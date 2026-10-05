@@ -1,19 +1,90 @@
+const fs = require("node:fs");
+
 const {
     createCanvas,
-    loadImage
+    loadImage,
+    GlobalFonts
 } = require("@napi-rs/canvas");
 
 
-// =====================================
+// ========================================
+// LOAD FONT CHO RAILWAY / LINUX
+// ========================================
+
+function loadFonts() {
+    const fonts = [
+        {
+            path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            name: "VNL"
+        },
+        {
+            path: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            name: "VNL Bold"
+        }
+    ];
+
+    for (const font of fonts) {
+        try {
+            if (fs.existsSync(font.path)) {
+                GlobalFonts.registerFromPath(
+                    font.path,
+                    font.name
+                );
+            }
+        } catch (error) {
+            console.log(
+                `Không load được font ${font.name}:`,
+                error.message
+            );
+        }
+    }
+}
+
+loadFonts();
+
+
+// ========================================
+// FONT
+// ========================================
+
+const REGULAR_FONT =
+    '"VNL", "DejaVu Sans", Arial, sans-serif';
+
+const BOLD_FONT =
+    '"VNL Bold", "DejaVu Sans", Arial, sans-serif';
+
+
+// ========================================
 // BO GÓC
-// =====================================
-function roundRect(ctx, x, y, width, height, radius) {
-    const r = Math.min(radius, width / 2, height / 2);
+// ========================================
+
+function roundRect(
+    ctx,
+    x,
+    y,
+    width,
+    height,
+    radius
+) {
+    const r =
+        Math.min(
+            radius,
+            width / 2,
+            height / 2
+        );
 
     ctx.beginPath();
-    ctx.moveTo(x + r, y);
 
-    ctx.lineTo(x + width - r, y);
+    ctx.moveTo(
+        x + r,
+        y
+    );
+
+    ctx.lineTo(
+        x + width - r,
+        y
+    );
+
     ctx.quadraticCurveTo(
         x + width,
         y,
@@ -21,7 +92,11 @@ function roundRect(ctx, x, y, width, height, radius) {
         y + r
     );
 
-    ctx.lineTo(x + width, y + height - r);
+    ctx.lineTo(
+        x + width,
+        y + height - r
+    );
+
     ctx.quadraticCurveTo(
         x + width,
         y + height,
@@ -29,7 +104,11 @@ function roundRect(ctx, x, y, width, height, radius) {
         y + height
     );
 
-    ctx.lineTo(x + r, y + height);
+    ctx.lineTo(
+        x + r,
+        y + height
+    );
+
     ctx.quadraticCurveTo(
         x,
         y + height,
@@ -37,7 +116,11 @@ function roundRect(ctx, x, y, width, height, radius) {
         y + height - r
     );
 
-    ctx.lineTo(x, y + r);
+    ctx.lineTo(
+        x,
+        y + r
+    );
+
     ctx.quadraticCurveTo(
         x,
         y,
@@ -49,51 +132,88 @@ function roundRect(ctx, x, y, width, height, radius) {
 }
 
 
-// =====================================
-// VẼ NGÔI SAO
-// =====================================
-function drawStar(ctx, cx, cy, outerRadius, innerRadius) {
+// ========================================
+// NGÔI SAO
+// ========================================
+
+function drawStar(
+    ctx,
+    cx,
+    cy,
+    outerRadius,
+    innerRadius
+) {
     const spikes = 5;
 
-    let rotation = -Math.PI / 2;
+    let rotation =
+        -Math.PI / 2;
 
     ctx.beginPath();
 
-    for (let i = 0; i < spikes * 2; i++) {
+    for (
+        let i = 0;
+        i < spikes * 2;
+        i++
+    ) {
         const radius =
             i % 2 === 0
                 ? outerRadius
                 : innerRadius;
 
         const x =
-            cx + Math.cos(rotation) * radius;
+            cx +
+            Math.cos(rotation) *
+                radius;
 
         const y =
-            cy + Math.sin(rotation) * radius;
+            cy +
+            Math.sin(rotation) *
+                radius;
 
         if (i === 0) {
-            ctx.moveTo(x, y);
+            ctx.moveTo(
+                x,
+                y
+            );
         } else {
-            ctx.lineTo(x, y);
+            ctx.lineTo(
+                x,
+                y
+            );
         }
 
-        rotation += Math.PI / spikes;
+        rotation +=
+            Math.PI / spikes;
     }
 
     ctx.closePath();
 }
 
 
-// =====================================
-// TỰ GIẢM FONT NẾU TÊN DÀI
-// =====================================
-function fitFont(ctx, text, maxWidth, startSize, minSize = 22) {
-    let size = startSize;
+// ========================================
+// TỰ GIẢM FONT USERNAME
+// ========================================
 
-    while (size > minSize) {
-        ctx.font = `bold ${size}px Arial`;
+function fitFont(
+    ctx,
+    text,
+    maxWidth,
+    startSize,
+    minSize = 22
+) {
+    let size =
+        startSize;
 
-        if (ctx.measureText(text).width <= maxWidth) {
+    while (
+        size > minSize
+    ) {
+        ctx.font =
+            `${size}px ${BOLD_FONT}`;
+
+        if (
+            ctx.measureText(text)
+                .width <= maxWidth
+        ) {
             break;
         }
 
@@ -104,10 +224,13 @@ function fitFont(ctx, text, maxWidth, startSize, minSize = 22) {
 }
 
 
-// =====================================
-// TẠO RANK CARD
-// =====================================
-async function createRankCard(data) {
+// ========================================
+// CREATE RANK CARD
+// ========================================
+
+async function createRankCard(
+    data
+) {
     const {
         avatarURL,
         username,
@@ -119,60 +242,103 @@ async function createRankCard(data) {
         requiredXp
     } = data;
 
+
     const width = 1200;
     const height = 450;
 
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext("2d");
+
+    const canvas =
+        createCanvas(
+            width,
+            height
+        );
 
 
-    // =====================================
-    // NỀN ĐỎ VIỆT NAM
-    // =====================================
+    const ctx =
+        canvas.getContext(
+            "2d"
+        );
 
-    const bg = ctx.createLinearGradient(
+
+    // ========================================
+    // BACKGROUND
+    // ========================================
+
+    const bg =
+        ctx.createLinearGradient(
+            0,
+            0,
+            width,
+            height
+        );
+
+    bg.addColorStop(
+        0,
+        "#3B0505"
+    );
+
+    bg.addColorStop(
+        0.35,
+        "#6E0808"
+    );
+
+    bg.addColorStop(
+        0.7,
+        "#8F0D0D"
+    );
+
+    bg.addColorStop(
+        1,
+        "#420404"
+    );
+
+    ctx.fillStyle = bg;
+
+    ctx.fillRect(
         0,
         0,
         width,
         height
     );
 
-    bg.addColorStop(0, "#3B0505");
-    bg.addColorStop(0.35, "#6E0808");
-    bg.addColorStop(0.7, "#8F0D0D");
-    bg.addColorStop(1, "#420404");
 
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, width, height);
+    // ========================================
+    // ÁNH SÁNG
+    // ========================================
 
-
-    // ánh sáng đỏ ở giữa
-    const glow = ctx.createRadialGradient(
-        650,
-        170,
-        20,
-        650,
-        170,
-        650
-    );
+    const glow =
+        ctx.createRadialGradient(
+            650,
+            170,
+            20,
+            650,
+            170,
+            650
+        );
 
     glow.addColorStop(
         0,
-        "rgba(210, 45, 30, 0.35)"
+        "rgba(210,45,30,0.35)"
     );
 
     glow.addColorStop(
         1,
-        "rgba(120, 0, 0, 0)"
+        "rgba(120,0,0,0)"
     );
 
     ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillRect(
+        0,
+        0,
+        width,
+        height
+    );
 
 
-    // =====================================
-    // NGÔI SAO TRANG TRÍ
-    // =====================================
+    // ========================================
+    // SAO MỜ
+    // ========================================
 
     ctx.save();
 
@@ -192,9 +358,9 @@ async function createRankCard(data) {
     ctx.restore();
 
 
-    // =====================================
-    // HOA VĂN MỜ
-    // =====================================
+    // ========================================
+    // HOA VĂN TRÒN
+    // ========================================
 
     ctx.save();
 
@@ -202,7 +368,11 @@ async function createRankCard(data) {
     ctx.strokeStyle = "#FFD75A";
     ctx.lineWidth = 2;
 
-    for (let r = 45; r <= 200; r += 30) {
+    for (
+        let r = 45;
+        r <= 200;
+        r += 30
+    ) {
         ctx.beginPath();
 
         ctx.arc(
@@ -219,11 +389,13 @@ async function createRankCard(data) {
     ctx.restore();
 
 
-    // =====================================
-    // KHUNG NGOÀI
-    // =====================================
+    // ========================================
+    // KHUNG
+    // ========================================
 
-    ctx.strokeStyle = "#E8B94B";
+    ctx.strokeStyle =
+        "#E8B94B";
+
     ctx.lineWidth = 3;
 
     roundRect(
@@ -255,12 +427,15 @@ async function createRankCard(data) {
     ctx.stroke();
 
 
-    // =====================================
-    // TITLE
-    // =====================================
+    // ========================================
+    // BRAND
+    // ========================================
 
-    ctx.fillStyle = "#FFD75A";
-    ctx.font = "bold 25px Arial";
+    ctx.fillStyle =
+        "#FFD75A";
+
+    ctx.font =
+        `25px ${BOLD_FONT}`;
 
     ctx.fillText(
         "VIETNAM LEGACY",
@@ -268,10 +443,12 @@ async function createRankCard(data) {
         52
     );
 
+
     ctx.fillStyle =
         "rgba(255,230,160,0.80)";
 
-    ctx.font = "14px Arial";
+    ctx.font =
+        `14px ${REGULAR_FONT}`;
 
     ctx.fillText(
         "COMMUNITY • LEGACY • VIETNAM",
@@ -280,40 +457,52 @@ async function createRankCard(data) {
     );
 
 
-    // =====================================
+    // ========================================
     // AVATAR
-    // =====================================
+    // ========================================
 
     const avatarResponse =
-        await fetch(avatarURL);
+        await fetch(
+            avatarURL
+        );
 
-    if (!avatarResponse.ok) {
+    if (
+        !avatarResponse.ok
+    ) {
         throw new Error(
             "Không thể tải avatar Discord."
         );
     }
 
+
     const avatarBuffer =
         Buffer.from(
-            await avatarResponse.arrayBuffer()
+            await avatarResponse
+                .arrayBuffer()
         );
 
+
     const avatar =
-        await loadImage(avatarBuffer);
+        await loadImage(
+            avatarBuffer
+        );
 
 
     const avatarSize = 155;
+
     const avatarX = 65;
     const avatarY = 70;
 
+
     const centerX =
-        avatarX + avatarSize / 2;
+        avatarX +
+        avatarSize / 2;
 
     const centerY =
-        avatarY + avatarSize / 2;
+        avatarY +
+        avatarSize / 2;
 
 
-    // vòng ngoài
     ctx.beginPath();
 
     ctx.arc(
@@ -324,11 +513,12 @@ async function createRankCard(data) {
         Math.PI * 2
     );
 
-    ctx.fillStyle = "#E8B94B";
+    ctx.fillStyle =
+        "#E8B94B";
+
     ctx.fill();
 
 
-    // avatar
     ctx.save();
 
     ctx.beginPath();
@@ -354,11 +544,12 @@ async function createRankCard(data) {
     ctx.restore();
 
 
-    // =====================================
-    // USERNAME
-    // =====================================
+    // ========================================
+    // USER INFO
+    // ========================================
 
     const nameX = 265;
+
 
     const nameSize =
         fitFont(
@@ -368,10 +559,12 @@ async function createRankCard(data) {
             50
         );
 
-    ctx.font =
-        `bold ${nameSize}px Arial`;
 
-    ctx.fillStyle = "#FFF0C2";
+    ctx.font =
+        `${nameSize}px ${BOLD_FONT}`;
+
+    ctx.fillStyle =
+        "#FFF0C2";
 
     ctx.fillText(
         username,
@@ -380,19 +573,22 @@ async function createRankCard(data) {
     );
 
 
-    // display name
-    ctx.font = "25px Arial";
-    ctx.fillStyle = "#E7C57B";
+    ctx.font =
+        `25px ${REGULAR_FONT}`;
+
+    ctx.fillStyle =
+        "#E7C57B";
 
     ctx.fillText(
-        displayName || username,
+        displayName ||
+            username,
         nameX,
         165
     );
 
 
-    // subtitle
-    ctx.font = "16px Arial";
+    ctx.font =
+        `16px ${REGULAR_FONT}`;
 
     ctx.fillStyle =
         "rgba(255,240,194,0.75)";
@@ -404,18 +600,23 @@ async function createRankCard(data) {
     );
 
 
-    // =====================================
-    // BOX THÔNG TIN
-    // =====================================
+    // ========================================
+    // BOX INFO
+    // ========================================
 
     const infoY = 260;
     const infoHeight = 92;
-    const gap = 20;
 
+    const gap = 20;
     const startX = 55;
 
+
     const boxWidth =
-        (width - 110 - gap * 2) / 3;
+        (
+            width -
+            110 -
+            gap * 2
+        ) / 3;
 
 
     function drawInfoBox(
@@ -428,20 +629,25 @@ async function createRankCard(data) {
                 x,
                 infoY,
                 x,
-                infoY + infoHeight
+                infoY +
+                    infoHeight
             );
+
 
         boxBg.addColorStop(
             0,
-            "rgba(60, 8, 8, 0.88)"
+            "rgba(60,8,8,0.88)"
         );
 
         boxBg.addColorStop(
             1,
-            "rgba(35, 3, 3, 0.88)"
+            "rgba(35,3,3,0.88)"
         );
 
-        ctx.fillStyle = boxBg;
+
+        ctx.fillStyle =
+            boxBg;
+
 
         roundRect(
             ctx,
@@ -458,7 +664,9 @@ async function createRankCard(data) {
         ctx.strokeStyle =
             "rgba(232,185,75,0.85)";
 
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth =
+            1.5;
+
 
         roundRect(
             ctx,
@@ -472,31 +680,40 @@ async function createRankCard(data) {
         ctx.stroke();
 
 
-        ctx.textAlign = "center";
+        ctx.textAlign =
+            "center";
 
-        ctx.font = "16px Arial";
 
-        ctx.fillStyle = "#D8B875";
+        ctx.font =
+            `16px ${REGULAR_FONT}`;
+
+        ctx.fillStyle =
+            "#D8B875";
 
         ctx.fillText(
             title,
-            x + boxWidth / 2,
+            x +
+                boxWidth / 2,
             infoY + 30
         );
 
 
         ctx.font =
-            "bold 33px Arial";
+            `33px ${BOLD_FONT}`;
 
-        ctx.fillStyle = "#FFF0C2";
+        ctx.fillStyle =
+            "#FFF0C2";
 
         ctx.fillText(
             value,
-            x + boxWidth / 2,
+            x +
+                boxWidth / 2,
             infoY + 69
         );
 
-        ctx.textAlign = "left";
+
+        ctx.textAlign =
+            "left";
     }
 
 
@@ -506,39 +723,54 @@ async function createRankCard(data) {
         `${level}`
     );
 
+
     drawInfoBox(
-        startX + boxWidth + gap,
+        startX +
+            boxWidth +
+            gap,
         "HẠNG SERVER",
         rank > 0
             ? `#${rank}`
             : "—"
     );
 
+
     drawInfoBox(
         startX +
-            (boxWidth + gap) * 2,
+            (
+                boxWidth +
+                gap
+            ) * 2,
         "TỔNG XP",
-        Number(totalXp)
-            .toLocaleString("vi-VN")
+        Number(
+            totalXp
+        ).toLocaleString(
+            "vi-VN"
+        )
     );
 
 
-    // =====================================
+    // ========================================
     // PROGRESS BAR
-    // =====================================
+    // ========================================
 
     const labelX = 55;
 
     const barX = 235;
     const barY = 392;
 
-    const barWidth = 740;
-    const barHeight = 25;
+    const barWidth =
+        740;
+
+    const barHeight =
+        25;
 
 
-    ctx.font = "bold 16px Arial";
+    ctx.font =
+        `16px ${BOLD_FONT}`;
 
-    ctx.fillStyle = "#D8B875";
+    ctx.fillStyle =
+        "#D8B875";
 
     ctx.fillText(
         "TIẾN ĐỘ",
@@ -549,15 +781,21 @@ async function createRankCard(data) {
 
     const safeRequiredXp =
         Math.max(
-            Number(requiredXp) || 1,
+            Number(
+                requiredXp
+            ) || 1,
             1
         );
 
+
     const safeCurrentXp =
         Math.max(
-            Number(currentXp) || 0,
+            Number(
+                currentXp
+            ) || 0,
             0
         );
+
 
     const progress =
         Math.max(
@@ -570,9 +808,9 @@ async function createRankCard(data) {
         );
 
 
-    // background progress
     ctx.fillStyle =
-        "rgba(25, 2, 2, 0.85)";
+        "rgba(25,2,2,0.85)";
+
 
     roundRect(
         ctx,
@@ -589,7 +827,9 @@ async function createRankCard(data) {
     ctx.strokeStyle =
         "rgba(232,185,75,0.70)";
 
-    ctx.lineWidth = 1.4;
+    ctx.lineWidth =
+        1.4;
+
 
     roundRect(
         ctx,
@@ -603,33 +843,41 @@ async function createRankCard(data) {
     ctx.stroke();
 
 
-    // progress
-    if (progress > 0) {
+    if (
+        progress > 0
+    ) {
         const progressGradient =
             ctx.createLinearGradient(
                 barX,
                 0,
-                barX + barWidth,
+                barX +
+                    barWidth,
                 0
             );
 
-        progressGradient.addColorStop(
-            0,
-            "#E6A63C"
-        );
 
-        progressGradient.addColorStop(
-            0.5,
-            "#F4C85D"
-        );
+        progressGradient
+            .addColorStop(
+                0,
+                "#E6A63C"
+            );
 
-        progressGradient.addColorStop(
-            1,
-            "#FFE69A"
-        );
+        progressGradient
+            .addColorStop(
+                0.5,
+                "#F4C85D"
+            );
+
+        progressGradient
+            .addColorStop(
+                1,
+                "#FFE69A"
+            );
+
 
         ctx.fillStyle =
             progressGradient;
+
 
         roundRect(
             ctx,
@@ -637,7 +885,8 @@ async function createRankCard(data) {
             barY,
             Math.max(
                 18,
-                barWidth * progress
+                barWidth *
+                    progress
             ),
             barHeight,
             13
@@ -647,12 +896,15 @@ async function createRankCard(data) {
     }
 
 
-    // XP
-    ctx.textAlign = "right";
+    ctx.textAlign =
+        "right";
 
-    ctx.font = "bold 19px Arial";
+    ctx.font =
+        `19px ${BOLD_FONT}`;
 
-    ctx.fillStyle = "#FFF0C2";
+    ctx.fillStyle =
+        "#FFF0C2";
+
 
     ctx.fillText(
         `${safeCurrentXp.toLocaleString("vi-VN")} / ${safeRequiredXp.toLocaleString("vi-VN")} XP`,
@@ -660,14 +912,14 @@ async function createRankCard(data) {
         412
     );
 
-    ctx.textAlign = "left";
+
+    ctx.textAlign =
+        "left";
 
 
-    // =====================================
-    // OUTPUT
-    // =====================================
-
-    return canvas.toBuffer("image/png");
+    return canvas.toBuffer(
+        "image/png"
+    );
 }
 
 

@@ -1,15 +1,73 @@
+const fs = require("node:fs");
+
 const {
     createCanvas,
-    loadImage
+    loadImage,
+    GlobalFonts
 } = require("@napi-rs/canvas");
 
-function roundRect(ctx, x, y, width, height, radius) {
-    const r = Math.min(radius, width / 2, height / 2);
+
+function loadFonts() {
+    const fonts = [
+        {
+            path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            name: "VNL"
+        },
+        {
+            path: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            name: "VNL Bold"
+        }
+    ];
+
+    for (const font of fonts) {
+        try {
+            if (fs.existsSync(font.path)) {
+                GlobalFonts.registerFromPath(
+                    font.path,
+                    font.name
+                );
+            }
+        } catch {}
+    }
+}
+
+loadFonts();
+
+
+const REGULAR_FONT =
+    '"VNL", "DejaVu Sans", Arial, sans-serif';
+
+const BOLD_FONT =
+    '"VNL Bold", "DejaVu Sans", Arial, sans-serif';
+
+
+function roundRect(
+    ctx,
+    x,
+    y,
+    width,
+    height,
+    radius
+) {
+    const r =
+        Math.min(
+            radius,
+            width / 2,
+            height / 2
+        );
 
     ctx.beginPath();
-    ctx.moveTo(x + r, y);
 
-    ctx.lineTo(x + width - r, y);
+    ctx.moveTo(
+        x + r,
+        y
+    );
+
+    ctx.lineTo(
+        x + width - r,
+        y
+    );
+
     ctx.quadraticCurveTo(
         x + width,
         y,
@@ -17,7 +75,11 @@ function roundRect(ctx, x, y, width, height, radius) {
         y + r
     );
 
-    ctx.lineTo(x + width, y + height - r);
+    ctx.lineTo(
+        x + width,
+        y + height - r
+    );
+
     ctx.quadraticCurveTo(
         x + width,
         y + height,
@@ -25,7 +87,11 @@ function roundRect(ctx, x, y, width, height, radius) {
         y + height
     );
 
-    ctx.lineTo(x + r, y + height);
+    ctx.lineTo(
+        x + r,
+        y + height
+    );
+
     ctx.quadraticCurveTo(
         x,
         y + height,
@@ -33,7 +99,11 @@ function roundRect(ctx, x, y, width, height, radius) {
         y + height - r
     );
 
-    ctx.lineTo(x, y + r);
+    ctx.lineTo(
+        x,
+        y + r
+    );
+
     ctx.quadraticCurveTo(
         x,
         y,
@@ -44,52 +114,89 @@ function roundRect(ctx, x, y, width, height, radius) {
     ctx.closePath();
 }
 
-function drawStar(ctx, cx, cy, outerRadius, innerRadius) {
-    let rotation = -Math.PI / 2;
+
+function drawStar(
+    ctx,
+    cx,
+    cy,
+    outerRadius,
+    innerRadius
+) {
+    let rotation =
+        -Math.PI / 2;
 
     ctx.beginPath();
 
-    for (let i = 0; i < 10; i++) {
+    for (
+        let i = 0;
+        i < 10;
+        i++
+    ) {
         const radius =
             i % 2 === 0
                 ? outerRadius
                 : innerRadius;
 
         const x =
-            cx + Math.cos(rotation) * radius;
+            cx +
+            Math.cos(rotation) *
+                radius;
 
         const y =
-            cy + Math.sin(rotation) * radius;
+            cy +
+            Math.sin(rotation) *
+                radius;
 
         if (i === 0) {
-            ctx.moveTo(x, y);
+            ctx.moveTo(
+                x,
+                y
+            );
         } else {
-            ctx.lineTo(x, y);
+            ctx.lineTo(
+                x,
+                y
+            );
         }
 
-        rotation += Math.PI / 5;
+        rotation +=
+            Math.PI / 5;
     }
 
     ctx.closePath();
 }
 
-function cutText(ctx, text, maxWidth) {
-    let result = text;
+
+function cutText(
+    ctx,
+    text,
+    maxWidth
+) {
+    let result =
+        text;
 
     while (
-        ctx.measureText(result).width > maxWidth &&
+        ctx.measureText(result)
+            .width >
+            maxWidth &&
         result.length > 3
     ) {
         result =
-            result.slice(0, -1);
+            result.slice(
+                0,
+                -1
+            );
     }
 
-    if (result !== text) {
+    if (
+        result !== text
+    ) {
         result += "...";
     }
 
     return result;
 }
+
 
 async function createVoiceLeaderboardCard(
     rows,
@@ -98,11 +205,19 @@ async function createVoiceLeaderboardCard(
     const width = 1500;
     const height = 900;
 
+
     const canvas =
-        createCanvas(width, height);
+        createCanvas(
+            width,
+            height
+        );
+
 
     const ctx =
-        canvas.getContext("2d");
+        canvas.getContext(
+            "2d"
+        );
+
 
     // Background
     const bg =
@@ -113,19 +228,45 @@ async function createVoiceLeaderboardCard(
             height
         );
 
-    bg.addColorStop(0, "#330303");
-    bg.addColorStop(0.4, "#700808");
-    bg.addColorStop(0.75, "#8F0C0C");
-    bg.addColorStop(1, "#3A0303");
+    bg.addColorStop(
+        0,
+        "#330303"
+    );
+
+    bg.addColorStop(
+        0.4,
+        "#700808"
+    );
+
+    bg.addColorStop(
+        0.75,
+        "#8F0C0C"
+    );
+
+    bg.addColorStop(
+        1,
+        "#3A0303"
+    );
+
 
     ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillRect(
+        0,
+        0,
+        width,
+        height
+    );
+
 
     // Star
     ctx.save();
 
-    ctx.globalAlpha = 0.08;
-    ctx.fillStyle = "#FFD75A";
+    ctx.globalAlpha =
+        0.08;
+
+    ctx.fillStyle =
+        "#FFD75A";
 
     drawStar(
         ctx,
@@ -139,9 +280,13 @@ async function createVoiceLeaderboardCard(
 
     ctx.restore();
 
+
     // Border
-    ctx.strokeStyle = "#E8B94B";
+    ctx.strokeStyle =
+        "#E8B94B";
+
     ctx.lineWidth = 3;
+
 
     roundRect(
         ctx,
@@ -154,9 +299,13 @@ async function createVoiceLeaderboardCard(
 
     ctx.stroke();
 
+
     // Header
-    ctx.fillStyle = "#FFD75A";
-    ctx.font = "bold 34px Arial";
+    ctx.fillStyle =
+        "#FFD75A";
+
+    ctx.font =
+        `34px ${BOLD_FONT}`;
 
     ctx.fillText(
         "VIETNAM LEGACY",
@@ -164,8 +313,12 @@ async function createVoiceLeaderboardCard(
         75
     );
 
-    ctx.fillStyle = "#FFF0C2";
-    ctx.font = "bold 46px Arial";
+
+    ctx.fillStyle =
+        "#FFF0C2";
+
+    ctx.font =
+        `46px ${BOLD_FONT}`;
 
     ctx.fillText(
         "TOP 10 VOICE LEVEL",
@@ -173,8 +326,12 @@ async function createVoiceLeaderboardCard(
         135
     );
 
-    ctx.fillStyle = "#D9BA79";
-    ctx.font = "19px Arial";
+
+    ctx.fillStyle =
+        "#D9BA79";
+
+    ctx.font =
+        `19px ${REGULAR_FONT}`;
 
     ctx.fillText(
         `${guildName} • Những thành viên hoạt động Voice nổi bật`,
@@ -182,13 +339,18 @@ async function createVoiceLeaderboardCard(
         172
     );
 
-    // Header table
+
+    // Table header
     const tableX = 65;
     const tableY = 215;
-    const tableWidth = 1370;
+
+    const tableWidth =
+        1370;
+
 
     ctx.fillStyle =
-        "rgba(35, 3, 3, 0.85)";
+        "rgba(35,3,3,0.85)";
+
 
     roundRect(
         ctx,
@@ -201,39 +363,84 @@ async function createVoiceLeaderboardCard(
 
     ctx.fill();
 
-    ctx.fillStyle = "#D8B875";
-    ctx.font = "bold 17px Arial";
 
-    ctx.fillText("#", 95, 250);
-    ctx.fillText("THÀNH VIÊN", 185, 250);
-    ctx.fillText("LEVEL", 850, 250);
-    ctx.fillText("VOICE XP", 1020, 250);
-    ctx.fillText("THỜI GIAN", 1220, 250);
+    ctx.fillStyle =
+        "#D8B875";
 
-    // Rows
-    const rowHeight = 58;
+    ctx.font =
+        `17px ${BOLD_FONT}`;
 
-    for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
+
+    ctx.fillText(
+        "#",
+        95,
+        250
+    );
+
+    ctx.fillText(
+        "THÀNH VIÊN",
+        185,
+        250
+    );
+
+    ctx.fillText(
+        "LEVEL",
+        850,
+        250
+    );
+
+    ctx.fillText(
+        "VOICE XP",
+        1020,
+        250
+    );
+
+    ctx.fillText(
+        "THỜI GIAN",
+        1220,
+        250
+    );
+
+
+    const rowHeight =
+        58;
+
+
+    for (
+        let i = 0;
+        i < rows.length;
+        i++
+    ) {
+        const row =
+            rows[i];
+
 
         const y =
             tableY +
             70 +
             i * rowHeight;
 
-        if (i === 0) {
+
+        if (
+            i === 0
+        ) {
             ctx.fillStyle =
                 "rgba(170,110,20,0.28)";
-        } else if (i === 1) {
+        } else if (
+            i === 1
+        ) {
             ctx.fillStyle =
                 "rgba(180,180,180,0.14)";
-        } else if (i === 2) {
+        } else if (
+            i === 2
+        ) {
             ctx.fillStyle =
                 "rgba(150,75,25,0.20)";
         } else {
             ctx.fillStyle =
                 "rgba(30,3,3,0.62)";
         }
+
 
         roundRect(
             ctx,
@@ -246,36 +453,49 @@ async function createVoiceLeaderboardCard(
 
         ctx.fill();
 
-        // Position
+
+        // Rank
         ctx.fillStyle =
             i < 3
                 ? "#FFD75A"
                 : "#D9BA79";
 
+
         ctx.font =
             i < 3
-                ? "bold 23px Arial"
-                : "bold 18px Arial";
+                ? `23px ${BOLD_FONT}`
+                : `18px ${BOLD_FONT}`;
+
 
         ctx.fillText(
-            `${i + 1}`,
+            `#${i + 1}`,
             90,
             y + 32
         );
 
+
         // Avatar
         try {
             const response =
-                await fetch(row.avatarURL);
+                await fetch(
+                    row.avatarURL
+                );
 
-            if (response.ok) {
+            if (
+                response.ok
+            ) {
                 const buffer =
                     Buffer.from(
-                        await response.arrayBuffer()
+                        await response
+                            .arrayBuffer()
                     );
 
+
                 const avatar =
-                    await loadImage(buffer);
+                    await loadImage(
+                        buffer
+                    );
+
 
                 ctx.save();
 
@@ -291,6 +511,7 @@ async function createVoiceLeaderboardCard(
 
                 ctx.clip();
 
+
                 ctx.drawImage(
                     avatar,
                     132,
@@ -303,9 +524,14 @@ async function createVoiceLeaderboardCard(
             }
         } catch {}
 
+
         // Name
-        ctx.fillStyle = "#FFF0C2";
-        ctx.font = "bold 19px Arial";
+        ctx.fillStyle =
+            "#FFF0C2";
+
+        ctx.font =
+            `19px ${BOLD_FONT}`;
+
 
         ctx.fillText(
             cutText(
@@ -317,9 +543,14 @@ async function createVoiceLeaderboardCard(
             y + 31
         );
 
+
         // Level
-        ctx.fillStyle = "#FFE29A";
-        ctx.font = "bold 19px Arial";
+        ctx.fillStyle =
+            "#FFE29A";
+
+        ctx.font =
+            `19px ${BOLD_FONT}`;
+
 
         ctx.fillText(
             `${row.level}`,
@@ -327,27 +558,41 @@ async function createVoiceLeaderboardCard(
             y + 31
         );
 
+
         // XP
         ctx.fillText(
-            Number(row.totalXp)
-                .toLocaleString("vi-VN"),
+            Number(
+                row.totalXp
+            ).toLocaleString(
+                "vi-VN"
+            ),
             1020,
             y + 31
         );
 
+
         // Time
+        const totalMinutes =
+            Number(
+                row.minutes
+            ) || 0;
+
+
         const hours =
             Math.floor(
-                row.minutes / 60
+                totalMinutes / 60
             );
 
+
         const minutes =
-            row.minutes % 60;
+            totalMinutes % 60;
+
 
         const timeText =
             hours > 0
                 ? `${hours}g ${minutes}p`
                 : `${minutes} phút`;
+
 
         ctx.fillText(
             timeText,
@@ -356,18 +601,27 @@ async function createVoiceLeaderboardCard(
         );
     }
 
+
     // Footer
-    ctx.fillStyle = "#D9BA79";
-    ctx.font = "17px Arial";
+    ctx.fillStyle =
+        "#D9BA79";
+
+    ctx.font =
+        `17px ${REGULAR_FONT}`;
+
 
     ctx.fillText(
-        "Voice cùng mọi người để tăng XP và kết nối nhiều hơn nhé ❤️",
+        "Voice cùng mọi người để tăng XP và kết nối nhiều hơn nhé!",
         70,
         845
     );
 
-    return canvas.toBuffer("image/png");
+
+    return canvas.toBuffer(
+        "image/png"
+    );
 }
+
 
 module.exports = {
     createVoiceLeaderboardCard

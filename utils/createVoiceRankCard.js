@@ -1,19 +1,73 @@
+const fs = require("node:fs");
+
 const {
     createCanvas,
-    loadImage
+    loadImage,
+    GlobalFonts
 } = require("@napi-rs/canvas");
 
 
-// ================================
-// BO GÓC
-// ================================
-function roundRect(ctx, x, y, width, height, radius) {
-    const r = Math.min(radius, width / 2, height / 2);
+function loadFonts() {
+    const fonts = [
+        {
+            path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            name: "VNL"
+        },
+        {
+            path: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            name: "VNL Bold"
+        }
+    ];
+
+    for (const font of fonts) {
+        try {
+            if (fs.existsSync(font.path)) {
+                GlobalFonts.registerFromPath(
+                    font.path,
+                    font.name
+                );
+            }
+        } catch {}
+    }
+}
+
+loadFonts();
+
+
+const REGULAR_FONT =
+    '"VNL", "DejaVu Sans", Arial, sans-serif';
+
+const BOLD_FONT =
+    '"VNL Bold", "DejaVu Sans", Arial, sans-serif';
+
+
+function roundRect(
+    ctx,
+    x,
+    y,
+    width,
+    height,
+    radius
+) {
+    const r =
+        Math.min(
+            radius,
+            width / 2,
+            height / 2
+        );
 
     ctx.beginPath();
-    ctx.moveTo(x + r, y);
 
-    ctx.lineTo(x + width - r, y);
+    ctx.moveTo(
+        x + r,
+        y
+    );
+
+    ctx.lineTo(
+        x + width - r,
+        y
+    );
+
     ctx.quadraticCurveTo(
         x + width,
         y,
@@ -21,7 +75,11 @@ function roundRect(ctx, x, y, width, height, radius) {
         y + r
     );
 
-    ctx.lineTo(x + width, y + height - r);
+    ctx.lineTo(
+        x + width,
+        y + height - r
+    );
+
     ctx.quadraticCurveTo(
         x + width,
         y + height,
@@ -29,7 +87,11 @@ function roundRect(ctx, x, y, width, height, radius) {
         y + height
     );
 
-    ctx.lineTo(x + r, y + height);
+    ctx.lineTo(
+        x + r,
+        y + height
+    );
+
     ctx.quadraticCurveTo(
         x,
         y + height,
@@ -37,7 +99,11 @@ function roundRect(ctx, x, y, width, height, radius) {
         y + height - r
     );
 
-    ctx.lineTo(x, y + r);
+    ctx.lineTo(
+        x,
+        y + r
+    );
+
     ctx.quadraticCurveTo(
         x,
         y,
@@ -49,50 +115,79 @@ function roundRect(ctx, x, y, width, height, radius) {
 }
 
 
-// ================================
-// NGÔI SAO
-// ================================
-function drawStar(ctx, cx, cy, outerRadius, innerRadius) {
-    const spikes = 5;
-    let rotation = -Math.PI / 2;
+function drawStar(
+    ctx,
+    cx,
+    cy,
+    outerRadius,
+    innerRadius
+) {
+    let rotation =
+        -Math.PI / 2;
 
     ctx.beginPath();
 
-    for (let i = 0; i < spikes * 2; i++) {
+    for (
+        let i = 0;
+        i < 10;
+        i++
+    ) {
         const radius =
             i % 2 === 0
                 ? outerRadius
                 : innerRadius;
 
         const x =
-            cx + Math.cos(rotation) * radius;
+            cx +
+            Math.cos(rotation) *
+                radius;
 
         const y =
-            cy + Math.sin(rotation) * radius;
+            cy +
+            Math.sin(rotation) *
+                radius;
 
         if (i === 0) {
-            ctx.moveTo(x, y);
+            ctx.moveTo(
+                x,
+                y
+            );
         } else {
-            ctx.lineTo(x, y);
+            ctx.lineTo(
+                x,
+                y
+            );
         }
 
-        rotation += Math.PI / spikes;
+        rotation +=
+            Math.PI / 5;
     }
 
     ctx.closePath();
 }
 
 
-// ================================
-// TỰ GIẢM FONT
-// ================================
-function fitFont(ctx, text, maxWidth, startSize, minSize = 22) {
-    let size = startSize;
+function fitFont(
+    ctx,
+    text,
+    maxWidth,
+    startSize,
+    minSize = 22
+) {
+    let size =
+        startSize;
 
-    while (size > minSize) {
-        ctx.font = `bold ${size}px Arial`;
+    while (
+        size > minSize
+    ) {
+        ctx.font =
+            `${size}px ${BOLD_FONT}`;
 
-        if (ctx.measureText(text).width <= maxWidth) {
+        if (
+            ctx.measureText(text)
+                .width <=
+            maxWidth
+        ) {
             break;
         }
 
@@ -103,10 +198,9 @@ function fitFont(ctx, text, maxWidth, startSize, minSize = 22) {
 }
 
 
-// ================================
-// TẠO VOICE RANK CARD
-// ================================
-async function createVoiceRankCard(data) {
+async function createVoiceRankCard(
+    data
+) {
     const {
         avatarURL,
         username,
@@ -123,28 +217,48 @@ async function createVoiceRankCard(data) {
     const width = 1200;
     const height = 450;
 
+
     const canvas =
-        createCanvas(width, height);
+        createCanvas(
+            width,
+            height
+        );
+
 
     const ctx =
-        canvas.getContext("2d");
+        canvas.getContext(
+            "2d"
+        );
 
 
-    // ================================
-    // BACKGROUND ĐỎ VIỆT NAM
-    // ================================
+    // Background
+    const bg =
+        ctx.createLinearGradient(
+            0,
+            0,
+            width,
+            height
+        );
 
-    const bg = ctx.createLinearGradient(
+    bg.addColorStop(
         0,
-        0,
-        width,
-        height
+        "#310404"
     );
 
-    bg.addColorStop(0, "#310404");
-    bg.addColorStop(0.35, "#680707");
-    bg.addColorStop(0.7, "#8E0C0C");
-    bg.addColorStop(1, "#3A0303");
+    bg.addColorStop(
+        0.35,
+        "#680707"
+    );
+
+    bg.addColorStop(
+        0.7,
+        "#8E0C0C"
+    );
+
+    bg.addColorStop(
+        1,
+        "#3A0303"
+    );
 
     ctx.fillStyle = bg;
 
@@ -156,7 +270,7 @@ async function createVoiceRankCard(data) {
     );
 
 
-    // Ánh sáng
+    // Glow
     const glow =
         ctx.createRadialGradient(
             650,
@@ -169,15 +283,16 @@ async function createVoiceRankCard(data) {
 
     glow.addColorStop(
         0,
-        "rgba(220, 50, 30, 0.32)"
+        "rgba(220,50,30,0.32)"
     );
 
     glow.addColorStop(
         1,
-        "rgba(100, 0, 0, 0)"
+        "rgba(100,0,0,0)"
     );
 
-    ctx.fillStyle = glow;
+    ctx.fillStyle =
+        glow;
 
     ctx.fillRect(
         0,
@@ -187,14 +302,14 @@ async function createVoiceRankCard(data) {
     );
 
 
-    // ================================
-    // SAO VIỆT NAM MỜ
-    // ================================
-
+    // Star
     ctx.save();
 
-    ctx.globalAlpha = 0.12;
-    ctx.fillStyle = "#FFD75A";
+    ctx.globalAlpha =
+        0.12;
+
+    ctx.fillStyle =
+        "#FFD75A";
 
     drawStar(
         ctx,
@@ -209,18 +324,22 @@ async function createVoiceRankCard(data) {
     ctx.restore();
 
 
-    // ================================
-    // HOA VĂN TRÒN
-    // ================================
-
+    // Pattern
     ctx.save();
 
-    ctx.globalAlpha = 0.07;
+    ctx.globalAlpha =
+        0.07;
 
-    ctx.strokeStyle = "#FFD75A";
+    ctx.strokeStyle =
+        "#FFD75A";
+
     ctx.lineWidth = 2;
 
-    for (let r = 45; r <= 200; r += 30) {
+    for (
+        let r = 45;
+        r <= 200;
+        r += 30
+    ) {
         ctx.beginPath();
 
         ctx.arc(
@@ -237,12 +356,12 @@ async function createVoiceRankCard(data) {
     ctx.restore();
 
 
-    // ================================
-    // KHUNG NGOÀI
-    // ================================
+    // Border
+    ctx.strokeStyle =
+        "#E8B94B";
 
-    ctx.strokeStyle = "#E8B94B";
     ctx.lineWidth = 3;
+
 
     roundRect(
         ctx,
@@ -261,6 +380,7 @@ async function createVoiceRankCard(data) {
 
     ctx.lineWidth = 1;
 
+
     roundRect(
         ctx,
         23,
@@ -273,14 +393,12 @@ async function createVoiceRankCard(data) {
     ctx.stroke();
 
 
-    // ================================
-    // TIÊU ĐỀ
-    // ================================
-
-    ctx.fillStyle = "#FFD75A";
+    // Brand
+    ctx.fillStyle =
+        "#FFD75A";
 
     ctx.font =
-        "bold 25px Arial";
+        `25px ${BOLD_FONT}`;
 
     ctx.fillText(
         "VIETNAM LEGACY",
@@ -292,7 +410,8 @@ async function createVoiceRankCard(data) {
     ctx.fillStyle =
         "rgba(255,230,160,0.80)";
 
-    ctx.font = "14px Arial";
+    ctx.font =
+        `14px ${REGULAR_FONT}`;
 
     ctx.fillText(
         "VOICE • COMMUNITY • VIETNAM",
@@ -301,40 +420,50 @@ async function createVoiceRankCard(data) {
     );
 
 
-    // ================================
-    // AVATAR
-    // ================================
-
+    // Avatar
     const avatarResponse =
-        await fetch(avatarURL);
+        await fetch(
+            avatarURL
+        );
 
-    if (!avatarResponse.ok) {
+    if (
+        !avatarResponse.ok
+    ) {
         throw new Error(
             "Không thể tải avatar Discord."
         );
     }
 
+
     const avatarBuffer =
         Buffer.from(
-            await avatarResponse.arrayBuffer()
+            await avatarResponse
+                .arrayBuffer()
         );
 
+
     const avatar =
-        await loadImage(avatarBuffer);
+        await loadImage(
+            avatarBuffer
+        );
 
 
-    const avatarSize = 155;
+    const avatarSize =
+        155;
+
     const avatarX = 65;
     const avatarY = 70;
 
+
     const centerX =
-        avatarX + avatarSize / 2;
+        avatarX +
+        avatarSize / 2;
 
     const centerY =
-        avatarY + avatarSize / 2;
+        avatarY +
+        avatarSize / 2;
 
 
-    // Viền avatar
     ctx.beginPath();
 
     ctx.arc(
@@ -345,11 +474,12 @@ async function createVoiceRankCard(data) {
         Math.PI * 2
     );
 
-    ctx.fillStyle = "#E8B94B";
+    ctx.fillStyle =
+        "#E8B94B";
+
     ctx.fill();
 
 
-    // Avatar
     ctx.save();
 
     ctx.beginPath();
@@ -375,11 +505,9 @@ async function createVoiceRankCard(data) {
     ctx.restore();
 
 
-    // ================================
-    // USERNAME
-    // ================================
-
+    // Username
     const nameX = 265;
+
 
     const nameSize =
         fitFont(
@@ -389,10 +517,12 @@ async function createVoiceRankCard(data) {
             50
         );
 
-    ctx.font =
-        `bold ${nameSize}px Arial`;
 
-    ctx.fillStyle = "#FFF0C2";
+    ctx.font =
+        `${nameSize}px ${BOLD_FONT}`;
+
+    ctx.fillStyle =
+        "#FFF0C2";
 
     ctx.fillText(
         username,
@@ -401,20 +531,22 @@ async function createVoiceRankCard(data) {
     );
 
 
-    // Display name
-    ctx.font = "25px Arial";
+    ctx.font =
+        `25px ${REGULAR_FONT}`;
 
-    ctx.fillStyle = "#E7C57B";
+    ctx.fillStyle =
+        "#E7C57B";
 
     ctx.fillText(
-        displayName || username,
+        displayName ||
+            username,
         nameX,
         165
     );
 
 
-    // Subtitle
-    ctx.font = "16px Arial";
+    ctx.font =
+        `16px ${REGULAR_FONT}`;
 
     ctx.fillStyle =
         "rgba(255,240,194,0.75)";
@@ -426,10 +558,7 @@ async function createVoiceRankCard(data) {
     );
 
 
-    // ================================
-    // TÍNH THỜI GIAN VOICE
-    // ================================
-
+    // Time
     const totalMinutes =
         Number(minutes) || 0;
 
@@ -442,18 +571,23 @@ async function createVoiceRankCard(data) {
         totalMinutes % 60;
 
 
-    // ================================
-    // 4 BOX THÔNG TIN
-    // ================================
-
+    // Info
     const infoY = 255;
-    const infoHeight = 92;
+
+    const infoHeight =
+        92;
+
     const gap = 14;
 
     const startX = 45;
 
+
     const boxWidth =
-        (width - 90 - gap * 3) / 4;
+        (
+            width -
+            90 -
+            gap * 3
+        ) / 4;
 
 
     function drawInfoBox(
@@ -466,20 +600,23 @@ async function createVoiceRankCard(data) {
                 x,
                 infoY,
                 x,
-                infoY + infoHeight
+                infoY +
+                    infoHeight
             );
 
         boxBg.addColorStop(
             0,
-            "rgba(60, 8, 8, 0.88)"
+            "rgba(60,8,8,0.88)"
         );
 
         boxBg.addColorStop(
             1,
-            "rgba(35, 3, 3, 0.88)"
+            "rgba(35,3,3,0.88)"
         );
 
-        ctx.fillStyle = boxBg;
+        ctx.fillStyle =
+            boxBg;
+
 
         roundRect(
             ctx,
@@ -496,7 +633,9 @@ async function createVoiceRankCard(data) {
         ctx.strokeStyle =
             "rgba(232,185,75,0.85)";
 
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth =
+            1.5;
+
 
         roundRect(
             ctx,
@@ -510,31 +649,40 @@ async function createVoiceRankCard(data) {
         ctx.stroke();
 
 
-        ctx.textAlign = "center";
+        ctx.textAlign =
+            "center";
 
-        ctx.font = "15px Arial";
 
-        ctx.fillStyle = "#D8B875";
+        ctx.font =
+            `15px ${REGULAR_FONT}`;
+
+        ctx.fillStyle =
+            "#D8B875";
 
         ctx.fillText(
             title,
-            x + boxWidth / 2,
+            x +
+                boxWidth / 2,
             infoY + 29
         );
 
 
         ctx.font =
-            "bold 29px Arial";
+            `29px ${BOLD_FONT}`;
 
-        ctx.fillStyle = "#FFF0C2";
+        ctx.fillStyle =
+            "#FFF0C2";
 
         ctx.fillText(
             value,
-            x + boxWidth / 2,
+            x +
+                boxWidth / 2,
             infoY + 67
         );
 
-        ctx.textAlign = "left";
+
+        ctx.textAlign =
+            "left";
     }
 
 
@@ -546,7 +694,9 @@ async function createVoiceRankCard(data) {
 
 
     drawInfoBox(
-        startX + boxWidth + gap,
+        startX +
+            boxWidth +
+            gap,
         "HẠNG VOICE",
         rank > 0
             ? `#${rank}`
@@ -556,16 +706,25 @@ async function createVoiceRankCard(data) {
 
     drawInfoBox(
         startX +
-            (boxWidth + gap) * 2,
+            (
+                boxWidth +
+                gap
+            ) * 2,
         "VOICE XP",
-        Number(totalXp)
-            .toLocaleString("vi-VN")
+        Number(
+            totalXp
+        ).toLocaleString(
+            "vi-VN"
+        )
     );
 
 
     drawInfoBox(
         startX +
-            (boxWidth + gap) * 3,
+            (
+                boxWidth +
+                gap
+            ) * 3,
         "THỜI GIAN",
         hours > 0
             ? `${hours}g ${remainMinutes}p`
@@ -573,23 +732,24 @@ async function createVoiceRankCard(data) {
     );
 
 
-    // ================================
-    // PROGRESS
-    // ================================
-
+    // Progress
     const labelX = 45;
 
     const barX = 235;
     const barY = 392;
 
-    const barWidth = 740;
-    const barHeight = 25;
+    const barWidth =
+        740;
+
+    const barHeight =
+        25;
 
 
     ctx.font =
-        "bold 16px Arial";
+        `16px ${BOLD_FONT}`;
 
-    ctx.fillStyle = "#D8B875";
+    ctx.fillStyle =
+        "#D8B875";
 
     ctx.fillText(
         "TIẾN ĐỘ",
@@ -600,13 +760,18 @@ async function createVoiceRankCard(data) {
 
     const safeRequiredXp =
         Math.max(
-            Number(requiredXp) || 1,
+            Number(
+                requiredXp
+            ) || 1,
             1
         );
 
+
     const safeCurrentXp =
         Math.max(
-            Number(currentXp) || 0,
+            Number(
+                currentXp
+            ) || 0,
             0
         );
 
@@ -622,9 +787,9 @@ async function createVoiceRankCard(data) {
         );
 
 
-    // Nền progress
     ctx.fillStyle =
-        "rgba(25, 2, 2, 0.85)";
+        "rgba(25,2,2,0.85)";
+
 
     roundRect(
         ctx,
@@ -641,7 +806,9 @@ async function createVoiceRankCard(data) {
     ctx.strokeStyle =
         "rgba(232,185,75,0.70)";
 
-    ctx.lineWidth = 1.4;
+    ctx.lineWidth =
+        1.4;
+
 
     roundRect(
         ctx,
@@ -655,13 +822,15 @@ async function createVoiceRankCard(data) {
     ctx.stroke();
 
 
-    // Progress thật
-    if (progress > 0) {
+    if (
+        progress > 0
+    ) {
         const progressGradient =
             ctx.createLinearGradient(
                 barX,
                 0,
-                barX + barWidth,
+                barX +
+                    barWidth,
                 0
             );
 
@@ -680,8 +849,10 @@ async function createVoiceRankCard(data) {
             "#FFE69A"
         );
 
+
         ctx.fillStyle =
             progressGradient;
+
 
         roundRect(
             ctx,
@@ -689,7 +860,8 @@ async function createVoiceRankCard(data) {
             barY,
             Math.max(
                 18,
-                barWidth * progress
+                barWidth *
+                    progress
             ),
             barHeight,
             13
@@ -699,13 +871,15 @@ async function createVoiceRankCard(data) {
     }
 
 
-    // XP
-    ctx.textAlign = "right";
+    ctx.textAlign =
+        "right";
 
     ctx.font =
-        "bold 19px Arial";
+        `19px ${BOLD_FONT}`;
 
-    ctx.fillStyle = "#FFF0C2";
+    ctx.fillStyle =
+        "#FFF0C2";
+
 
     ctx.fillText(
         `${safeCurrentXp.toLocaleString("vi-VN")} / ${safeRequiredXp.toLocaleString("vi-VN")} XP`,
@@ -713,12 +887,10 @@ async function createVoiceRankCard(data) {
         412
     );
 
-    ctx.textAlign = "left";
 
+    ctx.textAlign =
+        "left";
 
-    // ================================
-    // OUTPUT
-    // ================================
 
     return canvas.toBuffer(
         "image/png"

@@ -1,15 +1,73 @@
+const fs = require("node:fs");
+
 const {
     createCanvas,
-    loadImage
+    loadImage,
+    GlobalFonts
 } = require("@napi-rs/canvas");
 
-function roundRect(ctx, x, y, width, height, radius) {
-    const r = Math.min(radius, width / 2, height / 2);
+
+function loadFonts() {
+    const fonts = [
+        {
+            path: "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            name: "VNL"
+        },
+        {
+            path: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            name: "VNL Bold"
+        }
+    ];
+
+    for (const font of fonts) {
+        try {
+            if (fs.existsSync(font.path)) {
+                GlobalFonts.registerFromPath(
+                    font.path,
+                    font.name
+                );
+            }
+        } catch {}
+    }
+}
+
+loadFonts();
+
+
+const REGULAR_FONT =
+    '"VNL", "DejaVu Sans", Arial, sans-serif';
+
+const BOLD_FONT =
+    '"VNL Bold", "DejaVu Sans", Arial, sans-serif';
+
+
+function roundRect(
+    ctx,
+    x,
+    y,
+    width,
+    height,
+    radius
+) {
+    const r =
+        Math.min(
+            radius,
+            width / 2,
+            height / 2
+        );
 
     ctx.beginPath();
-    ctx.moveTo(x + r, y);
 
-    ctx.lineTo(x + width - r, y);
+    ctx.moveTo(
+        x + r,
+        y
+    );
+
+    ctx.lineTo(
+        x + width - r,
+        y
+    );
+
     ctx.quadraticCurveTo(
         x + width,
         y,
@@ -17,7 +75,11 @@ function roundRect(ctx, x, y, width, height, radius) {
         y + r
     );
 
-    ctx.lineTo(x + width, y + height - r);
+    ctx.lineTo(
+        x + width,
+        y + height - r
+    );
+
     ctx.quadraticCurveTo(
         x + width,
         y + height,
@@ -25,7 +87,11 @@ function roundRect(ctx, x, y, width, height, radius) {
         y + height
     );
 
-    ctx.lineTo(x + r, y + height);
+    ctx.lineTo(
+        x + r,
+        y + height
+    );
+
     ctx.quadraticCurveTo(
         x,
         y + height,
@@ -33,7 +99,11 @@ function roundRect(ctx, x, y, width, height, radius) {
         y + height - r
     );
 
-    ctx.lineTo(x, y + r);
+    ctx.lineTo(
+        x,
+        y + r
+    );
+
     ctx.quadraticCurveTo(
         x,
         y,
@@ -44,83 +114,159 @@ function roundRect(ctx, x, y, width, height, radius) {
     ctx.closePath();
 }
 
-function drawStar(ctx, cx, cy, outerRadius, innerRadius) {
-    let rotation = -Math.PI / 2;
+
+function drawStar(
+    ctx,
+    cx,
+    cy,
+    outerRadius,
+    innerRadius
+) {
+    let rotation =
+        -Math.PI / 2;
 
     ctx.beginPath();
 
-    for (let i = 0; i < 10; i++) {
+    for (
+        let i = 0;
+        i < 10;
+        i++
+    ) {
         const radius =
             i % 2 === 0
                 ? outerRadius
                 : innerRadius;
 
         const x =
-            cx + Math.cos(rotation) * radius;
+            cx +
+            Math.cos(rotation) *
+                radius;
 
         const y =
-            cy + Math.sin(rotation) * radius;
+            cy +
+            Math.sin(rotation) *
+                radius;
 
         if (i === 0) {
-            ctx.moveTo(x, y);
+            ctx.moveTo(
+                x,
+                y
+            );
         } else {
-            ctx.lineTo(x, y);
+            ctx.lineTo(
+                x,
+                y
+            );
         }
 
-        rotation += Math.PI / 5;
+        rotation +=
+            Math.PI / 5;
     }
 
     ctx.closePath();
 }
 
-function cutText(ctx, text, maxWidth) {
-    let result = text;
+
+function cutText(
+    ctx,
+    text,
+    maxWidth
+) {
+    let result =
+        text;
 
     while (
-        ctx.measureText(result).width > maxWidth &&
+        ctx.measureText(result)
+            .width >
+            maxWidth &&
         result.length > 3
     ) {
-        result = result.slice(0, -1);
+        result =
+            result.slice(
+                0,
+                -1
+            );
     }
 
-    if (result !== text) {
+    if (
+        result !== text
+    ) {
         result += "...";
     }
 
     return result;
 }
 
-async function createLeaderboardCard(rows, guildName) {
+
+async function createLeaderboardCard(
+    rows,
+    guildName
+) {
     const width = 1400;
     const height = 900;
 
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext("2d");
 
-    // ============================
-    // BACKGROUND
-    // ============================
+    const canvas =
+        createCanvas(
+            width,
+            height
+        );
 
-    const bg = ctx.createLinearGradient(
+
+    const ctx =
+        canvas.getContext(
+            "2d"
+        );
+
+
+    // Background
+    const bg =
+        ctx.createLinearGradient(
+            0,
+            0,
+            width,
+            height
+        );
+
+    bg.addColorStop(
+        0,
+        "#330303"
+    );
+
+    bg.addColorStop(
+        0.4,
+        "#700808"
+    );
+
+    bg.addColorStop(
+        0.75,
+        "#8F0C0C"
+    );
+
+    bg.addColorStop(
+        1,
+        "#3A0303"
+    );
+
+
+    ctx.fillStyle = bg;
+
+    ctx.fillRect(
         0,
         0,
         width,
         height
     );
 
-    bg.addColorStop(0, "#330303");
-    bg.addColorStop(0.4, "#700808");
-    bg.addColorStop(0.75, "#8F0C0C");
-    bg.addColorStop(1, "#3A0303");
 
-    ctx.fillStyle = bg;
-    ctx.fillRect(0, 0, width, height);
-
-    // Star Việt Nam
+    // Star
     ctx.save();
 
-    ctx.globalAlpha = 0.08;
-    ctx.fillStyle = "#FFD75A";
+    ctx.globalAlpha =
+        0.08;
+
+    ctx.fillStyle =
+        "#FFD75A";
 
     drawStar(
         ctx,
@@ -134,14 +280,23 @@ async function createLeaderboardCard(rows, guildName) {
 
     ctx.restore();
 
-    // Hoa văn tròn
+
+    // Pattern
     ctx.save();
 
-    ctx.globalAlpha = 0.06;
-    ctx.strokeStyle = "#FFD75A";
+    ctx.globalAlpha =
+        0.06;
+
+    ctx.strokeStyle =
+        "#FFD75A";
+
     ctx.lineWidth = 2;
 
-    for (let r = 60; r <= 280; r += 40) {
+    for (
+        let r = 60;
+        r <= 280;
+        r += 40
+    ) {
         ctx.beginPath();
 
         ctx.arc(
@@ -157,9 +312,13 @@ async function createLeaderboardCard(rows, guildName) {
 
     ctx.restore();
 
-    // Khung ngoài
-    ctx.strokeStyle = "#E8B94B";
+
+    // Border
+    ctx.strokeStyle =
+        "#E8B94B";
+
     ctx.lineWidth = 3;
+
 
     roundRect(
         ctx,
@@ -172,12 +331,13 @@ async function createLeaderboardCard(rows, guildName) {
 
     ctx.stroke();
 
-    // ============================
-    // HEADER
-    // ============================
 
-    ctx.fillStyle = "#FFD75A";
-    ctx.font = "bold 34px Arial";
+    // Header
+    ctx.fillStyle =
+        "#FFD75A";
+
+    ctx.font =
+        `34px ${BOLD_FONT}`;
 
     ctx.fillText(
         "VIETNAM LEGACY",
@@ -185,8 +345,12 @@ async function createLeaderboardCard(rows, guildName) {
         75
     );
 
-    ctx.fillStyle = "#FFF0C2";
-    ctx.font = "bold 46px Arial";
+
+    ctx.fillStyle =
+        "#FFF0C2";
+
+    ctx.font =
+        `46px ${BOLD_FONT}`;
 
     ctx.fillText(
         "TOP 10 CHAT LEVEL",
@@ -194,8 +358,12 @@ async function createLeaderboardCard(rows, guildName) {
         135
     );
 
-    ctx.fillStyle = "#D9BA79";
-    ctx.font = "19px Arial";
+
+    ctx.fillStyle =
+        "#D9BA79";
+
+    ctx.font =
+        `19px ${REGULAR_FONT}`;
 
     ctx.fillText(
         `${guildName} • Bảng xếp hạng hoạt động`,
@@ -203,15 +371,18 @@ async function createLeaderboardCard(rows, guildName) {
         172
     );
 
-    // ============================
-    // TABLE HEADER
-    // ============================
 
+    // Table
     const tableX = 65;
     const tableY = 215;
-    const tableWidth = 1270;
 
-    ctx.fillStyle = "rgba(35, 3, 3, 0.85)";
+    const tableWidth =
+        1270;
+
+
+    ctx.fillStyle =
+        "rgba(35,3,3,0.85)";
+
 
     roundRect(
         ctx,
@@ -224,42 +395,75 @@ async function createLeaderboardCard(rows, guildName) {
 
     ctx.fill();
 
-    ctx.fillStyle = "#D8B875";
-    ctx.font = "bold 18px Arial";
 
-    ctx.fillText("#", 95, 250);
-    ctx.fillText("THÀNH VIÊN", 185, 250);
-    ctx.fillText("LEVEL", 910, 250);
-    ctx.fillText("TỔNG XP", 1110, 250);
+    ctx.fillStyle =
+        "#D8B875";
 
-    // ============================
-    // ROWS
-    // ============================
+    ctx.font =
+        `18px ${BOLD_FONT}`;
 
-    const rowHeight = 58;
 
-    for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
+    ctx.fillText(
+        "#",
+        95,
+        250
+    );
+
+    ctx.fillText(
+        "THÀNH VIÊN",
+        185,
+        250
+    );
+
+    ctx.fillText(
+        "LEVEL",
+        910,
+        250
+    );
+
+    ctx.fillText(
+        "TỔNG XP",
+        1110,
+        250
+    );
+
+
+    const rowHeight =
+        58;
+
+
+    for (
+        let i = 0;
+        i < rows.length;
+        i++
+    ) {
+        const row =
+            rows[i];
 
         const y =
             tableY +
             70 +
             i * rowHeight;
 
-        // Top 3 khác màu nhẹ
+
         if (i === 0) {
             ctx.fillStyle =
-                "rgba(170, 110, 20, 0.28)";
-        } else if (i === 1) {
+                "rgba(170,110,20,0.28)";
+        } else if (
+            i === 1
+        ) {
             ctx.fillStyle =
-                "rgba(180, 180, 180, 0.14)";
-        } else if (i === 2) {
+                "rgba(180,180,180,0.14)";
+        } else if (
+            i === 2
+        ) {
             ctx.fillStyle =
-                "rgba(150, 75, 25, 0.20)";
+                "rgba(150,75,25,0.20)";
         } else {
             ctx.fillStyle =
-                "rgba(30, 3, 3, 0.62)";
+                "rgba(30,3,3,0.62)";
         }
+
 
         roundRect(
             ctx,
@@ -272,44 +476,48 @@ async function createLeaderboardCard(rows, guildName) {
 
         ctx.fill();
 
+
         // Rank
-        let rankText = `#${i + 1}`;
-
-        if (i === 0) rankText = "1";
-        if (i === 1) rankText = "2";
-        if (i === 2) rankText = "3";
-
         ctx.fillStyle =
             i < 3
                 ? "#FFD75A"
                 : "#D9BA79";
 
+
         ctx.font =
             i < 3
-                ? "bold 23px Arial"
-                : "bold 18px Arial";
+                ? `23px ${BOLD_FONT}`
+                : `18px ${BOLD_FONT}`;
+
 
         ctx.fillText(
-            rankText,
+            `#${i + 1}`,
             90,
             y + 32
         );
 
+
         // Avatar
         try {
             const response =
-                await fetch(row.avatarURL);
+                await fetch(
+                    row.avatarURL
+                );
 
-            if (response.ok) {
+            if (
+                response.ok
+            ) {
                 const buffer =
                     Buffer.from(
-                        await response.arrayBuffer()
+                        await response
+                            .arrayBuffer()
                     );
 
                 const avatar =
-                    await loadImage(buffer);
+                    await loadImage(
+                        buffer
+                    );
 
-                const size = 36;
 
                 ctx.save();
 
@@ -318,47 +526,53 @@ async function createLeaderboardCard(rows, guildName) {
                 ctx.arc(
                     150,
                     y + 24,
-                    size / 2,
+                    18,
                     0,
                     Math.PI * 2
                 );
 
                 ctx.clip();
 
+
                 ctx.drawImage(
                     avatar,
                     132,
                     y + 6,
-                    size,
-                    size
+                    36,
+                    36
                 );
 
                 ctx.restore();
             }
-        } catch {
-            // Nếu avatar lỗi thì bỏ qua
-        }
+        } catch {}
 
-        // Username
-        ctx.font = "bold 19px Arial";
-        ctx.fillStyle = "#FFF0C2";
 
-        const name =
+        // Name
+        ctx.font =
+            `19px ${BOLD_FONT}`;
+
+        ctx.fillStyle =
+            "#FFF0C2";
+
+
+        ctx.fillText(
             cutText(
                 ctx,
                 row.displayName,
                 600
-            );
-
-        ctx.fillText(
-            name,
+            ),
             185,
             y + 31
         );
 
+
         // Level
-        ctx.font = "bold 20px Arial";
-        ctx.fillStyle = "#FFE29A";
+        ctx.font =
+            `20px ${BOLD_FONT}`;
+
+        ctx.fillStyle =
+            "#FFE29A";
+
 
         ctx.fillText(
             `${row.level}`,
@@ -366,27 +580,40 @@ async function createLeaderboardCard(rows, guildName) {
             y + 31
         );
 
+
         // XP
         ctx.fillText(
-            Number(row.totalXp)
-                .toLocaleString("vi-VN"),
+            Number(
+                row.totalXp
+            ).toLocaleString(
+                "vi-VN"
+            ),
             1110,
             y + 31
         );
     }
 
+
     // Footer
-    ctx.fillStyle = "#D9BA79";
-    ctx.font = "17px Arial";
+    ctx.fillStyle =
+        "#D9BA79";
+
+    ctx.font =
+        `17px ${REGULAR_FONT}`;
+
 
     ctx.fillText(
-        "Cảm ơn mọi người đã luôn hoạt động và đồng hành cùng VietNam Legacy ❤️",
+        "Cảm ơn mọi người đã luôn hoạt động và đồng hành cùng VietNam Legacy!",
         70,
         845
     );
 
-    return canvas.toBuffer("image/png");
+
+    return canvas.toBuffer(
+        "image/png"
+    );
 }
+
 
 module.exports = {
     createLeaderboardCard
