@@ -1,0 +1,15 @@
+{
+  "name": "lowkey-bot-discord",
+  "version": "0.0.1",
+  "description": "VietNam Legacy Discord Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"No tests specified\""
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.10",
+    "discord.js": "^14.27.0",
+    "dotenv": "^18.0.5"
+  }
+}
