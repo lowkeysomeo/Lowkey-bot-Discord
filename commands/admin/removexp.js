@@ -1,77 +1,55 @@
 const {
-    PermissionFlagsBits
-} = require("discord.js");
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+} = require('discord.js');
 
-const {
-    removeXp
-} = require("../../utils/levelSystem");
+const { removeChatXp } = require('../../utils/levelSystem');
+const { syncLevelRole } = require('../../utils/levelRoles');
+const { formatXp } = require('../../utils/levelMath');
 
-const {
-    updateLevelRole
-} = require("../../utils/levelRoles");
-
-module.exports.data = {
-    name: "removexp",
-    description: "Trừ XP chat của một thành viên",
-    type: 1,
-
-    default_member_permissions:
-        PermissionFlagsBits.ManageGuild.toString(),
-
-    options: [
-        {
-            name: "user",
-            description: "Thành viên muốn trừ XP",
-            type: 6,
-            required: true
-        },
-        {
-            name: "amount",
-            description: "Số XP muốn trừ",
-            type: 4,
-            required: true,
-            min_value: 1
-        }
-    ],
-
-    integration_types: [0],
-    contexts: [0]
-};
+module.exports.data = new SlashCommandBuilder()
+  .setName('removexp')
+  .setDescription('Admin: trừ Chat XP của thành viên')
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  .addUserOption((option) =>
+    option
+      .setName('user')
+      .setDescription('Thành viên')
+      .setRequired(true),
+  )
+  .addNumberOption((option) =>
+    option
+      .setName('amount')
+      .setDescription('Số XP muốn trừ')
+      .setMinValue(0.1)
+      .setRequired(true),
+  )
+  .addBooleanOption((option) =>
+    option
+      .setName('monthly')
+      .setDescription('Có trừ cả XP tháng không? Mặc định: không')
+      .setRequired(false),
+  );
 
 module.exports.execute = async (interaction) => {
-    const user =
-        interaction.options.getUser("user");
+  const user = interaction.options.getUser('user', true);
+  const amount = interaction.options.getNumber('amount', true);
+  const monthly = interaction.options.getBoolean('monthly') ?? false;
 
-    const amount =
-        interaction.options.getInteger("amount");
+  const member = await interaction.guild.members.fetch(user.id);
+  const profile = removeChatXp(
+    interaction.guild.id,
+    user.id,
+    amount,
+    { affectMonthly: monthly },
+  );
 
-    const member =
-        await interaction.guild.members
-            .fetch(user.id)
-            .catch(() => null);
+  await syncLevelRole(member, profile.level);
 
-    if (!member) {
-        return interaction.reply({
-            content: "❌ Không tìm thấy thành viên.",
-            ephemeral: true
-        });
-    }
-
-    const result = removeXp(
-        interaction.guild.id,
-        user.id,
-        amount
-    );
-
-    await updateLevelRole(
-        member,
-        result.level
-    );
-
-    await interaction.reply({
-        content:
-            `✅ Đã trừ **${amount.toLocaleString()} XP** của ${user}.\n` +
-            `🏆 Level hiện tại: **${result.level}**\n` +
-            `✨ Tổng XP: **${result.totalXp.toLocaleString()}**`
-    });
+  return interaction.reply({
+    content:
+      `Đã trừ **${formatXp(amount)} Chat XP** của ${user}. ` +
+      `Tổng XP còn: **${formatXp(profile.totalXp)}**`,
+    ephemeral: true,
+  });
 };

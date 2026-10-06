@@ -1,90 +1,36 @@
 const {
-    AttachmentBuilder
-} = require("discord.js");
+  SlashCommandBuilder,
+  AttachmentBuilder,
+} = require('discord.js');
 
-const {
-    getVoiceLeaderboard
-} = require("../../utils/voiceLevelSystem");
+const { getVoiceLeaderboard } = require('../../utils/voiceLevelSystem');
+const { resolveLeaderboardEntries } = require('../../utils/leaderboardHelpers');
+const { createVoiceLeaderboardCard } = require('../../utils/createVoiceLeaderboardCard');
+const { getCurrentMonthKey, monthLabel } = require('../../utils/monthlySystem');
 
-const {
-    createVoiceLeaderboardCard
-} = require("../../utils/createVoiceLeaderboardCard");
+module.exports.data = new SlashCommandBuilder()
+  .setName('voiceleaderboard')
+  .setDescription('Xem bảng xếp hạng Voice của server');
 
-module.exports.data = {
-    name: "voiceleaderboard",
-    description:
-        "Xem bảng xếp hạng Voice của server",
-    type: 1,
-    options: [],
-    integration_types: [0],
-    contexts: [0]
+module.exports.execute = async (interaction) => {
+  await interaction.deferReply();
+
+  const rows = getVoiceLeaderboard(interaction.guild.id, 'monthly', 100);
+  const entries = await resolveLeaderboardEntries(
+    interaction.guild,
+    rows,
+    'monthlyXp',
+    10,
+  );
+
+  const buffer = await createVoiceLeaderboardCard(
+    entries,
+    monthLabel(getCurrentMonthKey()),
+  );
+
+  const attachment = new AttachmentBuilder(buffer, {
+    name: 'vnl-voice-leaderboard.png',
+  });
+
+  return interaction.editReply({ files: [attachment] });
 };
-
-module.exports.execute =
-    async (interaction) => {
-
-        await interaction.deferReply();
-
-        const leaderboard =
-            getVoiceLeaderboard(
-                interaction.guild.id,
-                10
-            );
-
-        if (leaderboard.length === 0) {
-            return interaction.editReply({
-                content:
-                    "🎙️ Bảng xếp hạng Voice hiện vẫn đang trống."
-            });
-        }
-
-        const rows = [];
-
-        for (const data of leaderboard) {
-            const member =
-                await interaction.guild.members
-                    .fetch(data.userId)
-                    .catch(() => null);
-
-            if (!member) continue;
-
-            rows.push({
-                displayName:
-                    member.displayName,
-
-                avatarURL:
-                    member.user.displayAvatarURL({
-                        extension: "png",
-                        size: 128
-                    }),
-
-                level:
-                    data.level,
-
-                totalXp:
-                    data.totalXp,
-
-                minutes:
-                    data.minutes || 0
-            });
-        }
-
-        const card =
-            await createVoiceLeaderboardCard(
-                rows,
-                interaction.guild.name
-            );
-
-        const attachment =
-            new AttachmentBuilder(
-                card,
-                {
-                    name:
-                        "voice-leaderboard.png"
-                }
-            );
-
-        await interaction.editReply({
-            files: [attachment]
-        });
-    };

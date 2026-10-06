@@ -1,81 +1,49 @@
-const { AttachmentBuilder } = require("discord.js");
+const {
+  SlashCommandBuilder,
+  AttachmentBuilder,
+} = require('discord.js');
 
 const {
-    getProfile,
-    getRequiredXp,
-    getLeaderboard
-} = require("../../utils/levelSystem");
+  getChatProfile,
+  getChatRankPosition,
+} = require('../../utils/levelSystem');
 
-const {
-    createRankCard
-} = require("../../utils/createRankCard");
+const { createRankCard } = require('../../utils/createRankCard');
 
-module.exports.data = {
-    name: "rank",
-    description: "Xem level và tiến độ hoạt động của bạn hoặc thành viên khác",
-    type: 1,
-
-    options: [
-        {
-            name: "user",
-            description: "Chọn thành viên muốn xem",
-            type: 6,
-            required: false
-        }
-    ],
-
-    integration_types: [0],
-    contexts: [0]
-};
+module.exports.data = new SlashCommandBuilder()
+  .setName('rank')
+  .setDescription('Xem Chat Rank của bạn hoặc thành viên khác')
+  .addUserOption((option) =>
+    option
+      .setName('user')
+      .setDescription('Thành viên muốn xem')
+      .setRequired(false),
+  );
 
 module.exports.execute = async (interaction) => {
-    const user =
-        interaction.options.getUser("user") ||
-        interaction.user;
+  await interaction.deferReply();
 
-    const member =
-        await interaction.guild.members
-            .fetch(user.id)
-            .catch(() => null);
+  const user = interaction.options.getUser('user') || interaction.user;
 
-    const profile = getProfile(
-        interaction.guild.id,
-        user.id
-    );
+  let member;
+  try {
+    member = await interaction.guild.members.fetch(user.id);
+  } catch {
+    return interaction.editReply('Không tìm thấy thành viên này trong server.');
+  }
 
-    const requiredXp = getRequiredXp(profile.level);
+  const profile = getChatProfile(interaction.guild.id, user.id);
+  const rank = getChatRankPosition(interaction.guild.id, user.id, 'total');
 
-    const leaderboard = getLeaderboard(
-        interaction.guild.id,
-        9999
-    );
+  const buffer = await createRankCard({
+    member,
+    profile,
+    rank,
+  });
 
-    const rankIndex = leaderboard.findIndex(
-        data => data.userId === user.id
-    );
+  const attachment = new AttachmentBuilder(buffer, {
+    name: 'vnl-rank.png',
+  });
 
-    const serverRank =
-        rankIndex === -1 ? 0 : rankIndex + 1;
-
-    const cardBuffer = await createRankCard({
-        avatarURL: user.displayAvatarURL({
-            extension: "png",
-            size: 256
-        }),
-        username: user.username,
-        displayName: member?.displayName || user.username,
-        level: profile.level,
-        rank: serverRank,
-        totalXp: profile.totalXp,
-        currentXp: profile.xp,
-        requiredXp
-    });
-
-    const attachment = new AttachmentBuilder(cardBuffer, {
-        name: "rank-card.png"
-    });
-
-    await interaction.reply({
-        files: [attachment]
-    });
+  return interaction.editReply({ files: [attachment] });
 };

@@ -1,76 +1,44 @@
 const {
-    PermissionFlagsBits
-} = require("discord.js");
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+} = require('discord.js');
 
-const {
-    setVoiceLevel
-} = require("../../utils/voiceLevelSystem");
+const { setVoiceLevel } = require('../../utils/voiceLevelSystem');
+const { syncVoiceLevelRole } = require('../../utils/voiceRoles');
+const { formatXp } = require('../../utils/levelMath');
 
-const {
-    updateVoiceRole
-} = require("../../utils/voiceRoles");
-
-module.exports.data = {
-    name: "setvoicelevel",
-    description: "Đặt Voice Level cho một thành viên",
-    type: 1,
-
-    default_member_permissions:
-        PermissionFlagsBits.ManageGuild.toString(),
-
-    options: [
-        {
-            name: "user",
-            description: "Thành viên muốn chỉnh",
-            type: 6,
-            required: true
-        },
-        {
-            name: "level",
-            description: "Voice Level muốn đặt",
-            type: 4,
-            required: true,
-            min_value: 1
-        }
-    ],
-
-    integration_types: [0],
-    contexts: [0]
-};
+module.exports.data = new SlashCommandBuilder()
+  .setName('setvoicelevel')
+  .setDescription('Admin: đặt Voice Level cho thành viên')
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  .addUserOption((option) =>
+    option
+      .setName('user')
+      .setDescription('Thành viên')
+      .setRequired(true),
+  )
+  .addIntegerOption((option) =>
+    option
+      .setName('level')
+      .setDescription('Voice Level mới')
+      .setMinValue(1)
+      .setRequired(true),
+  );
 
 module.exports.execute = async (interaction) => {
-    const user =
-        interaction.options.getUser("user");
+  const user = interaction.options.getUser('user', true);
+  const level = interaction.options.getInteger('level', true);
 
-    const level =
-        interaction.options.getInteger("level");
+  const member = await interaction.guild.members.fetch(user.id);
+  const profile = setVoiceLevel(interaction.guild.id, user.id, level);
 
-    const member =
-        await interaction.guild.members
-            .fetch(user.id)
-            .catch(() => null);
+  await syncVoiceLevelRole(member, profile.level);
 
-    if (!member) {
-        return interaction.reply({
-            content: "❌ Không tìm thấy thành viên.",
-            ephemeral: true
-        });
-    }
-
-    const result = setVoiceLevel(
-        interaction.guild.id,
-        user.id,
-        level
-    );
-
-    await updateVoiceRole(
-        member,
-        result.level
-    );
-
-    await interaction.reply({
-        content:
-            `✅ Đã đặt Voice Level của ${user} thành **Level ${result.level}**.\n` +
-            `🎙️ Tổng Voice XP: **${result.totalXp.toLocaleString()} XP**.`
-    });
+  return interaction.reply({
+    content:
+      `Đã đặt Voice Level của ${user} thành **${profile.level}**. ` +
+      `Tổng Voice XP tương ứng: **${formatXp(profile.totalXp)}**. ` +
+      'Voice XP tháng được giữ nguyên.',
+    ephemeral: true,
+  });
 };

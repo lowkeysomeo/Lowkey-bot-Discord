@@ -1,120 +1,172 @@
-const fs = require("node:fs");
-const path = require("node:path");
+const { getDb } = require('./database');
+const {
+  profileFromTotalXp,
+  totalXpForLevel,
+  roundXp,
+} = require('./levelMath');
 
-const dataPath = path.join(__dirname, "../data/levels.json");
+function ensureChatProfile(guildId, userId) {
+  const db = getDb();
 
-function ensureFile() {
-    const dataDir = path.dirname(dataPath);
-
-    if (!fs.existsSync(dataDir)) {
-        fs.mkdirSync(dataDir, { recursive: true });
-    }
-
-    if (!fs.existsSync(dataPath)) {
-        fs.writeFileSync(dataPath, "{}");
-    }
+  db.prepare(`
+    INSERT OR IGNORE INTO chat_levels
+      (guild_id, user_id, level, xp, total_xp, monthly_xp, updated_at)
+    VALUES (?, ?, 1, 0, 0, 0, ?)
+  `).run(guildId, userId, Date.now());
 }
 
-function loadData() {
-    ensureFile();
-
-    try {
-        return JSON.parse(
-            fs.readFileSync(dataPath, "utf8")
-        );
-    } catch (error) {
-        console.error("Lỗi đọc levels.json:", error);
-        return {};
-    }
+function mapRow(row) {
+  if (!row) return null;
+  return {
+    guildId: row.guild_id,
+    userId: row.user_id,
+    level: row.level,
+    xp: row.xp,
+    totalXp: row.total_xp,
+    monthlyXp: row.monthly_xp,
+  };
 }
 
-function saveData(data) {
-    ensureFile();
+function getChatProfile(guildId, userId) {
+  ensureChatProfile(guildId, userId);
+  const row = getDb()
+    .prepare('SELECT * FROM chat_levels WHERE guild_id = ? AND user_id = ?')
+    .get(guildId, userId);
 
-    fs.writeFileSync(
-        dataPath,
-        JSON.stringify(data, null, 4)
-    );
+  return mapRow(row);
 }
 
-function getKey(guildId, userId) {
-    return `${guildId}:${userId}`;
+function addChatXp(guildId, userId, amount, options = {}) {
+  const safeAmount = Math.max(0, Number(amount) || 0);
+  const countMonthly = options.countMonthly !== false;
+
+  const before = getChatProfile(guildId, userId);
+  const newTotal = roundXp(before.totalXp + safeAmount);
+  const newMonthly = roundXp(before.monthlyXp + (countMonthly ? safeAmount : 0));
+  const derived = profileFromTotalXp(newTotal);
+
+  getDb().prepare(`
+    UPDATE chat_levels
+    SET level = ?, xp = ?, total_xp = ?, monthly_xp = ?, updated_at = ?
+    WHERE guild_id = ? AND user_id = ?
+  `).run(
+    derived.level,
+    roundXp(derived.xp),
+    newTotal,
+    newMonthly,
+    Date.now(),
+    guildId,
+    userId,
+  );
+
+  return {
+    profile: getChatProfile(guildId, userId),
+    gainedXp: safeAmount,
+    oldLevel: before.level,
+    newLevel: derived.level,
+    leveledUp: derived.level > before.level,
+  };
 }
 
-function getRequiredXp(level) {
-    return 100 + ((level - 1) * 50);
+function removeChatXp(guildId, userId, amount, options = {}) {
+  const safeAmount = Math.max(0, Number(amount) || 0);
+  const affectMonthly = options.affectMonthly === true;
+
+  const before = getChatProfile(guildId, userId);
+  const newTotal = roundXp(Math.max(0, before.totalXp - safeAmount));
+  const newMonthly = affectMonthly
+    ? roundXp(Math.max(0, before.monthlyXp - safeAmount))
+    : before.monthlyXp;
+
+  const derived = profileFromTotalXp(newTotal);
+
+  getDb().prepare(`
+    UPDATE chat_levels
+    SET level = ?, xp = ?, total_xp = ?, monthly_xp = ?, updated_at = ?
+    WHERE guild_id = ? AND user_id = ?
+  `).run(
+    derived.level,
+    roundXp(derived.xp),
+    newTotal,
+    newMonthly,
+    Date.now(),
+    guildId,
+    userId,
+  );
+
+  return getChatProfile(guildId, userId);
 }
 
-function getProfile(guildId, userId) {
-    const data = loadData();
-    const key = getKey(guildId, userId);
+function setChatLevel(guildId, userId, level) {
+  const safeLevel = Math.max(1, Math.floor(Number(level) || 1));
+  ensureChatProfile(guildId, userId);
 
-    if (!data[key]) {
-        return {
-            level: 1,
-            xp: 0,
-            totalXp: 0
-        };
-    }
+  getDb().prepare(`
+    UPDATE chat_levels
+    SET level = ?, xp = 0, total_xp = ?, updated_at = ?
+    WHERE guild_id = ? AND user_id = ?
+  `).run(
+    safeLevel,
+    totalXpForLevel(safeLevel),
+    Date.now(),
+    guildId,
+    userId,
+  );
 
-    return data[key];
+  return getChatProfile(guildId, userId);
 }
 
-function addXp(guildId, userId, amount) {
-    const data = loadData();
-    const key = getKey(guildId, userId);
+function getChatLeaderboard(guildId, type = 'monthly', limit = 50) {
+  const safeLimit = Math.max(1, Math.min(500, Math.floor(Number(limit) || 50)));
+  const column = type === 'total' ? 'total_xp' : 'monthly_xp';
 
-    if (!data[key]) {
-        data[key] = {
-            level: 1,
-            xp: 0,
-            totalXp: 0
-        };
-    }
-
-    const profile = data[key];
-
-    profile.xp += amount;
-    profile.totalXp += amount;
-
-    let levelUps = 0;
-
-    while (
-        profile.xp >= getRequiredXp(profile.level)
-    ) {
-        profile.xp -= getRequiredXp(profile.level);
-        profile.level++;
-        levelUps++;
-    }
-
-    saveData(data);
-
-    return {
-        ...profile,
-        levelUps
-    };
+  return getDb().prepare(`
+    SELECT *
+    FROM chat_levels
+    WHERE guild_id = ? AND ${column} > 0
+    ORDER BY ${column} DESC, total_xp DESC, user_id ASC
+    LIMIT ?
+  `).all(guildId, safeLimit).map(mapRow);
 }
 
-function getLeaderboard(guildId, limit = 10) {
-    const data = loadData();
+function getChatRankPosition(guildId, userId, type = 'total') {
+  const profile = getChatProfile(guildId, userId);
+  const column = type === 'monthly' ? 'monthly_xp' : 'total_xp';
+  const value = type === 'monthly' ? profile.monthlyXp : profile.totalXp;
 
-    return Object.entries(data)
-        .filter(([key]) =>
-            key.startsWith(`${guildId}:`)
-        )
-        .map(([key, value]) => ({
-            userId: key.split(":")[1],
-            ...value
-        }))
-        .sort(
-            (a, b) => b.totalXp - a.totalXp
-        )
-        .slice(0, limit);
+  const row = getDb().prepare(`
+    SELECT COUNT(*) + 1 AS rank
+    FROM chat_levels
+    WHERE guild_id = ? AND ${column} > ?
+  `).get(guildId, value);
+
+  return row.rank;
 }
+
+function resetChatMonthlyXp(guildId) {
+  return getDb().prepare(`
+    UPDATE chat_levels
+    SET monthly_xp = 0, updated_at = ?
+    WHERE guild_id = ?
+  `).run(Date.now(), guildId);
+}
+
+// Compatibility aliases for older files.
+const getProfile = getChatProfile;
+const addXp = addChatXp;
+const removeXp = removeChatXp;
+const setLevel = setChatLevel;
 
 module.exports = {
-    getProfile,
-    addXp,
-    getRequiredXp,
-    getLeaderboard
+  getChatProfile,
+  addChatXp,
+  removeChatXp,
+  setChatLevel,
+  getChatLeaderboard,
+  getChatRankPosition,
+  resetChatMonthlyXp,
+  getProfile,
+  addXp,
+  removeXp,
+  setLevel,
 };

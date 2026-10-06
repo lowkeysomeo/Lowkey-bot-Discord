@@ -1,150 +1,49 @@
 const {
-    AttachmentBuilder
-} = require("discord.js");
+  SlashCommandBuilder,
+  AttachmentBuilder,
+} = require('discord.js');
 
 const {
-    getVoiceProfile,
-    getRequiredVoiceXp,
-    getVoiceLeaderboard
-} = require("../../utils/voiceLevelSystem");
+  getVoiceProfile,
+  getVoiceRankPosition,
+} = require('../../utils/voiceLevelSystem');
 
-const {
-    createVoiceRankCard
-} = require("../../utils/createVoiceRankCard");
+const { createVoiceRankCard } = require('../../utils/createVoiceRankCard');
 
+module.exports.data = new SlashCommandBuilder()
+  .setName('voicerank')
+  .setDescription('Xem Voice Rank của bạn hoặc thành viên khác')
+  .addUserOption((option) =>
+    option
+      .setName('user')
+      .setDescription('Thành viên muốn xem')
+      .setRequired(false),
+  );
 
-module.exports.data = {
-    name: "voicerank",
-    description:
-        "Xem Voice Level của bạn hoặc thành viên khác",
-    type: 1,
+module.exports.execute = async (interaction) => {
+  await interaction.deferReply();
 
-    options: [
-        {
-            name: "user",
-            description:
-                "Chọn thành viên muốn xem",
-            type: 6,
-            required: false
-        }
-    ],
+  const user = interaction.options.getUser('user') || interaction.user;
 
-    integration_types: [0],
-    contexts: [0]
+  let member;
+  try {
+    member = await interaction.guild.members.fetch(user.id);
+  } catch {
+    return interaction.editReply('Không tìm thấy thành viên này trong server.');
+  }
+
+  const profile = getVoiceProfile(interaction.guild.id, user.id);
+  const rank = getVoiceRankPosition(interaction.guild.id, user.id, 'total');
+
+  const buffer = await createVoiceRankCard({
+    member,
+    profile,
+    rank,
+  });
+
+  const attachment = new AttachmentBuilder(buffer, {
+    name: 'vnl-voice-rank.png',
+  });
+
+  return interaction.editReply({ files: [attachment] });
 };
-
-
-module.exports.execute =
-    async (interaction) => {
-
-        const user =
-            interaction.options.getUser(
-                "user"
-            ) ||
-            interaction.user;
-
-
-        const member =
-            await interaction.guild.members
-                .fetch(user.id)
-                .catch(() => null);
-
-
-        // ================================
-        // PROFILE VOICE
-        // ================================
-
-        const profile =
-            getVoiceProfile(
-                interaction.guild.id,
-                user.id
-            );
-
-
-        const requiredXp =
-            getRequiredVoiceXp(
-                profile.level
-            );
-
-
-        // ================================
-        // HẠNG VOICE SERVER
-        // ================================
-
-        const leaderboard =
-            getVoiceLeaderboard(
-                interaction.guild.id,
-                9999
-            );
-
-
-        const rankIndex =
-            leaderboard.findIndex(
-                data =>
-                    data.userId ===
-                    user.id
-            );
-
-
-        const voiceRank =
-            rankIndex === -1
-                ? 0
-                : rankIndex + 1;
-
-
-        // ================================
-        // TẠO CARD
-        // ================================
-
-        const cardBuffer =
-            await createVoiceRankCard({
-                avatarURL:
-                    user.displayAvatarURL({
-                        extension: "png",
-                        size: 256
-                    }),
-
-                username:
-                    user.username,
-
-                displayName:
-                    member?.displayName ||
-                    user.username,
-
-                level:
-                    profile.level,
-
-                rank:
-                    voiceRank,
-
-                totalXp:
-                    profile.totalXp,
-
-                currentXp:
-                    profile.xp,
-
-                requiredXp,
-
-                minutes:
-                    profile.minutes
-            });
-
-
-        // ================================
-        // GỬI ẢNH
-        // ================================
-
-        const attachment =
-            new AttachmentBuilder(
-                cardBuffer,
-                {
-                    name:
-                        "voice-rank-card.png"
-                }
-            );
-
-
-        await interaction.reply({
-            files: [attachment]
-        });
-    };

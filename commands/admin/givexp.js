@@ -1,77 +1,56 @@
 const {
-    PermissionFlagsBits
-} = require("discord.js");
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+} = require('discord.js');
 
-const {
-    addXp
-} = require("../../utils/levelSystem");
+const { addChatXp } = require('../../utils/levelSystem');
+const { syncLevelRole } = require('../../utils/levelRoles');
+const { formatXp } = require('../../utils/levelMath');
 
-const {
-    updateLevelRole
-} = require("../../utils/levelRoles");
-
-module.exports.data = {
-    name: "givexp",
-    description: "Cộng XP chat cho một thành viên",
-    type: 1,
-
-    default_member_permissions:
-        PermissionFlagsBits.ManageGuild.toString(),
-
-    options: [
-        {
-            name: "user",
-            description: "Thành viên muốn cộng XP",
-            type: 6,
-            required: true
-        },
-        {
-            name: "amount",
-            description: "Số XP muốn cộng",
-            type: 4,
-            required: true,
-            min_value: 1
-        }
-    ],
-
-    integration_types: [0],
-    contexts: [0]
-};
+module.exports.data = new SlashCommandBuilder()
+  .setName('givexp')
+  .setDescription('Admin: cộng Chat XP cho thành viên')
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  .addUserOption((option) =>
+    option
+      .setName('user')
+      .setDescription('Thành viên')
+      .setRequired(true),
+  )
+  .addNumberOption((option) =>
+    option
+      .setName('amount')
+      .setDescription('Số XP muốn cộng')
+      .setMinValue(0.1)
+      .setRequired(true),
+  )
+  .addBooleanOption((option) =>
+    option
+      .setName('monthly')
+      .setDescription('Có cộng vào BXH tháng không? Mặc định: không')
+      .setRequired(false),
+  );
 
 module.exports.execute = async (interaction) => {
-    const user =
-        interaction.options.getUser("user");
+  const user = interaction.options.getUser('user', true);
+  const amount = interaction.options.getNumber('amount', true);
+  const monthly = interaction.options.getBoolean('monthly') ?? false;
 
-    const amount =
-        interaction.options.getInteger("amount");
+  const member = await interaction.guild.members.fetch(user.id);
+  const result = addChatXp(
+    interaction.guild.id,
+    user.id,
+    amount,
+    { countMonthly: monthly },
+  );
 
-    const member =
-        await interaction.guild.members
-            .fetch(user.id)
-            .catch(() => null);
+  await syncLevelRole(member, result.profile.level);
 
-    if (!member) {
-        return interaction.reply({
-            content: "❌ Không tìm thấy thành viên này.",
-            ephemeral: true
-        });
-    }
-
-    const result = addXp(
-        interaction.guild.id,
-        user.id,
-        amount
-    );
-
-    await updateLevelRole(
-        member,
-        result.level
-    );
-
-    await interaction.reply({
-        content:
-            `✅ Đã cộng **${amount.toLocaleString()} XP** cho ${user}.\n` +
-            `🏆 Level hiện tại: **${result.level}**\n` +
-            `✨ Tổng XP: **${result.totalXp.toLocaleString()}**`
-    });
+  return interaction.reply({
+    content:
+      `Đã cộng **${formatXp(amount)} Chat XP** cho ${user}. ` +
+      `Tổng XP: **${formatXp(result.profile.totalXp)}**` +
+      (monthly ? ` • XP tháng: **${formatXp(result.profile.monthlyXp)}**` : ''),
+    ephemeral: true,
+  });
 };

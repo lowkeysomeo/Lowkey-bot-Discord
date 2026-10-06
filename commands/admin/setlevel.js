@@ -1,76 +1,44 @@
 const {
-    PermissionFlagsBits
-} = require("discord.js");
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+} = require('discord.js');
 
-const {
-    setLevel
-} = require("../../utils/levelSystem");
+const { setChatLevel } = require('../../utils/levelSystem');
+const { syncLevelRole } = require('../../utils/levelRoles');
+const { formatXp } = require('../../utils/levelMath');
 
-const {
-    updateLevelRole
-} = require("../../utils/levelRoles");
-
-module.exports.data = {
-    name: "setlevel",
-    description: "Đặt level chat cho một thành viên",
-    type: 1,
-
-    default_member_permissions:
-        PermissionFlagsBits.ManageGuild.toString(),
-
-    options: [
-        {
-            name: "user",
-            description: "Thành viên muốn chỉnh",
-            type: 6,
-            required: true
-        },
-        {
-            name: "level",
-            description: "Level muốn đặt",
-            type: 4,
-            required: true,
-            min_value: 1
-        }
-    ],
-
-    integration_types: [0],
-    contexts: [0]
-};
+module.exports.data = new SlashCommandBuilder()
+  .setName('setlevel')
+  .setDescription('Admin: đặt Chat Level cho thành viên')
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  .addUserOption((option) =>
+    option
+      .setName('user')
+      .setDescription('Thành viên')
+      .setRequired(true),
+  )
+  .addIntegerOption((option) =>
+    option
+      .setName('level')
+      .setDescription('Level mới')
+      .setMinValue(1)
+      .setRequired(true),
+  );
 
 module.exports.execute = async (interaction) => {
-    const user =
-        interaction.options.getUser("user");
+  const user = interaction.options.getUser('user', true);
+  const level = interaction.options.getInteger('level', true);
 
-    const level =
-        interaction.options.getInteger("level");
+  const member = await interaction.guild.members.fetch(user.id);
+  const profile = setChatLevel(interaction.guild.id, user.id, level);
 
-    const member =
-        await interaction.guild.members
-            .fetch(user.id)
-            .catch(() => null);
+  await syncLevelRole(member, profile.level);
 
-    if (!member) {
-        return interaction.reply({
-            content: "❌ Không tìm thấy thành viên.",
-            ephemeral: true
-        });
-    }
-
-    const result = setLevel(
-        interaction.guild.id,
-        user.id,
-        level
-    );
-
-    await updateLevelRole(
-        member,
-        result.level
-    );
-
-    await interaction.reply({
-        content:
-            `✅ Đã đặt level của ${user} thành **Level ${result.level}**.\n` +
-            `✨ Tổng XP được đồng bộ thành **${result.totalXp.toLocaleString()} XP**.`
-    });
+  return interaction.reply({
+    content:
+      `Đã đặt Chat Level của ${user} thành **${profile.level}**. ` +
+      `Tổng XP tương ứng: **${formatXp(profile.totalXp)}**. ` +
+      'XP tháng được giữ nguyên.',
+    ephemeral: true,
+  });
 };

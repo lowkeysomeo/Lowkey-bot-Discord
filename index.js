@@ -1,681 +1,208 @@
-// ========================================
-// ENV
-// ========================================
-
-require("dotenv").config();
-
-
-// ========================================
-// IMPORTS
-// ========================================
-
-const fs = require("node:fs");
-const path = require("node:path");
+require('dotenv').config();
 
 const {
-    Client,
-    Collection,
-    Events,
-    GatewayIntentBits,
-    MessageFlags,
-    EmbedBuilder
-} = require("discord.js");
+  Client,
+  GatewayIntentBits,
+  Events,
+  EmbedBuilder,
+  REST,
+  Routes,
+} = require('discord.js');
 
+const { initializeDatabase, getDatabasePath } = require('./utils/database');
+const { loadCommands } = require('./utils/loadCommands');
+const { addChatXp } = require('./utils/levelSystem');
+const { addVoiceXp } = require('./utils/voiceLevelSystem');
+const { applyBooster, hasBoosterRole } = require('./utils/xpBoost');
+const { syncLevelRole } = require('./utils/levelRoles');
+const { syncVoiceLevelRole } = require('./utils/voiceRoles');
+const { startMonthlySystem } = require('./utils/monthlySystem');
+const { formatXp } = require('./utils/levelMath');
 
-// ========================================
-// LEVEL SYSTEM
-// ========================================
-
-const {
-    addXp
-} = require("./utils/levelSystem");
-
-const {
-    addVoiceXp
-} = require("./utils/voiceLevelSystem");
-
-const {
-    updateLevelRole
-} = require("./utils/levelRoles");
-
-const {
-    updateVoiceRole
-} = require("./utils/voiceRoles");
-
-
-// ========================================
-// CLIENT
-// ========================================
+initializeDatabase();
 
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.GuildVoiceStates
-    ]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildVoiceStates,
+  ],
 });
 
-client.commands = new Collection();
+client.commands = loadCommands();
 
+const chatCooldowns = new Map();
+const CHAT_COOLDOWN_MS = 60_000;
+let voiceTimer = null;
 
-// ========================================
-// CHAT XP COOLDOWN
-// ========================================
+async function deployGuildCommands() {
+  if (!process.env.TOKEN || !process.env.CLIENT_ID || !process.env.GUILD_ID) {
+    console.warn('[DEPLOY] Thiếu TOKEN/CLIENT_ID/GUILD_ID, bỏ qua reload slash commands.');
+    return;
+  }
 
-const xpCooldown = new Map();
+  const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+  const commandData = client.commands.map((command) =>
+    typeof command.data.toJSON === 'function'
+      ? command.data.toJSON()
+      : command.data,
+  );
 
+  await rest.put(
+    Routes.applicationGuildCommands(
+      process.env.CLIENT_ID,
+      process.env.GUILD_ID,
+    ),
+    { body: commandData },
+  );
 
-// ========================================
-// LOAD COMMANDS
-// ========================================
-
-const foldersPath = path.join(
-    __dirname,
-    "commands"
-);
-
-const commandFolders =
-    fs.readdirSync(foldersPath);
-
-for (const folder of commandFolders) {
-    const commandsPath =
-        path.join(
-            foldersPath,
-            folder
-        );
-
-    // Bỏ qua nếu không phải folder
-    if (
-        !fs.statSync(commandsPath)
-            .isDirectory()
-    ) {
-        continue;
-    }
-
-    const commandFiles =
-        fs.readdirSync(commandsPath)
-            .filter(
-                file =>
-                    file.endsWith(".js")
-            );
-
-    for (const file of commandFiles) {
-        const filePath =
-            path.join(
-                commandsPath,
-                file
-            );
-
-        try {
-            const command =
-                require(filePath);
-
-            if (
-                "data" in command &&
-                "execute" in command
-            ) {
-                client.commands.set(
-                    command.data.name,
-                    command
-                );
-
-                console.log(
-                    `✅ Loaded command: /${command.data.name}`
-                );
-            } else {
-                console.log(
-                    `⚠️ Command ${filePath} thiếu "data" hoặc "execute".`
-                );
-            }
-        } catch (error) {
-            console.error(
-                `❌ Không load được command ${filePath}:`,
-                error
-            );
-        }
-    }
+  console.log(`Successfully reloaded ${commandData.length} application [/] commands.`);
 }
 
+async function sendLevelUp(member, type, level) {
+  const channelId = process.env.LEVEL_CHANNEL_ID;
+  if (!channelId) return;
 
-// ========================================
-// VOICE XP FUNCTION
-// ========================================
+  try {
+    const channel = await client.channels.fetch(channelId);
+    if (!channel?.isTextBased()) return;
 
-let voiceTickRunning = false;
+    const isVoice = type === 'voice';
+    const embed = new EmbedBuilder()
+      .setColor(0xC31822)
+      .setTitle(isVoice ? '🎙️ VOICE LEVEL UP!' : '🔥 CHAT LEVEL UP!')
+      .setDescription(
+        `${member} đã đạt **${isVoice ? 'Voice ' : ''}Level ${level}**!`,
+      )
+      .setFooter({ text: 'VietNam Legacy' })
+      .setTimestamp();
 
-async function runVoiceXpTick() {
-    // Tránh 2 vòng chạy chồng nhau
-    if (voiceTickRunning) return;
+    await channel.send({ embeds: [embed] });
+  } catch (error) {
+    console.error('[LEVEL UP] Không gửi được thông báo:', error.message);
+  }
+}
 
-    voiceTickRunning = true;
+client.once(Events.ClientReady, async (readyClient) => {
+  console.log(`Ready! Logged in as ${readyClient.user.tag}`);
+  console.log(`[DB] ${getDatabasePath()}`);
 
+  try {
+    await deployGuildCommands();
+  } catch (error) {
+    console.error('[DEPLOY] Lỗi reload slash commands:', error);
+  }
+
+  await startMonthlySystem(client);
+
+  if (voiceTimer) clearInterval(voiceTimer);
+  voiceTimer = setInterval(async () => {
     try {
-        for (
-            const guild
-            of client.guilds.cache.values()
-        ) {
-            const voiceChannels =
-                guild.channels.cache.filter(
-                    channel =>
-                        channel.isVoiceBased()
-                );
+      const guildId = process.env.GUILD_ID;
+      if (!guildId) return;
 
-            for (
-                const channel
-                of voiceChannels.values()
-            ) {
-                // Chỉ đếm người thật
-                const humans =
-                    channel.members.filter(
-                        member =>
-                            !member.user.bot
-                    );
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) return;
 
-                if (humans.size === 0) {
-                    continue;
-                }
+      for (const channel of guild.channels.cache.values()) {
+        if (!channel.isVoiceBased?.()) continue;
 
-                // ============================
-                // VOICE XP
-                // 1 người = 1 XP/phút
-                // 2+ người = 5 XP/phút
-                // ============================
+        const humans = channel.members.filter((member) => !member.user.bot);
+        if (humans.size === 0) continue;
 
-                const xpGain =
-                    humans.size === 1
-                        ? 1
-                        : 5;
+        const baseXp = humans.size >= 2 ? 5 : 1;
 
-                for (
-                    const member
-                    of humans.values()
-                ) {
-                    // Server Deaf không nhận XP
-                    if (
-                        member.voice.serverDeaf
-                    ) {
-                        continue;
-                    }
+        for (const member of humans.values()) {
+          if (member.voice.serverDeaf) continue;
 
-                    const result =
-                        addVoiceXp(
-                            guild.id,
-                            member.id,
-                            xpGain
-                        );
+          const gainedXp = applyBooster(baseXp, member);
+          const result = addVoiceXp(
+            guild.id,
+            member.id,
+            gainedXp,
+            { minutes: 1, countMonthly: true },
+          );
 
-                    console.log(
-                        `[VOICE XP] ${member.user.username} +${xpGain} XP | Level ${result.level} | ${result.xp} XP`
-                    );
+          if (result.leveledUp) {
+            await syncVoiceLevelRole(member, result.newLevel);
+            await sendLevelUp(member, 'voice', result.newLevel);
+          }
 
-
-                    // ============================
-                    // VOICE LEVEL UP
-                    // ============================
-
-                    if (
-                        result.levelUps > 0
-                    ) {
-                        const newVoiceRank =
-                            await updateVoiceRole(
-                                member,
-                                result.level
-                            );
-
-                        const levelChannel =
-                            guild.channels.cache.get(
-                                process.env
-                                    .LEVEL_CHANNEL_ID
-                            );
-
-                        if (
-                            levelChannel &&
-                            levelChannel
-                                .isTextBased()
-                        ) {
-                            const embed =
-                                new EmbedBuilder()
-
-                                    .setColor(
-                                        "#E53935"
-                                    )
-
-                                    .setAuthor({
-                                        name:
-                                            "VietNam Legacy • Voice Level Up",
-                                        iconURL:
-                                            guild.iconURL() ||
-                                            undefined
-                                    })
-
-                                    .setTitle(
-                                        "🎙️ VOICE LEVEL UP!"
-                                    )
-
-                                    .setDescription(
-                                        `Chúc mừng <@${member.id}> nha! ❤️\n\n` +
-                                        `Bạn vừa đạt **Voice Level ${result.level}** tại **VietNam Legacy**.\n` +
-                                        `Cảm ơn bạn đã dành thời gian trò chuyện và kết nối cùng mọi người!`
-                                    )
-
-                                    .setThumbnail(
-                                        member.user
-                                            .displayAvatarURL({
-                                                size: 256
-                                            })
-                                    )
-
-                                    .addFields({
-                                        name:
-                                            "🎙️ Voice Level",
-                                        value:
-                                            `**Level ${result.level}**`,
-                                        inline:
-                                            true
-                                    });
-
-
-                            // Nếu có Voice Rank
-                            if (
-                                newVoiceRank
-                                    ?.role
-                            ) {
-                                embed.addFields({
-                                    name:
-                                        "✨ Voice Rank",
-                                    value:
-                                        `${newVoiceRank.role}`,
-                                    inline:
-                                        true
-                                });
-                            }
-
-
-                            embed
-                                .setFooter({
-                                    text:
-                                        "Cùng voice vui vẻ và chinh phục level tiếp theo nhé ❤️"
-                                })
-
-                                .setTimestamp();
-
-
-                            await levelChannel.send({
-                                content:
-                                    `<@${member.id}>`,
-                                embeds: [
-                                    embed
-                                ]
-                            });
-                        }
-                    }
-                }
-            }
+          const boosterText = hasBoosterRole(member) ? ' [BOOSTER +10%]' : '';
+          console.log(
+            `[VOICE XP] ${member.user.username} +${formatXp(gainedXp)} XP${boosterText} | Level ${result.profile.level}`,
+          );
         }
+      }
     } catch (error) {
-        console.error(
-            "❌ Lỗi Voice XP System:",
-            error
-        );
-    } finally {
-        voiceTickRunning = false;
+      console.error('[VOICE XP] Tick error:', error);
     }
-}
+  }, 60_000);
 
+  console.log('Voice XP System đã hoạt động.');
+});
 
-// ========================================
-// BOT READY
-// ========================================
+client.on(Events.MessageCreate, async (message) => {
+  if (!message.guild || message.author.bot) return;
+  if (message.guild.id !== process.env.GUILD_ID) return;
 
-client.once(
-    Events.ClientReady,
-    async readyClient => {
+  const key = `${message.guild.id}:${message.author.id}`;
+  const now = Date.now();
+  const last = chatCooldowns.get(key) || 0;
 
-        console.log(
-            `✅ Ready! Logged in as ${readyClient.user.tag}`
-        );
+  if (now - last < CHAT_COOLDOWN_MS) return;
+  chatCooldowns.set(key, now);
 
+  try {
+    const member = message.member || await message.guild.members.fetch(message.author.id);
+    const baseXp = Math.floor(Math.random() * 11) + 10;
+    const gainedXp = applyBooster(baseXp, member);
+    const result = addChatXp(
+      message.guild.id,
+      message.author.id,
+      gainedXp,
+      { countMonthly: true },
+    );
 
-        // ================================
-        // DEPLOY SLASH COMMANDS
-        // ================================
-
-        try {
-            const deploy =
-                require("./deploy");
-
-            await deploy(
-                readyClient
-            );
-        } catch (error) {
-            console.error(
-                "❌ Lỗi deploy commands:",
-                error
-            );
-        }
-
-
-        // ================================
-        // START VOICE XP
-        // ================================
-
-        setInterval(
-            runVoiceXpTick,
-            60 * 1000
-        );
-
-        console.log(
-            "🎙️ Voice XP System đã hoạt động."
-        );
+    if (result.leveledUp) {
+      await syncLevelRole(member, result.newLevel);
+      await sendLevelUp(member, 'chat', result.newLevel);
     }
-);
+  } catch (error) {
+    console.error('[CHAT XP] Error:', error);
+  }
+});
 
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
 
-// ========================================
-// SLASH COMMAND HANDLER
-// ========================================
+  const command = client.commands.get(interaction.commandName);
+  if (!command) return;
 
-client.on(
-    Events.InteractionCreate,
-    async interaction => {
+  try {
+    await command.execute(interaction);
+  } catch (error) {
+    console.error(`[COMMAND] /${interaction.commandName}:`, error);
 
-        if (
-            !interaction
-                .isChatInputCommand()
-        ) {
-            return;
-        }
+    const payload = {
+      content: 'Có lỗi xảy ra khi thực hiện command này.',
+      ephemeral: true,
+    };
 
-        const command =
-            interaction.client.commands.get(
-                interaction.commandName
-            );
-
-        if (!command) {
-            console.error(
-                `❌ Không tìm thấy command /${interaction.commandName}`
-            );
-
-            return;
-        }
-
-        try {
-            await command.execute(
-                interaction
-            );
-        } catch (error) {
-            console.error(
-                `❌ Lỗi command /${interaction.commandName}:`,
-                error
-            );
-
-
-            const errorMessage = {
-                content:
-                    "❌ Có lỗi xảy ra khi thực hiện lệnh này!",
-                flags:
-                    MessageFlags.Ephemeral
-            };
-
-
-            try {
-                if (
-                    interaction.replied ||
-                    interaction.deferred
-                ) {
-                    await interaction
-                        .followUp(
-                            errorMessage
-                        );
-                } else {
-                    await interaction
-                        .reply(
-                            errorMessage
-                        );
-                }
-            } catch (
-                replyError
-            ) {
-                console.error(
-                    "❌ Không gửi được error reply:",
-                    replyError
-                );
-            }
-        }
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp(payload).catch(() => {});
+    } else {
+      await interaction.reply(payload).catch(() => {});
     }
-);
+  }
+});
 
+process.on('unhandledRejection', (error) => {
+  console.error('[UNHANDLED REJECTION]', error);
+});
 
-// ========================================
-// CHAT LEVEL SYSTEM
-// ========================================
+process.on('uncaughtException', (error) => {
+  console.error('[UNCAUGHT EXCEPTION]', error);
+});
 
-client.on(
-    Events.MessageCreate,
-    async message => {
-
-        // Không phải server
-        if (!message.guild) {
-            return;
-        }
-
-        // Không tính bot
-        if (message.author.bot) {
-            return;
-        }
-
-
-        // ================================
-        // COOLDOWN 60 GIÂY
-        // ================================
-
-        const cooldownTime =
-            60 * 1000;
-
-        const key =
-            `${message.guild.id}:${message.author.id}`;
-
-        const lastXpTime =
-            xpCooldown.get(key);
-
-
-        if (
-            lastXpTime &&
-            Date.now() -
-                lastXpTime <
-                cooldownTime
-        ) {
-            return;
-        }
-
-
-        xpCooldown.set(
-            key,
-            Date.now()
-        );
-
-
-        // ================================
-        // RANDOM CHAT XP 10 - 20
-        // ================================
-
-        const xpGain =
-            Math.floor(
-                Math.random() * 11
-            ) + 10;
-
-
-        const result =
-            addXp(
-                message.guild.id,
-                message.author.id,
-                xpGain
-            );
-
-
-        console.log(
-            `[CHAT XP] ${message.author.username} +${xpGain} XP | Level ${result.level} | ${result.xp} XP`
-        );
-
-
-        // ================================
-        // CHAT LEVEL UP
-        // ================================
-
-        if (
-            result.levelUps > 0
-        ) {
-            const member =
-                await message.guild.members
-                    .fetch(
-                        message.author.id
-                    )
-                    .catch(
-                        () => null
-                    );
-
-
-            let newRank = null;
-
-
-            if (member) {
-                newRank =
-                    await updateLevelRole(
-                        member,
-                        result.level
-                    );
-            }
-
-
-            const levelChannel =
-                message.guild.channels.cache.get(
-                    process.env
-                        .LEVEL_CHANNEL_ID
-                );
-
-
-            if (
-                !levelChannel ||
-                !levelChannel
-                    .isTextBased()
-            ) {
-                console.log(
-                    "⚠️ Không tìm thấy kênh thông báo level."
-                );
-
-                return;
-            }
-
-
-            const embed =
-                new EmbedBuilder()
-
-                    .setColor(
-                        "#E53935"
-                    )
-
-                    .setAuthor({
-                        name:
-                            "VietNam Legacy • Level Up",
-                        iconURL:
-                            message.guild
-                                .iconURL() ||
-                            undefined
-                    })
-
-                    .setTitle(
-                        "🎉 LEVEL UP!"
-                    )
-
-                    .setDescription(
-                        `Chúc mừng <@${message.author.id}> nha! ❤️\n\n` +
-                        `Bạn vừa đạt **Level ${result.level}** tại **VietNam Legacy**.\n` +
-                        `Cảm ơn bạn đã luôn trò chuyện và đồng hành cùng mọi người!`
-                    )
-
-                    .setThumbnail(
-                        message.author
-                            .displayAvatarURL({
-                                size: 256
-                            })
-                    )
-
-                    .addFields({
-                        name:
-                            "🏆 Level hiện tại",
-                        value:
-                            `**Level ${result.level}**`,
-                        inline:
-                            true
-                    });
-
-
-            // Nếu có rank
-            if (
-                newRank?.role
-            ) {
-                embed.addFields({
-                    name:
-                        "✨ Rank hiện tại",
-                    value:
-                        `${newRank.role}`,
-                    inline:
-                        true
-                });
-            }
-
-
-            embed
-                .setFooter({
-                    text:
-                        "Cùng hoạt động và chinh phục rank tiếp theo nhé ❤️"
-                })
-
-                .setTimestamp();
-
-
-            await levelChannel.send({
-                content:
-                    `<@${message.author.id}>`,
-                embeds: [
-                    embed
-                ]
-            });
-        }
-    }
-);
-
-
-// ========================================
-// ERROR LOG
-// ========================================
-
-process.on(
-    "unhandledRejection",
-    error => {
-        console.error(
-            "❌ Unhandled Rejection:",
-            error
-        );
-    }
-);
-
-
-process.on(
-    "uncaughtException",
-    error => {
-        console.error(
-            "❌ Uncaught Exception:",
-            error
-        );
-    }
-);
-
-
-// ========================================
-// LOGIN
-// ========================================
-
-client.login(
-    process.env.TOKEN
-);
+client.login(process.env.TOKEN);
