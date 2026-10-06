@@ -15,6 +15,7 @@ const {
 const { sendLevelUp } = require('./utils/sendLevelUp');
 const { initializeDatabase, getDatabasePath } = require('./utils/database');
 const { loadCommands } = require('./utils/loadCommands');
+const { handleConfessionButton } = require('./utils/confessionSystem');
 const { addChatXp } = require('./utils/levelSystem');
 const { addVoiceXp } = require('./utils/voiceLevelSystem');
 const { applyBooster, hasBoosterRole } = require('./utils/xpBoost');
@@ -289,6 +290,7 @@ client.once(
 client.on(
   Events.MessageCreate,
   async (message) => {
+    if (!message.guild || message.author.bot) return;
 
  // Không cộng Chat XP trong channel/category bị chặn
 if (
@@ -415,6 +417,18 @@ if (
 client.on(
   Events.InteractionCreate,
   async (interaction) => {
+    if (interaction.isButton() && interaction.customId.startsWith('confession:')) {
+      try {
+        await handleConfessionButton(interaction);
+      } catch (error) {
+        console.error('[CONFESSION] Button error:', error);
+        const payload = { content: 'Có lỗi khi xử lý nút confession.', flags: 64 };
+        if (interaction.deferred) await interaction.editReply(payload).catch(() => {});
+        else if (interaction.replied) await interaction.followUp(payload).catch(() => {});
+        else await interaction.reply(payload).catch(() => {});
+      }
+      return;
+    }
 
     if (
       !interaction.isChatInputCommand()
