@@ -57,6 +57,13 @@ module.exports.execute = async (interaction) => {
       true
     );
 
+  if (user.bot) {
+  return interaction.reply({
+    content: '❌ Không thể chỉnh XP hoặc Level cho tài khoản bot.',
+    flags: 64,
+  });
+}
+
   const amount =
     interaction.options.getNumber(
       'amount',

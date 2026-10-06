@@ -2,6 +2,8 @@ const { AttachmentBuilder } = require('discord.js');
 const { createLevelUpCard } = require('./createLevelUpCard');
 
 async function sendLevelUp(client, member, type, profile) {
+    if (!member || member.user?.bot) return;
+
   const channelId = process.env.LEVEL_CHANNEL_ID;
 
   if (!channelId) return;
