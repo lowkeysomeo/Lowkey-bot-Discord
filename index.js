@@ -33,6 +33,7 @@ const client = new Client({
 });
 
 client.commands = loadCommands();
+require('./dashboard/server').startDashboard(client);
 
 const chatCooldowns = new Map();
 const CHAT_COOLDOWN_MS = 60_000;

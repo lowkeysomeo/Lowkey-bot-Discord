@@ -1,0 +1,68 @@
+const assert = require('node:assert/strict');
+const { Collection, ChannelType } = require('discord.js');
+process.env.DB_PATH = ':memory:';
+const { createDashboard } = require('../dashboard/server');
+const { getGuildSetting } = require('../utils/guildSettings');
+const { getDb } = require('../utils/database');
+const confession = require('../utils/confessionStore');
+let owner = true;
+const channel = { id: '333', name: 'level', type: ChannelType.GuildText, guildId: '111', permissionsFor: () => ({ has: () => true }) };
+const guild = { id: '111', memberCount: 20, channels: { fetch: async () => new Collection([['333', channel]]) },
+  roles: { fetch: async () => new Collection() }, members: { fetchMe: async () => ({ permissions: { has: () => true }, roles: { highest: { comparePositionTo: () => 1 } } }) } };
+const client = { isReady: () => true, guilds: { cache: new Collection([['111', guild]]) } };
+const env = { CLIENT_ID: '999', DISCORD_CLIENT_SECRET: 'test-only-secret', DASHBOARD_URL: 'http://127.0.0.1:3000' };
+const mockFetch = async url => {
+  let data;
+  if (url.endsWith('/oauth2/token')) data = { access_token: 'private-test-token', expires_in: 3600 };
+  else if (url.endsWith('/users/@me')) data = { id: '444', username: 'Admin' };
+  else if (url.includes('/users/@me/guilds')) data = [{ id: '111', name: '<script>unsafe</script>', owner, permissions: '0' }];
+  else throw new Error(`Unexpected request ${url}`);
+  return { ok: true, status: 200, json: async () => data };
+};
+async function main() {
+  const server = createDashboard(client, { env, fetch: mockFetch });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const request = (route, options) => fetch(base + route, { redirect: 'manual', ...options });
+  try {
+    assert.equal((await request('/api/guilds')).status, 401);
+    assert.equal((await request('/api/guilds/111/settings', { method: 'POST' })).status, 401);
+    assert.equal((await request('/auth/callback?state=wrong&code=code')).status, 400);
+    const auth = await request('/auth/discord');
+    const authUrl = new URL(auth.headers.get('location'));
+    assert.equal(authUrl.searchParams.get('scope'), 'identify guilds');
+    assert(!authUrl.href.includes('test-only-secret'));
+    const loginCookie = auth.headers.get('set-cookie').split(';')[0];
+    const callback = `/auth/callback?state=${authUrl.searchParams.get('state')}&code=fake-code`;
+    const result = await request(callback, { headers: { cookie: loginCookie } });
+    assert.equal(result.status, 302);
+    const sessionCookie = result.headers.getSetCookie().find(value => value.startsWith('vnl_session=')).split(';')[0];
+    assert.equal((await request(callback, { headers: { cookie: loginCookie } })).status, 400, 'OAuth state is single-use');
+    const headers = { cookie: sessionCookie };
+    const info = await (await request('/api/session', { headers })).json();
+    assert.equal(info.user.name, 'Admin');
+    assert(!JSON.stringify(info).includes('private-test-token'));
+    assert(!JSON.stringify(info).includes('test-only-secret'));
+    const data = await (await request('/api/guilds/111/settings', { headers })).json();
+    assert.equal(data.channels[0].id, '333');
+    const postHeaders = { ...headers, 'Content-Type': 'application/json', origin: env.DASHBOARD_URL, 'X-CSRF-Token': info.csrf };
+    const payload = JSON.stringify({ settings: { LEVEL_CHANNEL_ID: '333' }, confessionChannel: '333' });
+    assert.equal((await request('/api/guilds/111/settings', { method: 'POST', headers, body: payload })).status, 403);
+    assert.equal((await request('/api/guilds/111/settings', { method: 'POST', headers: { ...postHeaders, origin: 'https://evil.example' }, body: payload })).status, 403);
+    assert.equal((await request('/api/guilds/222/settings', { headers })).status, 403);
+    assert.equal((await request('/api/guilds/111/settings', { method: 'POST', headers: postHeaders, body: JSON.stringify({ settings: { LEVEL_CHANNEL_ID: '99999' } }) })).status, 400);
+    assert.equal((await request('/api/guilds/111/settings', { method: 'POST', headers: postHeaders, body: payload })).status, 200);
+    assert.equal(getGuildSetting('111', 'LEVEL_CHANNEL_ID'), '333');
+    assert.equal(getGuildSetting('222', 'LEVEL_CHANNEL_ID'), null);
+    assert.equal(confession.getConfig('111').channel_id, '333');
+    owner = false;
+    assert.equal((await request('/api/guilds/111/settings', { method: 'POST', headers: postHeaders, body: payload })).status, 403, 'Permissions are checked again after revocation');
+    assert.equal((await request('/api/logout', { method: 'POST', headers: postHeaders, body: '{}' })).status, 200);
+    assert.equal((await request('/api/guilds', { headers })).status, 401);
+    const html = await request('/');
+    assert.match(html.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+    assert.equal(html.status, 200);
+    console.log('PASS: OAuth state/cookie binding, state replay rejection, session privacy, CSRF/origin checks, per-server authorization, permission revocation, config validation/persistence, logout, security headers');
+  } finally { await new Promise(resolve => server.close(resolve)); getDb().close(); }
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });
