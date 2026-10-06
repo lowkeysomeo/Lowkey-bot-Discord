@@ -8,6 +8,10 @@ const {
   Routes,
 } = require('discord.js');
 
+const {
+  isXpExcluded,
+} = require('./utils/xpExclusions');
+
 const { sendLevelUp } = require('./utils/sendLevelUp');
 const { initializeDatabase, getDatabasePath } = require('./utils/database');
 const { loadCommands } = require('./utils/loadCommands');
@@ -156,10 +160,18 @@ client.once(
           }
 
 
-          for (
-            const channel
-            of guild.channels.cache.values()
-          ) {
+          for (const channel of guild.channels.cache.values()) {
+  if (!channel.isVoiceBased?.()) continue;
+
+  // Kênh hoặc Category bị chặn XP
+  if (
+    isXpExcluded(
+      guild.id,
+      channel
+    )
+  ) {
+    continue;
+  }
 
             if (
               !channel.isVoiceBased?.()
@@ -278,12 +290,15 @@ client.on(
   Events.MessageCreate,
   async (message) => {
 
-    if (
-      !message.guild ||
-      message.author.bot
-    ) {
-      return;
-    }
+ // Không cộng Chat XP trong channel/category bị chặn
+if (
+  isXpExcluded(
+    message.guild.id,
+    message.channel
+  )
+) {
+  return;
+}
 
 
     if (
