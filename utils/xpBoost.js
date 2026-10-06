@@ -1,7 +1,8 @@
+const { getGuildSetting } = require('./guildSettings');
 const BOOST_MULTIPLIER = 1.10;
 
 function hasBoosterRole(member) {
-  const roleId = process.env.VNL_BOOSTER_ROLE_ID;
+  const roleId = getGuildSetting(member?.guild?.id, 'VNL_BOOSTER_ROLE_ID');
   return Boolean(roleId && member?.roles?.cache?.has(roleId));
 }
 

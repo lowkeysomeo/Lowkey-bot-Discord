@@ -1,10 +1,11 @@
+const { getGuildSetting } = require('./guildSettings');
 const VOICE_ROLE_LEVELS = [1, 10, 20, 40, 65, 80, 100];
 
-function getConfiguredRoles() {
+function getConfiguredRoles(guildId) {
   return VOICE_ROLE_LEVELS
     .map((level) => ({
       level,
-      roleId: process.env[`VOICE_ROLE_${level}`],
+      roleId: getGuildSetting(guildId, `VOICE_ROLE_${level}`),
     }))
     .filter((item) => item.roleId);
 }
@@ -12,7 +13,7 @@ function getConfiguredRoles() {
 async function syncVoiceLevelRole(member, level) {
   if (!member) return;
 
-  const configured = getConfiguredRoles();
+  const configured = getConfiguredRoles(member.guild.id);
   if (configured.length === 0) return;
 
   const eligible = configured

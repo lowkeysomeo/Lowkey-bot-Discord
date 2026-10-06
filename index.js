@@ -4,8 +4,6 @@ const {
   Client,
   GatewayIntentBits,
   Events,
-  REST,
-  Routes,
 } = require('discord.js');
 
 const {
@@ -17,10 +15,10 @@ const { initializeDatabase, getDatabasePath } = require('./utils/database');
 const { loadCommands } = require('./utils/loadCommands');
 const { handleConfessionButton } = require('./utils/confessionSystem');
 const { addChatXp } = require('./utils/levelSystem');
-const { addVoiceXp } = require('./utils/voiceLevelSystem');
+const { voiceXpTick } = require('./utils/voiceXpTick');
+const { deployCommands } = require('./utils/deployCommands');
 const { applyBooster, hasBoosterRole } = require('./utils/xpBoost');
 const { syncLevelRole } = require('./utils/levelRoles');
-const { syncVoiceLevelRole } = require('./utils/voiceRoles');
 const { startMonthlySystem } = require('./utils/monthlySystem');
 const { formatXp } = require('./utils/levelMath');
 
@@ -46,45 +44,6 @@ let voiceTimer = null;
 // DEPLOY SLASH COMMANDS
 // ==============================
 
-async function deployGuildCommands() {
-  if (
-    !process.env.TOKEN ||
-    !process.env.CLIENT_ID ||
-    !process.env.GUILD_ID
-  ) {
-    console.warn(
-      '[DEPLOY] Thiếu TOKEN/CLIENT_ID/GUILD_ID, bỏ qua reload slash commands.'
-    );
-    return;
-  }
-
-  const rest = new REST({ version: '10' }).setToken(
-    process.env.TOKEN
-  );
-
-  const commandData = client.commands.map((command) =>
-    typeof command.data.toJSON === 'function'
-      ? command.data.toJSON()
-      : command.data
-  );
-
-  await rest.put(
-    Routes.applicationGuildCommands(
-      process.env.CLIENT_ID,
-      process.env.GUILD_ID
-    ),
-    {
-      body: commandData,
-    }
-  );
-
-  console.log(
-    `Successfully reloaded ${commandData.length} application [/] commands.`
-  );
-}
-
-
-
 // ==============================
 // BOT READY
 // ==============================
@@ -107,7 +66,7 @@ client.once(
     // ==============================
 
     try {
-      await deployGuildCommands();
+      await deployCommands(client.commands);
     } catch (error) {
       console.error(
         '[DEPLOY] Lỗi reload slash commands:',
@@ -139,142 +98,9 @@ client.once(
     }
 
 
-    voiceTimer = setInterval(
-      async () => {
-
-        try {
-          const guildId =
-            process.env.GUILD_ID;
-
-          if (!guildId) {
-            return;
-          }
-
-
-          const guild =
-            client.guilds.cache.get(
-              guildId
-            );
-
-          if (!guild) {
-            return;
-          }
-
-
-          for (const channel of guild.channels.cache.values()) {
-  if (!channel.isVoiceBased?.()) continue;
-
-  // Kênh hoặc Category bị chặn XP
-  if (
-    isXpExcluded(
-      guild.id,
-      channel
-    )
-  ) {
-    continue;
-  }
-
-            if (
-              !channel.isVoiceBased?.()
-            ) {
-              continue;
-            }
-
-
-            const humans =
-              channel.members.filter(
-                (member) =>
-                  !member.user.bot
-              );
-
-
-            if (
-              humans.size === 0
-            ) {
-              continue;
-            }
-
-
-            const baseXp =
-              humans.size >= 2
-                ? 5
-                : 1;
-
-
-            for (
-              const member
-              of humans.values()
-            ) {
-
-              if (
-                member.voice.serverDeaf
-              ) {
-                continue;
-              }
-
-
-              const gainedXp =
-                applyBooster(
-                  baseXp,
-                  member
-                );
-
-
-              const result =
-                addVoiceXp(
-                  guild.id,
-                  member.id,
-                  gainedXp,
-                  {
-                    minutes: 1,
-                    countMonthly: true,
-                  }
-                );
-
-
-              if (
-                result.leveledUp
-              ) {
-
-                await syncVoiceLevelRole(
-                  member,
-                  result.newLevel
-    );
-
-
-    await sendLevelUp(
-  client,
-  member,
-  'voice',
-  result.profile
-);
-              }
-
-
-              const boosterText =
-                hasBoosterRole(member)
-                  ? ' [BOOSTER +10%]'
-                  : '';
-
-
-              console.log(
-                `[VOICE XP] ${member.user.username} +${formatXp(gainedXp)} XP${boosterText} | Level ${result.profile.level}`
-              );
-            }
-          }
-
-        } catch (error) {
-
-          console.error(
-            '[VOICE XP] Tick error:',
-            error
-          );
-        }
-
-      },
-      60_000
-    );
-
+    voiceTimer = setInterval(() => {
+      voiceXpTick(client).catch(error => console.error('[VOICE XP] Tick error:', error));
+    }, 60_000);
 
     console.log(
       'Voice XP System đã hoạt động.'
@@ -303,12 +129,6 @@ if (
 }
 
 
-    if (
-      message.guild.id !==
-      process.env.GUILD_ID
-    ) {
-      return;
-    }
 
 
     const key =
@@ -436,6 +256,10 @@ client.on(
       return;
     }
 
+
+    if (!interaction.inGuild()) {
+      return interaction.reply({ content: 'Lệnh này chỉ dùng trong server.', flags: 64 });
+    }
 
     const command =
       client.commands.get(

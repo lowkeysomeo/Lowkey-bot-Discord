@@ -1,3 +1,4 @@
+const { getGuildSetting } = require('./guildSettings');
 const { EmbedBuilder } = require('discord.js');
 const { getDb } = require('./database');
 const { getChatLeaderboard, resetChatMonthlyXp } = require('./levelSystem');
@@ -115,14 +116,14 @@ function formatTop(entries) {
     .join('\n');
 }
 
-async function sendMonthlyAnnouncement(client, monthKey, chatTop, voiceTop) {
-  const channelId = process.env.MONTHLY_RANK_CHANNEL_ID;
+async function sendMonthlyAnnouncement(guild, monthKey, chatTop, voiceTop) {
+  const channelId = getGuildSetting(guild.id, 'MONTHLY_RANK_CHANNEL_ID');
   if (!channelId) {
     throw new Error('Thiếu MONTHLY_RANK_CHANNEL_ID trong Railway/.env.');
   }
 
-  const channel = await client.channels.fetch(channelId);
-  if (!channel?.isTextBased()) {
+  const channel = await guild.channels.fetch(channelId);
+  if (!channel?.isTextBased() || channel.guildId !== guild.id) {
     throw new Error('MONTHLY_RANK_CHANNEL_ID không phải text channel hợp lệ.');
   }
 
@@ -164,7 +165,7 @@ async function updateMonthlyWinnerRoles(guild, chatTop, voiceTop) {
   const db = getDb();
 
   for (const config of MONTHLY_ROLE_CONFIG) {
-    const roleId = process.env[config.env];
+    const roleId = getGuildSetting(guild.id, config.env);
     if (!roleId) continue;
 
     const entries = config.source === 'chat' ? chatTop : voiceTop;
@@ -212,7 +213,7 @@ async function updateMonthlyWinnerRoles(guild, chatTop, voiceTop) {
   }
 }
 
-async function processPendingResults(client, guild) {
+async function processPendingResults(guild) {
   const db = getDb();
 
   const pending = db.prepare(`
@@ -244,12 +245,13 @@ async function processPendingResults(client, guild) {
     let rolesAssigned = Boolean(result.roles_assigned);
 
     if (!announcementMessageId) {
-      const message = await sendMonthlyAnnouncement(
-        client,
+      const channelId = getGuildSetting(guild.id, 'MONTHLY_RANK_CHANNEL_ID');
+      const message = channelId ? await sendMonthlyAnnouncement(
+        guild,
         result.month_key,
         chatTop,
         voiceTop,
-      );
+      ) : { id: 'disabled' };
 
       announcementMessageId = message.id;
 
@@ -288,32 +290,27 @@ async function processMonthlyBoundary(client) {
   running = true;
 
   try {
-    const guildId = process.env.GUILD_ID;
-    if (!guildId) return;
-
-    // Không await trước bước này: việc chốt/reset tháng diễn ra đồng bộ trong SQLite.
-    closeMonthIfNeeded(guildId);
-
-    const guild = client.guilds.cache.get(guildId) || await client.guilds.fetch(guildId);
-    if (!guild) return;
-
-    await processPendingResults(client, guild);
-  } catch (error) {
-    // XP tháng mới vẫn an toàn vì tháng cũ đã được snapshot trong SQLite trước.
-    // Bot sẽ thử lại announcement/role ở tick kế tiếp.
-    console.error('[MONTHLY] Lỗi xử lý thông báo/role tháng:', error);
+    const guilds = [...client.guilds.cache.values()];
+    const ready = [];
+    // Close every server synchronously before awaiting any Discord request.
+    for (const guild of guilds) {
+      try {
+        closeMonthIfNeeded(guild.id);
+        ready.push(guild);
+      } catch (error) {
+        console.error('[MONTHLY] Close month failed:', guild.id, error.message);
+      }
+    }
+    for (const guild of ready) {
+      try { await processPendingResults(guild); }
+      catch (error) { console.error('[MONTHLY] Announcement/roles failed:', guild.id, error.message); }
+    }
   } finally {
     running = false;
   }
 }
 
 async function startMonthlySystem(client) {
-  if (!process.env.GUILD_ID) {
-    console.warn('[MONTHLY] Thiếu GUILD_ID, monthly system không khởi động.');
-    return;
-  }
-
-  ensureMonthlyState(process.env.GUILD_ID);
 
   // Chạy ngay khi bot ready để chốt tháng cũ trước khi hệ thống hoạt động lâu.
   await processMonthlyBoundary(client);

@@ -1,17 +1,18 @@
+const { getGuildSetting } = require('./guildSettings');
 const { AttachmentBuilder } = require('discord.js');
 const { createLevelUpCard } = require('./createLevelUpCard');
 
 async function sendLevelUp(client, member, type, profile) {
     if (!member || member.user?.bot) return;
 
-  const channelId = process.env.LEVEL_CHANNEL_ID;
+  const channelId = getGuildSetting(member.guild.id, 'LEVEL_CHANNEL_ID');
 
   if (!channelId) return;
 
   try {
-    const channel = await client.channels.fetch(channelId);
+    const channel = await member.guild.channels.fetch(channelId);
 
-    if (!channel?.isTextBased()) return;
+    if (!channel?.isTextBased() || channel.guildId !== member.guild.id) return;
 
     const isVoice = type === 'voice';
 
