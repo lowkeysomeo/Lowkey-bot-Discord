@@ -4,11 +4,12 @@ const {
   Client,
   GatewayIntentBits,
   Events,
-  EmbedBuilder,
+  AttachmentBuilder,
   REST,
   Routes,
 } = require('discord.js');
 
+const { createLevelUpCard } = require("./utils/createLevelUpCard");
 const { initializeDatabase, getDatabasePath } = require('./utils/database');
 const { loadCommands } = require('./utils/loadCommands');
 const { addChatXp } = require('./utils/levelSystem');
@@ -59,7 +60,7 @@ async function deployGuildCommands() {
   console.log(`Successfully reloaded ${commandData.length} application [/] commands.`);
 }
 
-async function sendLevelUp(member, type, level) {
+async function sendLevelUp(member, type, profile) {
   const channelId = process.env.LEVEL_CHANNEL_ID;
   if (!channelId) return;
 
@@ -68,30 +69,36 @@ async function sendLevelUp(member, type, level) {
     if (!channel?.isTextBased()) return;
 
     const isVoice = type === 'voice';
-    const embed = new EmbedBuilder()
-      .setColor(0xC31822)
-      .setTitle(isVoice ? '🎙️ VOICE LEVEL UP!' : '🔥 CHAT LEVEL UP!')
-      .setDescription(
-        `${member} đã đạt **${isVoice ? 'Voice ' : ''}Level ${level}**!`,
-      )
-      .setFooter({ text: 'VietNam Legacy' })
-      .setTimestamp();
 
-    await channel.send({ embeds: [embed] });
+    const cardBuffer = await createLevelUpCard({
+      avatarUrl: member.user.displayAvatarURL({
+        extension: 'png',
+        size: 256,
+      }),
+      username: member.displayName || member.user.username,
+      level: profile.level,
+      totalXp: profile.totalXp,
+      type: isVoice ? 'voice' : 'chat',
+      minutes: isVoice ? (profile.minutes || 0) : 0,
+    });
+
+    const attachment = new AttachmentBuilder(cardBuffer, {
+      name: isVoice
+        ? 'voice-level-up.png'
+        : 'chat-level-up.png',
+    });
+
+    await channel.send({
+      content: isVoice
+        ? `🎙️ Chúc mừng ${member} đã đạt **Voice Level ${profile.level}**!`
+        : `🎉 Chúc mừng ${member} đã đạt **Chat Level ${profile.level}**!`,
+      files: [attachment],
+    });
+
   } catch (error) {
-    console.error('[LEVEL UP] Không gửi được thông báo:', error.message);
+    console.error('[LEVEL UP CARD] Không gửi được thông báo:', error);
   }
 }
-
-client.once(Events.ClientReady, async (readyClient) => {
-  console.log(`Ready! Logged in as ${readyClient.user.tag}`);
-  console.log(`[DB] ${getDatabasePath()}`);
-
-  try {
-    await deployGuildCommands();
-  } catch (error) {
-    console.error('[DEPLOY] Lỗi reload slash commands:', error);
-  }
 
   await startMonthlySystem(client);
 
@@ -124,9 +131,9 @@ client.once(Events.ClientReady, async (readyClient) => {
           );
 
           if (result.leveledUp) {
-            await syncVoiceLevelRole(member, result.newLevel);
-            await sendLevelUp(member, 'voice', result.newLevel);
-          }
+            await syncLevelRole(member, result.newLevel);
+            await sendLevelUp(member, 'chat', result.profile);
+}
 
           const boosterText = hasBoosterRole(member) ? ' [BOOSTER +10%]' : '';
           console.log(
@@ -140,7 +147,7 @@ client.once(Events.ClientReady, async (readyClient) => {
   }, 60_000);
 
   console.log('Voice XP System đã hoạt động.');
-});
+
 
 client.on(Events.MessageCreate, async (message) => {
   if (!message.guild || message.author.bot) return;
@@ -165,9 +172,9 @@ client.on(Events.MessageCreate, async (message) => {
     );
 
     if (result.leveledUp) {
-      await syncLevelRole(member, result.newLevel);
-      await sendLevelUp(member, 'chat', result.newLevel);
-    }
+  await syncVoiceLevelRole(member, result.newLevel);
+  await sendLevelUp(member, 'voice', result.profile);
+}
   } catch (error) {
     console.error('[CHAT XP] Error:', error);
   }
