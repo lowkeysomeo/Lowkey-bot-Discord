@@ -3,36 +3,81 @@ const {
   PermissionFlagsBits,
 } = require('discord.js');
 
-const { setChatLevel } = require('../../utils/levelSystem');
-const { syncLevelRole } = require('../../utils/levelRoles');
-const { formatXp } = require('../../utils/levelMath');
+const {
+  getChatProfile,
+  setChatLevel,
+} = require('../../utils/levelSystem');
+
+const {
+  syncLevelRole,
+} = require('../../utils/levelRoles');
+
+const {
+  formatXp,
+} = require('../../utils/levelMath');
+
+const {
+  sendLevelUp,
+} = require('../../utils/sendLevelUp');
 
 module.exports.data = new SlashCommandBuilder()
   .setName('setlevel')
   .setDescription('Admin: đặt Chat Level cho thành viên')
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  .setDefaultMemberPermissions(
+    PermissionFlagsBits.Administrator
+  )
   .addUserOption((option) =>
     option
       .setName('user')
       .setDescription('Thành viên')
-      .setRequired(true),
+      .setRequired(true)
   )
   .addIntegerOption((option) =>
     option
       .setName('level')
       .setDescription('Level mới')
       .setMinValue(1)
-      .setRequired(true),
+      .setRequired(true)
   );
 
 module.exports.execute = async (interaction) => {
-  const user = interaction.options.getUser('user', true);
-  const level = interaction.options.getInteger('level', true);
+  const user =
+    interaction.options.getUser('user', true);
 
-  const member = await interaction.guild.members.fetch(user.id);
-  const profile = setChatLevel(interaction.guild.id, user.id, level);
+  const level =
+    interaction.options.getInteger('level', true);
 
-  await syncLevelRole(member, profile.level);
+  const member =
+    await interaction.guild.members.fetch(user.id);
+
+  // Lưu level cũ trước khi thay đổi
+  const before =
+    getChatProfile(
+      interaction.guild.id,
+      user.id
+    );
+
+  const profile =
+    setChatLevel(
+      interaction.guild.id,
+      user.id,
+      level
+    );
+
+  await syncLevelRole(
+    member,
+    profile.level
+  );
+
+  // Chỉ thông báo nếu level mới CAO HƠN level cũ
+  if (profile.level > before.level) {
+    await sendLevelUp(
+      interaction.client,
+      member,
+      'chat',
+      profile
+    );
+  }
 
   return interaction.reply({
     content:
