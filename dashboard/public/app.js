@@ -15,8 +15,8 @@ async function api(route, data) {
   return result;
 }
 const brand = `<div class="brand"><span class="brand-icon">V</span><span>VietNam Legacy<small>SERVER DASHBOARD</small></span></div>`;
-const labels = { overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp', monthly: 'Top tháng', confession: 'Confession', leaderboard: 'Bảng xếp hạng' };
-const icons = { overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', leaderboard: '≋' };
+const labels = { overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp', monthly: 'Top tháng', confession: 'Confession', leaderboard: 'Bảng xếp hạng', test: 'Gửi thử' };
+const icons = { overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', leaderboard: '≋', test: '▷' };
 function render() {
   if (!state.session?.user) {
     app.innerHTML = `<div class="login"><section class="login-art">${brand}<div class="login-copy"><span class="eyebrow">MỘT NƠI. CẢ CỘNG ĐỒNG.</span><h1>Server của bạn.<br><span>Theo cách của bạn.</span></h1><p>Chăm chút cộng đồng cùng VietNam Legacy. Quản lý level, role thưởng và những câu chuyện ẩn danh trong một nơi.</p><div class="login-pills"><span>↗ Level & Role</span><span>♡ Confession</span><span>≋ Bảng xếp hạng</span></div></div><p class="login-foot">VIETNAM LEGACY · DÀNH CHO CỘNG ĐỒNG CỦA BẠN</p></section><section class="login-panel"><div class="login-box"><span class="badge purple">BẢNG ĐIỀU KHIỂN</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng Discord để chọn server và bắt đầu quản lý.</p>${state.session?.configured ? '<a class="primary" href="/auth/discord">Đăng nhập bằng Discord <span>↗</span></a>' : '<button class="primary" disabled>Đăng nhập Discord</button><div class="error">Dashboard đang chờ hoàn tất kết nối đăng nhập Discord. Chủ bot cần cấu hình OAuth2 để mở đăng nhập.</div>'}<p class="subtle">Chỉ chủ server và thành viên có quyền Administrator được quản lý cấu hình.</p></div></section></div>`;
@@ -28,6 +28,8 @@ function render() {
   document.querySelectorAll('[data-guild]').forEach(button => { button.onclick = () => selectGuild(button.dataset.guild); });
   document.querySelector('#logout').onclick = async () => { if (!canLeave()) return; try { await api('/api/logout', {}); location.href = '/'; } catch (error) { notify(error.message); } };
   const form = document.querySelector('#settings-form');
+  const testForm = document.querySelector('#test-form');
+  if (testForm) testForm.onsubmit = sendTest;
   if (form) {
     const changed = () => { state.dirty = true; document.querySelector('#save-status').textContent = 'Bạn có thay đổi chưa lưu.'; updateNoticePreview(); };
     form.oninput = changed; form.onchange = changed; form.onsubmit = save;
@@ -49,6 +51,7 @@ function heading(eyebrow, title, subtitle, right = '') { return `<div class="hea
 function content() {
   if (!state.guild) return heading('KHÔNG GIAN QUẢN LÝ', 'Chọn server của bạn', 'Các server mà bạn sở hữu hoặc có quyền Administrator.') + (state.guilds.length ? `<div class="server-grid">${state.guilds.map(guild => `<article class="server-card">${guild.icon ? `<img class="server-avatar" src="${h(guild.icon)}" alt="">` : `<div class="server-avatar">${h(guild.name.slice(0, 1))}</div>`}<h2>${h(guild.name)}</h2><p>${guild.installed ? 'VietNam Legacy đã sẵn sàng.' : 'Thêm VietNam Legacy để bắt đầu.'}</p>${guild.installed ? `<button class="primary" data-guild="${h(guild.id)}">Quản lý server →</button>` : `<a class="secondary" href="${h(guild.invite)}" target="_blank" rel="noopener noreferrer">Mời bot vào server ↗</a>`}</article>`).join('')}</div>` : '<div class="card empty"><h2>Chưa có server để quản lý</h2><p>Bạn cần là chủ server hoặc có quyền Administrator.</p><a class="secondary" href="/">Tải lại trang để kiểm tra</a></div>');
   if (!state.data) return '<div class="card empty"><h2>Chưa tải được dữ liệu</h2><p>Chọn lại server để thử lại.</p></div>';
+  if (state.page === 'test') return testPage();
   if (state.page === 'level') return levelPage();
   if (['xp', 'notifications', 'monthly'].includes(state.page)) return customPage(state.page);
   if (state.page === 'confession') return confessionPage();
@@ -129,6 +132,40 @@ function updateNoticePreview() {
   document.querySelector('#notice-preview-chat').textContent = renderText('chatNoticeText', 'CHAT');
   document.querySelector('#notice-preview-voice').textContent = renderText('voiceNoticeText', 'VOICE');
   document.querySelector('#notice-preview').style.borderColor = document.querySelector('[name="option_noticeColor"]').value;
+}
+function testPage() {
+  return heading('XEM THÔNG BÁO TRÊN DISCORD', 'Gửi thử', 'Dùng cấu hình đã lưu của server. Hãy lưu các chỉnh sửa trước khi gửi thử.') +
+    '<form id="test-form">' + panel('Chọn bản thử và nơi nhận', 'Bản thử có nhãn TEST và không ping thành viên.',
+      '<div class="form-grid"><div class="field"><label for="test-type">Loại thông báo</label><select id="test-type" name="type"><option value="chat">Lên cấp Chat</option><option value="voice">Lên cấp Voice</option><option value="monthly">Vinh danh tháng + ảnh Top 10</option><option value="confession">Confession</option></select></div>' +
+      '<div class="field"><label for="test-channel">Kênh nhận bản thử</label><select id="test-channel" name="channelId" required><option value="">Chọn kênh…</option>' + state.data.channels.map(c => '<option value="' + h(c.id) + '"># ' + h(c.name) + '</option>').join('') + '</select></div>' +
+      '<div class="field"><label for="test-level">Level mẫu (Chat/Voice)</label><input id="test-level" name="level" type="number" min="1" max="100000" value="25" required></div>' +
+      '<div class="field"><label for="test-confession">Nội dung mẫu (Confession)</label><textarea id="test-confession" name="content" maxlength="4000" rows="3">Đây là confession gửi thử từ dashboard. Chúc cộng đồng luôn vui vẻ!</textarea></div></div>') +
+    '<div class="note">Thông báo lên cấp dùng tên/avatar của bạn và level mẫu. Bảng tháng dùng 10 thành viên minh họa mỗi bảng. Gửi thử không đổi XP, không cấp/gỡ role và không tăng số confession. Nút thích chỉ để xem giao diện, không tạo luồng bình luận. Ảnh tháng xuất hiện khi bạn bật tùy chọn kèm ảnh. Tối đa 6 lần/phút.</div>' +
+    '<div class="savebar"><span id="test-status" role="status">Bản thử sẽ được đăng vào kênh bạn chọn.</span><button type="submit" class="primary">Gửi bản thử</button></div><div id="test-result"></div></form>';
+}
+async function sendTest(event) {
+  event.preventDefault();
+  if (state.saving) return;
+  const form = event.currentTarget, values = Object.fromEntries(new FormData(form));
+  const button = form.querySelector('button[type="submit"]'), status = form.querySelector('#test-status');
+  const payload = { type: values.type, channelId: values.channelId };
+  if (['chat', 'voice'].includes(values.type)) payload.level = Number(values.level);
+  if (values.type === 'confession') payload.content = values.content;
+  state.saving = true;
+  form.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = true; });
+  button.textContent = 'Đang gửi…'; status.textContent = 'Đang tạo và gửi bản thử…';
+  form.querySelector('#test-result').innerHTML = '';
+  try {
+    const result = await api(`/api/guilds/${state.guild.id}/test`, payload);
+    status.textContent = 'Đã gửi bản thử thành công.';
+    form.querySelector('#test-result').innerHTML = '<a class="secondary" href="' + h(result.messageUrl) + '" target="_blank" rel="noopener noreferrer">Mở tin nhắn trên Discord ↗</a>';
+    notify('Đã gửi bản thử vào kênh bạn chọn.');
+  } catch (error) { status.textContent = error.message; notify(error.message); }
+  finally {
+    state.saving = false;
+    form.querySelectorAll('input,textarea,select,button').forEach(control => { control.disabled = false; });
+    button.textContent = 'Gửi bản thử';
+  }
 }
 function leaderboardPage() {
   const rows = state.data.leaderboard;

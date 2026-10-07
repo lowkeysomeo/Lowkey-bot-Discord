@@ -105,7 +105,7 @@ function closeMonthIfNeeded(guildId) {
   return monthToClose;
 }
 
-function formatTop(entries, guildId, type, options) {
+function formatTop(entries, guildId, type, options, preview = false) {
   if (!entries.length) return 'Chưa có dữ liệu trong tháng này.';
 
   const medals = ['🥇', '🥈', '🥉'];
@@ -116,18 +116,18 @@ function formatTop(entries, guildId, type, options) {
       const roleId = getGuildSetting(guildId, `MONTHLY_${type}_TOP${index + 1}_ROLE_ID`);
       const reward = !options.monthlyRoles ? 'Trao role tháng đang tắt.'
         : roleId ? `🎁 **Role vinh danh:** <@&${roleId}>` : '🎖️ Vinh danh Top tháng · Chưa cấu hình role thưởng.';
-      return `${prefix} **TOP ${index + 1}** — <@${entry.userId}>\n✦ **${formatXp(entry.score)} XP tháng**\n${reward}`;
+      return `${prefix} **TOP ${index + 1}** — ${preview ? entry.username : `<@${entry.userId}>`}\n✦ **${formatXp(entry.score)} XP tháng**\n${reward}`;
     })
     .join('\n\n');
 }
 
-async function sendMonthlyAnnouncement(guild, monthKey, chatTop, voiceTop) {
+async function sendMonthlyAnnouncement(guild, monthKey, chatTop, voiceTop, preview = null) {
   const channelId = getGuildSetting(guild.id, 'MONTHLY_RANK_CHANNEL_ID');
-  if (!channelId) {
+  if (!channelId && !preview) {
     throw new Error('Thiếu MONTHLY_RANK_CHANNEL_ID trong Railway/.env.');
   }
 
-  const channel = await guild.channels.fetch(channelId);
+  const channel = preview?.channel || await guild.channels.fetch(channelId);
   if (!channel?.isTextBased() || channel.guildId !== guild.id) {
     throw new Error('MONTHLY_RANK_CHANNEL_ID không phải text channel hợp lệ.');
   }
@@ -141,19 +141,19 @@ async function sendMonthlyAnnouncement(guild, monthKey, chatTop, voiceTop) {
     .addFields(
       {
         name: '💬 ĐẠI SẢNH VINH DANH — TOP 3 CHAT',
-        value: formatTop(chatTop, guild.id, 'CHAT', options),
+        value: formatTop(chatTop, guild.id, 'CHAT', options, Boolean(preview)),
         inline: false,
       },
       {
         name: '🎙️ ĐẠI SẢNH VINH DANH — TOP 3 VOICE',
-        value: formatTop(voiceTop, guild.id, 'VOICE', options),
+        value: formatTop(voiceTop, guild.id, 'VOICE', options, Boolean(preview)),
         inline: false,
       },
     )
     .setFooter({ text: 'Role vinh danh được chuyển theo kết quả mỗi tháng • XP tổng và level được giữ nguyên.' })
     .setTimestamp();
 
-  const winners = [...new Set([...chatTop.slice(0, 3), ...voiceTop.slice(0, 3)].map(entry => entry.userId))];
+  const winners = preview ? [] : [...new Set([...chatTop.slice(0, 3), ...voiceTop.slice(0, 3)].map(entry => entry.userId))];
   const files = [];
   if (options.monthlyImage) {
     try {
@@ -172,7 +172,7 @@ async function sendMonthlyAnnouncement(guild, monthKey, chatTop, voiceTop) {
     }
   }
   return channel.send({
-    content: winners.length ? `🎊 **Xin chúc mừng những gương mặt xuất sắc của ${monthLabel(monthKey)}!**\n${winners.map(id => `<@${id}>`).join(' ')}` : '🏆 Đại sảnh vinh danh tháng',
+    content: preview ? '🧪 **TEST — Vinh danh tháng · Dữ liệu minh họa, không trao role hoặc chốt tháng.**' : winners.length ? `🎊 **Xin chúc mừng những gương mặt xuất sắc của ${monthLabel(monthKey)}!**\n${winners.map(id => `<@${id}>`).join(' ')}` : '🏆 Đại sảnh vinh danh tháng',
     embeds: [embed],
     files,
     allowedMentions: { parse: [], users: winners },
@@ -356,4 +356,5 @@ module.exports = {
   processMonthlyBoundary,
   getCurrentMonthKey,
   monthLabel,
+  sendMonthlyAnnouncement,
 };

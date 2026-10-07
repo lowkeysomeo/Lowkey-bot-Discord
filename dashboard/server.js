@@ -11,6 +11,7 @@ const { VOICE_ROLE_LEVELS } = require('../utils/voiceRoles');
 const { customizationData, validateCustomization } = require('./customization');
 const { getOptions, saveOptions, saveRewards, updateLegacyReward } = require('../utils/customization');
 const { replaceXpExclusions } = require('../utils/xpExclusions');
+const { sendTestMessage } = require('./testMessages');
 
 const fields = [
   ['LEVEL_CHANNEL_ID', 'Kênh thông báo lên level', 'channel'],
@@ -165,9 +166,14 @@ function createDashboard(client, options = {}) {
             icon: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128` : null,
             installed: client.guilds.cache.has(guild.id), invite: invite(guild.id) })));
         }
-        const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard)$/.exec(route);
+        const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test)$/.exec(route);
         if (!match) fail(404, 'Không tìm thấy trang.');
         const guild = await managedGuild(match[1], value);
+        if (match[2] === 'test') {
+          if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
+          rateLimit(`test:${guild.id}:${value.user.id}`, 6);
+          return json(res, 200, await sendTestMessage(guild, value.user.id, await body(req)));
+        }
         if (match[2] === 'leaderboard' && req.method === 'GET') {
           const rows = getDb().prepare(`SELECT user_id, SUM(chat_xp) AS chatXp, SUM(voice_xp) AS voiceXp,
             SUM(chat_xp + voice_xp) AS totalXp FROM (

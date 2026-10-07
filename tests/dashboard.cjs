@@ -6,10 +6,13 @@ const { getGuildSetting } = require('../utils/guildSettings');
 const { getDb } = require('../utils/database');
 const confession = require('../utils/confessionStore');
 let owner = true;
-const channel = { id: '333', name: 'level', type: ChannelType.GuildText, guildId: '111', permissionsFor: () => ({ has: () => true }) };
-const guild = { id: '111', memberCount: 20, channels: { fetch: async () => new Collection([['333', channel]]) },
+let canSend = true;
+const testPosts = [];
+const channel = { id: '333', name: 'level', type: ChannelType.GuildText, guildId: '111', isTextBased: () => true, permissionsFor: () => ({ has: () => canSend }),
+  send: async payload => { testPosts.push(payload); return { id: '555' }; } };
+const guild = { id: '111', name: 'Test server', memberCount: 20, channels: { fetch: async id => id ? (id === '333' ? channel : null) : new Collection([['333', channel]]) },
   roles: { fetch: async () => new Collection([['777', { id: '777', name: 'Reward', managed: false }], ['888', { id: '888', name: 'Managed', managed: true }]]) }, members: {
-    fetch: async id => ({ displayName: `Member ${id}`, user: { bot: false } }),
+    fetch: async id => ({ id, guild, displayName: `Member ${id}`, user: { bot: false, username: 'Tester' } }),
     fetchMe: async () => ({ permissions: { has: () => true }, roles: { highest: { comparePositionTo: () => 1 } } }),
   } };
 const client = { isReady: () => true, guilds: { cache: new Collection([['111', guild]]) } };
@@ -91,7 +94,33 @@ async function main() {
     assert.equal(require('../utils/customization').getOptions('222').chatMin, 10);
     assert.equal((await customPost({ options: { chatMin: 99 }, exclusions: ['999'] })).status, 400);
     assert.equal(require('../utils/customization').getOptions('111').chatMin, 7, 'Invalid batch cannot partially change settings');
+    const testPost = async data => request('/api/guilds/111/test', { method: 'POST', headers: postHeaders, body: JSON.stringify(data) });
+    assert.equal((await request('/api/guilds/111/test', { method: 'POST', headers, body: '{}' })).status, 403);
+    assert.equal((await testPost({ type: 'chat', channelId: '999' })).status, 400);
+    assert.equal((await testPost({ type: 'unknown', channelId: '333' })).status, 400);
+    canSend = false;
+    assert.equal((await testPost({ type: 'chat', channelId: '333' })).status, 400);
+    canSend = true;
+    const beforeXp = getDb().prepare('SELECT total_xp FROM chat_levels WHERE guild_id = ? AND user_id = ?').get('111', userId).total_xp;
+    const beforeConfession = confession.getConfig('111').counter;
+    const testReply = await testPost({ type: 'chat', channelId: '333', level: 42 });
+    assert.equal(testReply.status, 200);
+    assert.equal((await testReply.json()).messageUrl, 'https://discord.com/channels/111/333/555');
+    assert.match(testPosts.at(-1).content, /TEST/);
+    assert.match(testPosts.at(-1).content, /42/);
+    assert.deepEqual(testPosts.at(-1).allowedMentions.users, []);
+    assert.equal((await testPost({ type: 'monthly', channelId: '333' })).status, 200);
+    assert.equal(testPosts.at(-1).files.length, 1);
+    assert.match(testPosts.at(-1).embeds[0].data.fields[0].value, /Thành viên mẫu Chat/);
+    assert.deepEqual(testPosts.at(-1).allowedMentions.users, []);
+    assert.equal((await testPost({ type: 'confession', channelId: '333', content: 'Test confession' })).status, 200);
+    assert.equal(testPosts.at(-1).components[0].components[0].data.disabled, true);
+    assert.equal(confession.getConfig('111').counter, beforeConfession);
+    assert.equal(getDb().prepare('SELECT total_xp FROM chat_levels WHERE guild_id = ? AND user_id = ?').get('111', userId).total_xp, beforeXp);
+    assert.equal((await testPost({ type: 'confession', channelId: '333' })).status, 429);
+    assert.equal(testPosts.length, 3);
     owner = false;
+    assert.equal((await testPost({ type: 'chat', channelId: '333' })).status, 403);
     assert.equal((await request('/api/guilds/111/settings', { method: 'POST', headers: postHeaders, body: payload })).status, 403, 'Permissions are checked again after revocation');
     assert.equal((await request('/api/logout', { method: 'POST', headers: postHeaders, body: '{}' })).status, 200);
     assert.equal((await request('/api/guilds', { headers })).status, 401);

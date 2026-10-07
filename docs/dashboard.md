@@ -11,6 +11,7 @@ Booster, role top tháng và xem bảng tổng XP. Cấu hình được áp dụ
 - **Thông báo lên cấp**: chọn kênh chung hoặc riêng cho Chat/Voice, kiểu thẻ ảnh/embed/văn bản, màu, tiêu đề, nội dung và việc nhắc tên thành viên.
 - **Top tháng**: bật/tắt tổng kết và chuyển role, chỉnh tiêu đề, nội dung, màu và các role Top 1/2/3.
 - **Confession**: bật/tắt, cooldown, độ dài, luồng bình luận, nút thích, tiêu đề, chân trang và màu bài đăng.
+- **Gửi thử**: chọn kênh nhận và gửi bản TEST theo cấu hình đã lưu. Hỗ trợ Chat/Voice với level mẫu, bảng tháng với 10 người minh họa mỗi bảng và Confession với nội dung mẫu. Bản thử không ping, không ghi XP, không trao role, không chốt tháng và không tăng số confession; nút thích bị vô hiệu hóa và không tạo luồng. Chỉ admin/owner được dùng, có CSRF và giới hạn 6 lần/phút theo người dùng/server.
 
 Các lựa chọn được lưu riêng theo từng server trong SQLite và có hiệu lực ngay sau khi bấm **Lưu thay đổi**.
 
