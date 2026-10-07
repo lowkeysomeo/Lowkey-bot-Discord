@@ -170,7 +170,8 @@ function createDashboard(client, options = {}) {
             SUM(chat_xp + voice_xp) AS totalXp FROM (
               SELECT user_id, total_xp AS chat_xp, 0 AS voice_xp FROM chat_levels WHERE guild_id = ?
               UNION ALL SELECT user_id, 0, total_xp FROM voice_levels WHERE guild_id = ?
-            ) GROUP BY user_id ORDER BY totalXp DESC, user_id LIMIT 20`).all(guild.id, guild.id);
+            ) WHERE length(user_id) BETWEEN 17 AND 20 AND user_id NOT GLOB '*[^0-9]*'
+            GROUP BY user_id ORDER BY totalXp DESC, user_id LIMIT 20`).all(guild.id, guild.id);
           const members = await Promise.all(rows.map(async row => {
             const member = await guild.members.fetch(row.user_id).catch(() => null);
             return { ...row, name: member?.displayName || `Thành viên ${row.user_id}`, bot: member?.user.bot || false };
@@ -183,7 +184,7 @@ function createDashboard(client, options = {}) {
         if (req.method === 'GET') {
           const current = Object.fromEntries(fields.map(([key]) => [key, getGuildSetting(guild.id, key)]));
           const conf = confession.getConfig(guild.id);
-          const count = getDb().prepare('SELECT COUNT(DISTINCT user_id) AS count FROM (SELECT user_id FROM chat_levels WHERE guild_id = ? UNION SELECT user_id FROM voice_levels WHERE guild_id = ?)').get(guild.id, guild.id).count;
+          const count = getDb().prepare("SELECT COUNT(DISTINCT user_id) AS count FROM (SELECT user_id FROM chat_levels WHERE guild_id = ? UNION SELECT user_id FROM voice_levels WHERE guild_id = ?) WHERE length(user_id) BETWEEN 17 AND 20 AND user_id NOT GLOB '*[^0-9]*'").get(guild.id, guild.id).count;
           return json(res, 200, { settings: current, fields, confessionChannel: conf?.channel_id || null,
             stats: { members: guild.memberCount, tracked: count, confessions: conf?.counter || 0 },
             channels: [...channels.values()].filter(channel => channel?.type === ChannelType.GuildText).map(channel => ({ id: channel.id, name: channel.name })),

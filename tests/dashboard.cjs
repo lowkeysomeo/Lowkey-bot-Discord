@@ -8,7 +8,10 @@ const confession = require('../utils/confessionStore');
 let owner = true;
 const channel = { id: '333', name: 'level', type: ChannelType.GuildText, guildId: '111', permissionsFor: () => ({ has: () => true }) };
 const guild = { id: '111', memberCount: 20, channels: { fetch: async () => new Collection([['333', channel]]) },
-  roles: { fetch: async () => new Collection() }, members: { fetchMe: async () => ({ permissions: { has: () => true }, roles: { highest: { comparePositionTo: () => 1 } } }) } };
+  roles: { fetch: async () => new Collection() }, members: {
+    fetch: async id => ({ displayName: `Member ${id}`, user: { bot: false } }),
+    fetchMe: async () => ({ permissions: { has: () => true }, roles: { highest: { comparePositionTo: () => 1 } } }),
+  } };
 const client = { isReady: () => true, guilds: { cache: new Collection([['111', guild]]) } };
 const env = { CLIENT_ID: '999', DISCORD_CLIENT_SECRET: 'test-only-secret', DASHBOARD_URL: 'http://127.0.0.1:3000' };
 const mockFetch = async url => {
@@ -45,6 +48,18 @@ async function main() {
     assert(!JSON.stringify(info).includes('test-only-secret'));
     const data = await (await request('/api/guilds/111/settings', { headers })).json();
     assert.equal(data.channels[0].id, '333');
+    const userId = '123456789012345678';
+    getDb().prepare('INSERT INTO chat_levels (guild_id, user_id, total_xp) VALUES (?, ?, ?)').run('111', userId, 50);
+    getDb().prepare('INSERT INTO voice_levels (guild_id, user_id, total_xp) VALUES (?, ?, ?)').run('111', userId, 25);
+    getDb().prepare('INSERT INTO chat_levels (guild_id, user_id, total_xp) VALUES (?, ?, ?)').run('222', userId, 999999);
+    const insertLegacy = getDb().prepare('INSERT INTO chat_levels (guild_id, user_id, total_xp) VALUES (?, ?, ?)');
+    for (let i = 0; i < 21; i++) insertLegacy.run('111', `222:${userId}${i}`, 100000);
+    const ranked = await (await request('/api/guilds/111/leaderboard', { headers })).json();
+    assert.equal(ranked.length, 1, 'Malformed legacy IDs are excluded before applying the top-20 limit');
+    assert.equal(ranked[0].user_id, userId);
+    assert.equal(ranked[0].totalXp, 75, 'Chat/Voice totals remain isolated by server');
+    const refreshed = await (await request('/api/guilds/111/settings', { headers })).json();
+    assert.equal(refreshed.stats.tracked, 1, 'Legacy keys do not inflate tracked member counts');
     const postHeaders = { ...headers, 'Content-Type': 'application/json', origin: env.DASHBOARD_URL, 'X-CSRF-Token': info.csrf };
     const payload = JSON.stringify({ settings: { LEVEL_CHANNEL_ID: '333' }, confessionChannel: '333' });
     assert.equal((await request('/api/guilds/111/settings', { method: 'POST', headers, body: payload })).status, 403);
@@ -62,7 +77,7 @@ async function main() {
     const html = await request('/');
     assert.match(html.headers.get('content-security-policy'), /frame-ancestors 'none'/);
     assert.equal(html.status, 200);
-    console.log('PASS: OAuth state/cookie binding, state replay rejection, session privacy, CSRF/origin checks, per-server authorization, permission revocation, config validation/persistence, logout, security headers');
+    console.log('PASS: OAuth state/cookie binding, state replay rejection, session privacy, CSRF/origin checks, per-server authorization, permission revocation, config validation/persistence, leaderboard legacy filtering and isolation, logout, security headers');
   } finally { await new Promise(resolve => server.close(resolve)); getDb().close(); }
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
