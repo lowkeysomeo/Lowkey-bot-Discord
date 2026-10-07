@@ -92,22 +92,22 @@ class MusicSystem {
       await this.audio.entersState(session.connection, this.audio.VoiceConnectionStatus.Ready, 20_000);
       if (!this.active(session) || session.current !== track) return;
       track.audio = this.media.openAudio(track);
-      track.audio.onError(() => this.fail(session, track));
+      track.audio.onError(error => this.fail(session, track, error));
       const resource = this.audio.createAudioResource(track.audio.stream, { inputType: this.audio.StreamType.Raw });
       session.player.play(resource);
       await this.audio.entersState(session.player, this.audio.AudioPlayerStatus.Playing, 25_000);
       if (this.active(session) && session.current === track) await this.tell(session, `🎶 Đang phát: **${label(track)}**`);
-    } catch {
+    } catch (error) {
       if (session.connection.state.status !== this.audio.VoiceConnectionStatus.Ready && this.active(session)) {
         await this.tell(session, '❌ Không kết nối được voice. Kiểm tra quyền Kết nối/Nói của bot và thử lại.');
         this.destroy(session);
-      } else this.fail(session, track);
+      } else this.fail(session, track, error);
     }
   }
 
-  fail(session, track) {
+  fail(session, track, error) {
     if (!track || !this.active(session) || session.current !== track) return;
-    void this.tell(session, `❌ Không phát được **${label(track)}**. Nguồn nhạc có thể đang chặn truy cập; thử bài/link khác.`);
+    void this.tell(session, `❌ Không phát được **${label(track)}**. ${source.sourceErrorMessage(error)}`);
     this.skip(session);
   }
 

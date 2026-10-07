@@ -2,6 +2,7 @@
 
 const { PermissionFlagsBits, ChannelType } = require('discord.js');
 const { music, label } = require('./musicSystem');
+const { sourceErrorMessage } = require('./musicSource');
 
 function musicCommand(name, description) {
   return { data: { name, description, type: 1,
@@ -42,7 +43,7 @@ function musicCommand(name, description) {
     } catch (error) {
       const known = /^(Nhập|Link|Chỉ hỗ trợ|Không tìm|Bạn |Bot |Hãy |Kênh |Hàng |Chưa |Không có|Bài hát)/.test(error.message);
       if (!known) console.error('[MUSIC] Không tải được nguồn nhạc:', error.code || error.name);
-      await interaction.editReply({ content: `❌ ${known ? error.message : 'Không tải được bài hát. Nguồn nhạc có thể đang chặn truy cập; thử link/bài khác.'}`,
+      await interaction.editReply({ content: `❌ ${known ? error.message : sourceErrorMessage(error)}`,
         allowedMentions: { parse: [] } });
     }
   } };

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { MusicSystem } = require('../utils/musicSystem');
-const { normalizeQuery, sourceFlags } = require('../utils/musicSource');
+const { normalizeQuery, sourceFlags, sourceErrorMessage } = require('../utils/musicSource');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function fixture() {
@@ -58,6 +58,13 @@ async function main() {
     assert.match(sourceFlags(query).extractorArgs, /player_skip=webpage,configs/);
   }
   assert.equal(sourceFlags('https://soundcloud.com/example/song').extractorArgs, undefined);
+  const proxyEnv = { YOUTUBE_PROXY_URL: 'http://private-user:private-pass@proxy.example:8080' };
+  assert.equal(sourceFlags('https://youtu.be/FN7ALfpGxiI', proxyEnv).proxy, proxyEnv.YOUTUBE_PROXY_URL + '/');
+  assert.equal(sourceFlags('https://soundcloud.com/example/song', proxyEnv).proxy, undefined);
+  assert.throws(() => sourceFlags('https://youtu.be/FN7ALfpGxiI', { YOUTUBE_PROXY_URL: 'socks5://proxy.example' }));
+  assert.match(sourceErrorMessage({ stderr: 'Sign in to confirm you are not a bot' }), /xác minh/);
+  assert.match(sourceErrorMessage({ stderr: 'Private video' }), /cần đăng nhập/);
+  assert(!sourceErrorMessage({ message: proxyEnv.YOUTUBE_PROXY_URL }).includes('private-pass'));
   for (const input of ['http://127.0.0.1/a', 'file:///etc/passwd', 'https://youtube.com.evil.test/a',
     'https://user:secret@youtube.com/a', 'https://youtube.com:8443/a', '', 'x'.repeat(501)]) {
     assert.throws(() => normalizeQuery(input));

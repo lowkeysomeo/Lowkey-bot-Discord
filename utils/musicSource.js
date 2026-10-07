@@ -38,11 +38,37 @@ function normalizeQuery(input) {
 const flags = { noConfig: true, noPlaylist: true, noWarnings: true, socketTimeout: 10,
   retries: 1, extractorRetries: 1, jsRuntimes: `node:${process.execPath}` };
 
-function sourceFlags(target) {
+function youtubeProxy(env = process.env) {
+  if (!env.YOUTUBE_PROXY_URL) return null;
+  let url;
+  try { url = new URL(env.YOUTUBE_PROXY_URL); } catch { throw new Error('Cấu hình proxy YouTube không hợp lệ.'); }
+  // FFmpeg and yt-dlp must use the same egress address; both support HTTP CONNECT.
+  if (url.protocol !== 'http:' || url.pathname !== '/' || url.search || url.hash) {
+    throw new Error('Proxy YouTube phải là HTTP CONNECT, dạng http://user:password@host:port.');
+  }
+  return url.href;
+}
+
+function sourceFlags(target, env = process.env) {
   const youtube = target.startsWith('ytsearch1:') || /^https:\/\/(?:[^/]+\.)?youtube\.com\//.test(target) || target.startsWith('https://youtu.be/');
   // The web client currently requests sign-in on server IPs. Android exposes
   // a combined audio/video fallback; FFmpeg below reads only its audio track.
-  return youtube ? { ...flags, extractorArgs: 'youtube:player_client=android;player_skip=webpage,configs' } : flags;
+  if (!youtube) return flags;
+  const proxy = youtubeProxy(env);
+  return { ...flags, extractorArgs: 'youtube:player_client=android;player_skip=webpage,configs',
+    ...(proxy ? { proxy } : {}) };
+}
+
+function sourceErrorMessage(error) {
+  const detail = String(error?.stderr || error?.message || '');
+  if (/sign in to confirm|not a bot|HTTP Error 429/i.test(detail)) {
+    return 'YouTube đang yêu cầu xác minh với mạng của máy chủ bot. Cần cấu hình proxy YouTube hoạt động; hãy dùng SoundCloud trong lúc chờ.';
+  }
+  if (/private video|members.only|age.restricted|login.required|video unavailable/i.test(detail)) {
+    return 'Video này không khả dụng hoặc cần đăng nhập. Hãy chọn video công khai khác.';
+  }
+  if (/Cấu hình proxy|Proxy YouTube/.test(detail)) return 'Cấu hình proxy YouTube chưa hợp lệ. Quản trị viên cần kiểm tra YOUTUBE_PROXY_URL trên Railway.';
+  return 'Không tải được âm thanh từ nguồn này. Thử lại sau hoặc chọn bài khác.';
 }
 
 async function resolveTrack(input) {
@@ -82,7 +108,9 @@ function openAudio(track) {
       return value && !/[\r\n]/.test(value) ? [`${name}: ${value}\r\n`] : [];
     }).join('');
     // FFmpeg streams the CDN directly: no song files or HLS fragment files on disk.
+    const proxy = sourceFlags(track.url).proxy;
     encoder = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-rw_timeout', '15000000',
+      ...(proxy ? ['-http_proxy', proxy] : []),
       ...(headers ? ['-headers', headers] : []), '-i', info.url,
       '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'], { windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore'] });
@@ -103,4 +131,4 @@ function openAudio(track) {
   } };
 }
 
-module.exports = { normalizeQuery, resolveTrack, openAudio, sourceFlags };
+module.exports = { normalizeQuery, resolveTrack, openAudio, sourceFlags, sourceErrorMessage };

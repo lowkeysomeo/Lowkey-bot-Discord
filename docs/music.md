@@ -27,3 +27,5 @@ khi cài trên Windows: `$env:YOUTUBE_DL_SKIP_PYTHON_CHECK='1'; npm install`.
 Không cần bật bot thứ hai để chạy tests: `node tests/music.cjs`.
 
 Link YouTube dùng client Android và bỏ bước tải trang web; nếu không có audio-only, FFmpeg tách âm thanh từ định dạng kết hợp. Không dùng tài khoản/cookies cá nhân.
+
+Nếu IP Railway bị YouTube yêu cầu đăng nhập, client Android và PO token không đảm bảo khắc phục. Đã thử link 3tV09SB4GcM: máy Windows lấy được Opus, IP Railway vẫn bị yêu cầu xác minh. Có thể cấu hình YOUTUBE_PROXY_URL (HTTP CONNECT) trong Railway Variables, dạng http://user:password@host:port. Proxy phải cho phép cả YouTube và CDN googlevideo.com; bot dùng cùng proxy cho yt-dlp lẫn FFmpeg. SoundCloud giữ mạng hiện tại. Không ghi mật khẩu proxy vào Git/chat. Chưa có proxy để kiểm tra đường phát này.
