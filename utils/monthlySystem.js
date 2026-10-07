@@ -145,6 +145,11 @@ async function sendMonthlyAnnouncement(guild, monthKey, chatTop, voiceTop, previ
         inline: false,
       },
       {
+        name: '\u200b',
+        value: '━━━━━━━━━━━━━━━━━━━━━━━━━━━━',
+        inline: false,
+      },
+      {
         name: '🎙️ ĐẠI SẢNH VINH DANH — TOP 3 VOICE',
         value: formatTop(voiceTop, guild.id, 'VOICE', options, Boolean(preview)),
         inline: false,

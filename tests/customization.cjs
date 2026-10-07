@@ -73,7 +73,7 @@ async function main() {
   assert.match(ceremony.embeds[0].data.title, /VINH DANH/);
   assert.match(ceremony.embeds[0].data.fields[0].value, /<@&666>/);
   assert.match(ceremony.embeds[0].data.fields[0].name, /TOP 3 CHAT/);
-  assert.match(ceremony.embeds[0].data.fields[1].name, /TOP 3 VOICE/);
+  assert.match(ceremony.embeds[0].data.fields[2].name, /TOP 3 VOICE/);
   assert.deepEqual(ceremony.allowedMentions, { parse: [], users: [member.id] });
   assert.equal(ceremony.files.length, 1);
   assert.equal(ceremony.files[0].attachment.subarray(1, 4).toString(), 'PNG');
