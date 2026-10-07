@@ -22,6 +22,8 @@ const { syncLevelRole } = require('./utils/levelRoles');
 const { startMonthlySystem } = require('./utils/monthlySystem');
 const { formatXp } = require('./utils/levelMath');
 const { getOptions } = require('./utils/customization');
+const { music } = require('./utils/musicSystem');
+
 
 initializeDatabase();
 
@@ -34,6 +36,8 @@ const client = new Client({
 });
 
 client.commands = loadCommands();
+client.on(Events.VoiceStateUpdate, (oldState, newState) => music.handleVoiceState(oldState, newState));
+client.on(Events.GuildDelete, guild => { const session = music.session(guild.id); if (session) music.destroy(session); });
 require('./dashboard/server').startDashboard(client);
 
 const chatCooldowns = new Map();
