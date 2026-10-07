@@ -1,17 +1,21 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const { PassThrough } = require('node:stream');
 const yt = require('youtube-dl-exec');
 const ffmpeg = require('ffmpeg-static');
 
-function terminate(child) {
-  if (!child.pid) return;
+function terminate(child, group = false) {
+  if (!child?.pid || child.exitCode != null || child.signalCode != null) return;
   if (process.platform === 'win32') {
     // The Windows yt-dlp executable has a child process; cancel the entire tree.
     const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'],
       { windowsHide: true, stdio: 'ignore' });
     killer.on('error', () => child.kill('SIGKILL'));
-  } else child.kill('SIGKILL');
+  } else {
+    try { if (group) process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); }
+    catch { child.kill('SIGKILL'); }
+  }
 }
 
 function normalizeQuery(input) {
@@ -55,31 +59,40 @@ async function resolveTrack(input) {
 
 function openAudio(track) {
   // Re-extract at playback time so queued tracks never rely on expired CDN URLs.
-  const downloader = yt.exec(track.url, { ...flags, format: 'bestaudio/best', output: '-' },
-    { buffer: false, stdio: ['ignore', 'pipe', 'pipe'] });
-  const encoder = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0',
-    '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'], { windowsHide: true,
-    stdio: ['pipe', 'pipe', 'ignore'] });
+  const stream = new PassThrough();
+  const downloader = yt.exec(track.url, { ...flags, format: 'bestaudio/best', dumpSingleJson: true, skipDownload: true },
+    { timeout: 20_000, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024, detached: process.platform !== 'win32' });
+  let encoder;
   let closed = false;
   const handlers = new Set();
   const fail = error => { if (!closed) for (const handler of handlers) handler(error); };
-  downloader.catch(fail); // Always consume the subprocess rejection, including cancellation.
-  encoder.on('error', fail);
-  encoder.on('close', code => { if (code && !closed) fail(new Error('Không giải mã được âm thanh.')); });
-  encoder.stdin.on('error', error => { if (error.code !== 'EPIPE') fail(error); });
-  downloader.stdout.on('error', fail);
-  downloader.stderr.resume();
-  downloader.stdout.pipe(encoder.stdin);
-  return { stream: encoder.stdout, onError: handler => handlers.add(handler), close() {
+  downloader.then(result => {
+    if (closed) return;
+    const info = JSON.parse(result.stdout);
+    if (!info.url || new URL(info.url).protocol !== 'https:') throw new Error('Không có nguồn âm thanh HTTPS.');
+    const headers = ['User-Agent', 'Referer'].flatMap(name => {
+      const value = info.http_headers?.[name];
+      return value && !/[\r\n]/.test(value) ? [`${name}: ${value}\r\n`] : [];
+    }).join('');
+    // FFmpeg streams the CDN directly: no song files or HLS fragment files on disk.
+    encoder = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-rw_timeout', '15000000',
+      ...(headers ? ['-headers', headers] : []), '-i', info.url,
+      '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'], { windowsHide: true,
+      stdio: ['ignore', 'pipe', 'ignore'] });
+    encoder.on('error', fail);
+    encoder.stdout.on('error', fail);
+    encoder.on('close', code => { if (code && !closed) fail(new Error('Không giải mã được âm thanh.')); });
+    encoder.stdout.pipe(stream);
+  }).catch(fail);
+  return { stream, onError: handler => handlers.add(handler), close() {
     if (closed) return;
     closed = true;
-    downloader.stdout.unpipe(encoder.stdin);
-    terminate(downloader);
+    terminate(downloader, true);
     terminate(encoder);
     downloader.stdout.destroy();
     downloader.stderr.destroy();
-    encoder.stdin.destroy();
-    encoder.stdout.destroy();
+    encoder?.stdout.destroy();
+    stream.destroy();
   } };
 }
 
