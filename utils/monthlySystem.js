@@ -1,5 +1,6 @@
 const { getGuildSetting } = require('./guildSettings');
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, AttachmentBuilder } = require('discord.js');
+const { createMonthlyRankCard } = require('./createMonthlyRankCard');
 const { getDb } = require('./database');
 const { getChatLeaderboard, resetChatMonthlyXp } = require('./levelSystem');
 const { getVoiceLeaderboard, resetVoiceMonthlyXp } = require('./voiceLevelSystem');
@@ -153,9 +154,27 @@ async function sendMonthlyAnnouncement(guild, monthKey, chatTop, voiceTop) {
     .setTimestamp();
 
   const winners = [...new Set([...chatTop.slice(0, 3), ...voiceTop.slice(0, 3)].map(entry => entry.userId))];
+  const files = [];
+  if (options.monthlyImage) {
+    try {
+      const roles = await guild.roles.fetch();
+      const withRewards = (entries, type) => entries.slice(0, 10).map((entry, index) => ({
+        ...entry, rewardRole: index < 3 ? roles.get(getGuildSetting(guild.id, `MONTHLY_${type}_TOP${index + 1}_ROLE_ID`))?.name : undefined,
+      }));
+      const image = await createMonthlyRankCard({ serverName: guild.name, month: monthLabel(monthKey),
+        chat: withRewards(chatTop, 'CHAT'), voice: withRewards(voiceTop, 'VOICE'),
+        color: options.monthlyColor, rolesEnabled: options.monthlyRoles });
+      const name = `monthly-rank-${monthKey}.png`;
+      files.push(new AttachmentBuilder(image, { name }));
+      embed.setImage(`attachment://${name}`);
+    } catch (error) {
+      console.warn('[MONTHLY IMAGE] Không tạo được ảnh; vẫn gửi bài vinh danh:', error.message);
+    }
+  }
   return channel.send({
     content: winners.length ? `🎊 **Xin chúc mừng những gương mặt xuất sắc của ${monthLabel(monthKey)}!**\n${winners.map(id => `<@${id}>`).join(' ')}` : '🏆 Đại sảnh vinh danh tháng',
     embeds: [embed],
+    files,
     allowedMentions: { parse: [], users: winners },
   });
 }

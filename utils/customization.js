@@ -25,6 +25,7 @@ const definitions = [
   ['noticeColor', 'notifications', 'Màu nhấn thông báo / ảnh', 'color', '#ffd54d'],
   ['noticeMention', 'notifications', 'Thông báo nhắc tên người lên cấp', 'boolean', true],
   ['monthlyAnnounce', 'monthly', 'Đăng tổng kết mỗi tháng', 'boolean', true],
+  ['monthlyImage', 'monthly', 'Kèm ảnh bảng xếp hạng tháng', 'boolean', true],
   ['monthlyRoles', 'monthly', 'Chuyển role cho Top 1/2/3 mỗi tháng', 'boolean', true],
   ['monthlyTitle', 'monthly', 'Tiêu đề tổng kết tháng', 'text', '🏆 {server} — VINH DANH {month}', 180],
   ['monthlyText', 'monthly', 'Nội dung tổng kết tháng', 'text', '✨ Một tháng sôi nổi đã khép lại! Cảm ơn những thành viên đã góp phần giữ ngọn lửa cộng đồng luôn rực sáng.\n\n👑 Xin vinh danh **Top 3 Chat** và **Top 3 Voice** với thành tích nổi bật nhất tháng. Các bạn nhận **role vinh danh tương ứng với thứ hạng** được ghi bên dưới.\n\n🔥 Hành trình tháng mới đã bắt đầu — tiếp tục trò chuyện, kết nối và chinh phục vị trí tiếp theo!', 1500],
