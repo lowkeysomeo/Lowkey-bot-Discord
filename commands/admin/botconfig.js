@@ -2,6 +2,7 @@ const { SlashCommandBuilder, PermissionFlagsBits, ChannelType, MessageFlags } = 
 const { getGuildSetting, setGuildSetting } = require('../../utils/guildSettings');
 const { CHAT_ROLE_LEVELS } = require('../../utils/levelRoles');
 const { VOICE_ROLE_LEVELS } = require('../../utils/voiceRoles');
+const { updateLegacyReward } = require('../../utils/customization');
 
 const settings = [
   { name: 'Kênh thông báo level', value: 'LEVEL_CHANNEL_ID', type: 'channel' },
@@ -37,6 +38,7 @@ module.exports.execute = async interaction => {
   if (interaction.options.getBoolean('disable')) {
     if (channel || role) return reply('Chọn disable hoặc chọn kênh/role, không dùng cùng lúc.');
     setGuildSetting(interaction.guildId, key, null);
+    updateLegacyReward(interaction.guildId, key, null);
     return reply(`✅ Đã tắt ${setting.name} trong server này.`);
   }
   if (!channel && !role) {
@@ -66,5 +68,6 @@ module.exports.execute = async interaction => {
     }
   }
   setGuildSetting(interaction.guildId, key, (channel || role).id);
+  updateLegacyReward(interaction.guildId, key, (channel || role).id);
   return interaction.editReply({ content: `✅ Đã lưu ${setting.name} cho server này.`, allowedMentions: { parse: [] } });
 };

@@ -8,11 +8,14 @@ const { getGuildSetting, setGuildSetting } = require('../utils/guildSettings');
 const confession = require('../utils/confessionStore');
 const { CHAT_ROLE_LEVELS } = require('../utils/levelRoles');
 const { VOICE_ROLE_LEVELS } = require('../utils/voiceRoles');
+const { customizationData, validateCustomization } = require('./customization');
+const { getOptions, saveOptions, saveRewards, updateLegacyReward } = require('../utils/customization');
+const { replaceXpExclusions } = require('../utils/xpExclusions');
 
 const fields = [
   ['LEVEL_CHANNEL_ID', 'Kênh thông báo lên level', 'channel'],
   ['MONTHLY_RANK_CHANNEL_ID', 'Kênh tổng kết tháng', 'channel'],
-  ['VNL_BOOSTER_ROLE_ID', 'Role Booster (+10% XP)', 'role'],
+  ['VNL_BOOSTER_ROLE_ID', 'Role Booster', 'role'],
   ...CHAT_ROLE_LEVELS.map(level => [`LEVEL_ROLE_${level}`, `Chat · Level ${level}`, 'role']),
   ...VOICE_ROLE_LEVELS.map(level => [`VOICE_ROLE_${level}`, `Voice · Level ${level}`, 'role']),
   ...['CHAT', 'VOICE'].flatMap(type => [1, 2, 3].map(rank => [`MONTHLY_${type}_TOP${rank}_ROLE_ID`, `${type} · Top ${rank} tháng`, 'role'])),
@@ -185,15 +188,16 @@ function createDashboard(client, options = {}) {
           const current = Object.fromEntries(fields.map(([key]) => [key, getGuildSetting(guild.id, key)]));
           const conf = confession.getConfig(guild.id);
           const count = getDb().prepare("SELECT COUNT(DISTINCT user_id) AS count FROM (SELECT user_id FROM chat_levels WHERE guild_id = ? UNION SELECT user_id FROM voice_levels WHERE guild_id = ?) WHERE length(user_id) BETWEEN 17 AND 20 AND user_id NOT GLOB '*[^0-9]*'").get(guild.id, guild.id).count;
-          return json(res, 200, { settings: current, fields, confessionChannel: conf?.channel_id || null,
+          return json(res, 200, { settings: current, fields, ...customizationData(guild, channels), confessionChannel: conf?.channel_id || null,
             stats: { members: guild.memberCount, tracked: count, confessions: conf?.counter || 0 },
-            channels: [...channels.values()].filter(channel => channel?.type === ChannelType.GuildText).map(channel => ({ id: channel.id, name: channel.name })),
+            channels: [...channels.values()].filter(channel => channel && [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)).map(channel => ({ id: channel.id, name: channel.name, type: channel.type })),
             roles: [...roles.values()].filter(role => role.id !== guild.id).map(role => ({ id: role.id, name: role.name, managed: role.managed,
               editable: !role.managed && me.permissions.has(P.ManageRoles) && me.roles.highest.comparePositionTo(role) > 0 })) });
         }
         if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
         const input = await body(req);
         if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'Dữ liệu không hợp lệ.');
+        const optionsPatch = validateCustomization(input, guild, channels, roles, me);
         const changes = input.settings || {};
         if (typeof changes !== 'object' || Array.isArray(changes)) fail(400, 'Cấu hình không hợp lệ.');
         for (const [key, id] of Object.entries(changes)) {
@@ -202,7 +206,7 @@ function createDashboard(client, options = {}) {
           if (id === null) continue;
           if (field[2] === 'channel') {
             const channel = channels.get(id);
-            if (!channel || channel.type !== ChannelType.GuildText || channel.guildId !== guild.id) fail(400, 'Kênh không thuộc server này.');
+            if (!channel || ![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type) || channel.guildId !== guild.id) fail(400, 'Kênh không thuộc server này.');
             if (!channel.permissionsFor(me)?.has([P.ViewChannel, P.SendMessages, P.EmbedLinks, P.AttachFiles])) fail(400, `Bot thiếu quyền gửi thông báo trong #${channel.name}.`);
           } else {
             const role = roles.get(id);
@@ -213,13 +217,20 @@ function createDashboard(client, options = {}) {
         if (Object.hasOwn(input, 'confessionChannel')) {
           const channel = channels.get(input.confessionChannel);
           if (!channel || channel.type !== ChannelType.GuildText || channel.guildId !== guild.id) fail(400, 'Hãy chọn kênh confession của server này.');
-          if (!channel.permissionsFor(me)?.has([P.ViewChannel, P.SendMessages, P.EmbedLinks, P.CreatePublicThreads])) fail(400, 'Bot cần quyền gửi tin, nhúng liên kết và tạo luồng trong kênh confession.');
+          const custom = { ...getOptions(guild.id), ...optionsPatch };
+          if (!channel.permissionsFor(me)?.has([P.ViewChannel, P.SendMessages, P.EmbedLinks, ...(custom.confessionThreads ? [P.CreatePublicThreads] : [])])) fail(400, 'Bot thiếu quyền gửi bài hoặc tạo luồng trong kênh confession.');
         }
         // Initialize tables before the transaction, then persist all validated changes together.
         getGuildSetting(guild.id, 'LEVEL_CHANNEL_ID'); confession.getConfig(guild.id);
         getDb().transaction(() => {
-          for (const [key, id] of Object.entries(changes)) setGuildSetting(guild.id, key, id);
+          for (const [key, id] of Object.entries(changes)) {
+            setGuildSetting(guild.id, key, id);
+            updateLegacyReward(guild.id, key, id);
+          }
           if (Object.hasOwn(input, 'confessionChannel')) confession.setChannel(guild.id, input.confessionChannel);
+          if (input.options !== undefined) saveOptions(guild.id, optionsPatch);
+          if (input.rewards !== undefined) for (const [type, entries] of Object.entries(input.rewards)) saveRewards(guild.id, type, entries);
+          if (input.exclusions !== undefined) replaceXpExclusions(guild.id, input.exclusions.map(id => ({ id, type: channels.get(id).type === ChannelType.GuildCategory ? 'category' : 'channel' })), getDb());
         })();
         return json(res, 200, { ok: true });
       }

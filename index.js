@@ -21,6 +21,7 @@ const { applyBooster, hasBoosterRole } = require('./utils/xpBoost');
 const { syncLevelRole } = require('./utils/levelRoles');
 const { startMonthlySystem } = require('./utils/monthlySystem');
 const { formatXp } = require('./utils/levelMath');
+const { getOptions } = require('./utils/customization');
 
 initializeDatabase();
 
@@ -36,7 +37,6 @@ client.commands = loadCommands();
 require('./dashboard/server').startDashboard(client);
 
 const chatCooldowns = new Map();
-const CHAT_COOLDOWN_MS = 60_000;
 
 let voiceTimer = null;
 
@@ -118,6 +118,8 @@ client.on(
   Events.MessageCreate,
   async (message) => {
     if (!message.guild || message.author.bot) return;
+    const options = getOptions(message.guild.id);
+    if (!options.chatEnabled) return;
 
  // Không cộng Chat XP trong channel/category bị chặn
 if (
@@ -146,7 +148,7 @@ if (
 
     if (
       now - last <
-      CHAT_COOLDOWN_MS
+      options.chatCooldown * 1000
     ) {
       return;
     }
@@ -169,8 +171,8 @@ if (
 
       const baseXp =
         Math.floor(
-          Math.random() * 11
-        ) + 10;
+          Math.random() * (options.chatMax - options.chatMin + 1)
+        ) + options.chatMin;
 
 
       const gainedXp =
@@ -191,14 +193,11 @@ if (
         );
 
 
+      await syncLevelRole(member, result.newLevel);
       if (
         result.leveledUp
       ) {
 
-        await syncLevelRole(
-          member,
-          result.newLevel
-        );
 
 
         await sendLevelUp(
@@ -212,7 +211,7 @@ if (
 
       const boosterText =
         hasBoosterRole(member)
-          ? ' [BOOSTER +10%]'
+          ? ' [BOOSTER]'
           : '';
 
 

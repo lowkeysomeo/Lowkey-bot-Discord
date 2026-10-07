@@ -5,6 +5,7 @@ const { getChatLeaderboard, resetChatMonthlyXp } = require('./levelSystem');
 const { getVoiceLeaderboard, resetVoiceMonthlyXp } = require('./voiceLevelSystem');
 const { resolveLeaderboardEntries } = require('./leaderboardHelpers');
 const { formatXp } = require('./levelMath');
+const { getOptions, template } = require('./customization');
 
 const TIME_ZONE = 'Asia/Ho_Chi_Minh';
 let timer = null;
@@ -127,13 +128,12 @@ async function sendMonthlyAnnouncement(guild, monthKey, chatTop, voiceTop) {
     throw new Error('MONTHLY_RANK_CHANNEL_ID không phải text channel hợp lệ.');
   }
 
+  const options = getOptions(guild.id);
+  const values = { server: guild.name, month: monthLabel(monthKey) };
   const embed = new EmbedBuilder()
-    .setColor(0xC31822)
-    .setTitle(`🏆 VIETNAM LEGACY — TỔNG KẾT ${monthLabel(monthKey).toUpperCase()}`)
-    .setDescription(
-      'Bảng xếp hạng dưới đây dùng **XP tháng**. ' +
-      'XP tổng và level lâu dài của thành viên **không bị reset**.',
-    )
+    .setColor(options.monthlyColor)
+    .setTitle(template(options.monthlyTitle, values).slice(0, 256))
+    .setDescription(template(options.monthlyText, values).slice(0, 4096))
     .addFields(
       {
         name: '💬 TOP 10 CHAT',
@@ -188,6 +188,9 @@ async function updateMonthlyWinnerRoles(guild, chatTop, voiceTop) {
           `[MONTHLY ROLE] Không gỡ được ${config.key} khỏi ${oldHolder.user_id}:`,
           error.message,
         );
+        // Departed members no longer hold server roles. Other errors must retry
+        // before recording a different holder, or the old role could be stranded.
+        if (error.code !== 10007) throw error;
       }
     }
 
@@ -243,10 +246,19 @@ async function processPendingResults(guild) {
 
     let announcementMessageId = result.announcement_message_id;
     let rolesAssigned = Boolean(result.roles_assigned);
+    const options = getOptions(guild.id);
+
+    // Role rotation must not depend on the announcement channel being available.
+    if (!rolesAssigned) {
+      if (options.monthlyRoles) await updateMonthlyWinnerRoles(guild, chatTop, voiceTop);
+      rolesAssigned = true;
+      db.prepare('UPDATE monthly_results SET roles_assigned = 1 WHERE guild_id = ? AND month_key = ?')
+        .run(guild.id, result.month_key);
+    }
 
     if (!announcementMessageId) {
       const channelId = getGuildSetting(guild.id, 'MONTHLY_RANK_CHANNEL_ID');
-      const message = channelId ? await sendMonthlyAnnouncement(
+      const message = channelId && options.monthlyAnnounce ? await sendMonthlyAnnouncement(
         guild,
         result.month_key,
         chatTop,
@@ -260,17 +272,6 @@ async function processPendingResults(guild) {
         SET announcement_message_id = ?
         WHERE guild_id = ? AND month_key = ?
       `).run(message.id, guild.id, result.month_key);
-    }
-
-    if (!rolesAssigned) {
-      await updateMonthlyWinnerRoles(guild, chatTop, voiceTop);
-      rolesAssigned = true;
-
-      db.prepare(`
-        UPDATE monthly_results
-        SET roles_assigned = 1
-        WHERE guild_id = ? AND month_key = ?
-      `).run(guild.id, result.month_key);
     }
 
     if (announcementMessageId && rolesAssigned) {

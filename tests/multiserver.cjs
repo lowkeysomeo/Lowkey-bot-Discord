@@ -77,6 +77,14 @@ async function main() {
   assert(getChatProfile('other', 'same-user').totalXp > 0);
   await chat({ guild: a.guild, author: a.member.user, member: a.member, channel: { id: 'text-a' } });
   assert.equal(getChatProfile('home', 'same-user').totalXp, before);
+  const { saveOptions } = require('../utils/customization');
+  saveOptions('other', { chatMin: 7, chatMax: 7, chatCooldown: 1 });
+  const anotherAuthor = { ...b.member.user, id: 'custom-rate-user' };
+  await chat({ guild: b.guild, author: anotherAuthor, member: b.member, channel: { id: 'text-b' } });
+  assert.equal(getChatProfile('other', anotherAuthor.id).totalXp, 7, 'Chat handler uses custom XP rate');
+  saveOptions('other', { chatEnabled: false });
+  await chat({ guild: b.guild, author: { ...anotherAuthor, id: 'disabled-user' }, member: b.member, channel: { id: 'text-b' } });
+  assert.equal(getChatProfile('other', 'disabled-user').totalXp, 0, 'Disabled Chat XP does not award points');
   await chat({ guild: null, author: a.member.user });
   let dmReply;
   await handlers.get(Events.InteractionCreate)({ isButton: () => false, isChatInputCommand: () => true,

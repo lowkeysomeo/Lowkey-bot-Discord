@@ -170,6 +170,18 @@ function isXpExcluded(
 }
 
 module.exports = {
+  replaceXpExclusions(guildId, targets, transactionDb = null) {
+    ensureTable();
+    const db = transactionDb || getDb();
+    const replace = () => {
+      db.prepare('DELETE FROM xp_exclusions WHERE guild_id = ?').run(guildId);
+      const insert = db.prepare('INSERT INTO xp_exclusions VALUES (?, ?, ?, ?)');
+      for (const target of targets) insert.run(guildId, target.id, target.type, Date.now());
+    };
+    if (transactionDb) replace();
+    else db.transaction(replace)();
+    exclusionCache.delete(guildId);
+  },
   addXpExclusion,
   removeXpExclusion,
   listXpExclusions,

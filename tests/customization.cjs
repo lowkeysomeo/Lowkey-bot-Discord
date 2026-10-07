@@ -1,0 +1,80 @@
+const assert = require('node:assert/strict');
+process.env.DB_PATH = ':memory:';
+delete process.env.GUILD_ID;
+const { Collection, ChannelType } = require('discord.js');
+const { getDb } = require('../utils/database');
+const { getGuildSetting, setGuildSetting } = require('../utils/guildSettings');
+const { getOptions, saveOptions, getRewards, saveRewards, syncRewards, template, updateLegacyReward } = require('../utils/customization');
+const { sendLevelUp } = require('../utils/sendLevelUp');
+const { applyBooster } = require('../utils/xpBoost');
+const { replaceXpExclusions, isXpExcluded } = require('../utils/xpExclusions');
+const { voiceXpTick } = require('../utils/voiceXpTick');
+const { getVoiceProfile } = require('../utils/voiceLevelSystem');
+const { addChatXp } = require('../utils/levelSystem');
+const { processMonthlyBoundary } = require('../utils/monthlySystem');
+const { confess } = require('../utils/confessionSystem');
+const confession = require('../utils/confessionStore');
+async function main() {
+  const sent = [];
+  const guild = { id: '111', name: 'Test server', channels: { cache: new Collection() }, members: {} };
+  const member = { id: '123456789012345678', guild, displayName: 'Test user',
+    user: { bot: false, username: 'Test', displayAvatarURL: () => 'unused' }, voice: { serverDeaf: false },
+    roles: { cache: new Collection(), add: async id => member.roles.cache.set(id, {}), remove: async id => member.roles.cache.delete(id) } };
+  guild.members.fetch = async () => member;
+  guild.members.me = {};
+  const channel = { id: '333', guildId: guild.id, type: ChannelType.GuildText, isTextBased: () => true,
+    permissionsFor: () => ({ has: () => true }), send: async payload => { sent.push(payload); return { id: String(sent.length), edit: async () => {}, startThread: async () => { throw new Error('Threads should be disabled'); } }; } };
+  guild.channels.fetch = async () => channel;
+  setGuildSetting(guild.id, 'LEVEL_ROLE_10', '777');
+  assert.deepEqual(getRewards(guild.id, 'chat'), [{ level: 10, roleId: '777' }]);
+  saveRewards(guild.id, 'chat', [{ level: 5, roleId: '777' }, { level: 25, roleId: '888' }]);
+  await syncRewards(member, 5, 'chat'); assert(member.roles.cache.has('777'));
+  await syncRewards(member, 25, 'chat'); assert(!member.roles.cache.has('777')); assert(member.roles.cache.has('888'));
+  saveOptions(guild.id, { chatRoleMode: 'all' });
+  await syncRewards(member, 25, 'chat'); assert(member.roles.cache.has('777')); assert(member.roles.cache.has('888'));
+  await syncRewards(member, 1, 'chat'); assert.equal(member.roles.cache.size, 0);
+  saveRewards(guild.id, 'chat', []); assert.deepEqual(getRewards(guild.id, 'chat'), []);
+  updateLegacyReward(guild.id, 'LEVEL_ROLE_10', '777'); assert.deepEqual(getRewards(guild.id, 'chat'), [{ level: 10, roleId: '777' }]);
+  assert.equal(getOptions('other').chatRoleMode, 'highest');
+  setGuildSetting(guild.id, 'VNL_BOOSTER_ROLE_ID', '999'); member.roles.cache.set('999', {});
+  saveOptions(guild.id, { boosterPercent: 50 }); assert.equal(applyBooster(10, member), 15);
+  replaceXpExclusions(guild.id, [{ id: '333', type: 'channel' }]); assert(isXpExcluded(guild.id, channel));
+  replaceXpExclusions(guild.id, []); assert(!isXpExcluded(guild.id, channel));
+  setGuildSetting(guild.id, 'LEVEL_CHANNEL_ID', '333');
+  saveOptions(guild.id, { chatNoticeStyle: 'text', chatNoticeText: 'Hi {user}: {level} @everyone', noticeMention: false });
+  await sendLevelUp(null, member, 'chat', { level: 25, totalXp: 500 });
+  assert.equal(sent[0].content, `Hi <@${member.id}>: 25 @everyone`);
+  assert.deepEqual(sent[0].allowedMentions, { parse: [], users: [] });
+  saveOptions(guild.id, { chatNotice: false }); await sendLevelUp(null, member, 'chat', { level: 26 }); assert.equal(sent.length, 1);
+  saveOptions(guild.id, { voiceNoticeStyle: 'embed', voiceNoticeText: 'Voice {level}', noticeColor: '#abcdef' });
+  await sendLevelUp(null, member, 'voice', { level: 3 }); assert.equal(sent[1].embeds[0].data.color, 0xabcdef);
+  assert.equal(template('{server} {missing}', { server: '<test>' }), '<test> {missing}');
+  const voice = { id: '444', isVoiceBased: () => true, members: new Collection([[member.id, member]]) };
+  guild.channels.cache.set(voice.id, voice);
+  const client = { guilds: { cache: new Collection([[guild.id, guild]]) } };
+  saveOptions(guild.id, { voiceSolo: 8, voiceSkipSelfDeaf: true, voiceNotice: false });
+  member.voice.selfDeaf = true; await voiceXpTick(client); assert.equal(getVoiceProfile(guild.id, member.id).totalXp, 0);
+  member.voice.selfDeaf = false; await voiceXpTick(client); assert.equal(getVoiceProfile(guild.id, member.id).totalXp, 12);
+  // A failed announcement must not block transferring the monthly role.
+  addChatXp(guild.id, member.id, 30);
+  setGuildSetting(guild.id, 'MONTHLY_CHAT_TOP1_ROLE_ID', '666');
+  setGuildSetting(guild.id, 'MONTHLY_RANK_CHANNEL_ID', 'bad');
+  getDb().prepare('INSERT INTO monthly_state VALUES (?, ?)').run(guild.id, '2000-01');
+  guild.channels.fetch = async () => { throw new Error('Expected unavailable announcement channel'); };
+  await processMonthlyBoundary(client);
+  assert(member.roles.cache.has('666'));
+  assert.equal(getDb().prepare('SELECT roles_assigned FROM monthly_results WHERE guild_id = ?').get(guild.id).roles_assigned, 1);
+  // Confession cooldown survives module reads and disabled threads never create a thread.
+  guild.channels.fetch = async () => channel;
+  confession.setChannel(guild.id, channel.id);
+  saveOptions(guild.id, { confessionThreads: false, confessionLikes: false, confessionCooldown: 60, confessionTitle: 'Story #{number}' });
+  let reply;
+  const interaction = { guildId: guild.id, guild, user: member, inGuild: () => true,
+    options: { getString: () => 'Hello' }, deferReply: async () => {}, editReply: async value => { reply = value; } };
+  await confess(interaction); const post = sent.at(-1); assert.equal(post.embeds[0].data.title, 'Story #001'); assert.deepEqual(post.components, []);
+  const before = sent.length; await confess(interaction); assert.equal(sent.length, before); assert.match(reply, /chờ/);
+  assert(JSON.parse(getGuildSetting(guild.id, 'DASHBOARD_OPTIONS')).confessionCooldown === 60);
+  getDb().close();
+  console.log('PASS: dynamic reward modes, legacy compatibility, XP settings, exclusions cache, safe notices, independent monthly roles, confession options/cooldown');
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -8,7 +8,7 @@ const confession = require('../utils/confessionStore');
 let owner = true;
 const channel = { id: '333', name: 'level', type: ChannelType.GuildText, guildId: '111', permissionsFor: () => ({ has: () => true }) };
 const guild = { id: '111', memberCount: 20, channels: { fetch: async () => new Collection([['333', channel]]) },
-  roles: { fetch: async () => new Collection() }, members: {
+  roles: { fetch: async () => new Collection([['777', { id: '777', name: 'Reward', managed: false }], ['888', { id: '888', name: 'Managed', managed: true }]]) }, members: {
     fetch: async id => ({ displayName: `Member ${id}`, user: { bot: false } }),
     fetchMe: async () => ({ permissions: { has: () => true }, roles: { highest: { comparePositionTo: () => 1 } } }),
   } };
@@ -70,6 +70,27 @@ async function main() {
     assert.equal(getGuildSetting('111', 'LEVEL_CHANNEL_ID'), '333');
     assert.equal(getGuildSetting('222', 'LEVEL_CHANNEL_ID'), null);
     assert.equal(confession.getConfig('111').channel_id, '333');
+    const customPost = async body => request('/api/guilds/111/settings', { method: 'POST', headers: postHeaders, body: JSON.stringify(body) });
+    for (const bad of [
+      { options: { chatMin: 30, chatMax: 10 } }, { options: { chatEnabled: 'yes' } },
+      { options: { chatCooldown: 0 } }, { options: { noticeColor: 'red' } },
+      { options: { unknownSetting: true } }, { options: { chatNoticeChannel: '999' } },
+      { rewards: { chat: [{ level: 5, roleId: '888' }] } },
+      { rewards: { chat: [{ level: 0, roleId: '777' }] } },
+      { rewards: { chat: [{ level: 5, roleId: '777' }, { level: 5, roleId: '777' }] } },
+      { exclusions: ['999'] },
+    ]) assert.equal((await customPost(bad)).status, 400, JSON.stringify(bad));
+    assert.equal((await customPost({ options: { chatMin: 7, chatMax: 7, chatNoticeText: 'Xin chào {user} — cấp {level}', chatNoticeStyle: 'text' },
+      rewards: { chat: [{ level: 25, roleId: '777' }], voice: [] }, exclusions: ['333'] })).status, 200);
+    const savedCustom = await (await request('/api/guilds/111/settings', { headers })).json();
+    assert.equal(savedCustom.options.chatMin, 7);
+    assert.equal(savedCustom.options.chatNoticeText, 'Xin chào {user} — cấp {level}');
+    assert.deepEqual(savedCustom.rewards.chat, [{ level: 25, roleId: '777' }]);
+    assert.deepEqual(savedCustom.rewards.voice, []);
+    assert.deepEqual(savedCustom.exclusions, ['333']);
+    assert.equal(require('../utils/customization').getOptions('222').chatMin, 10);
+    assert.equal((await customPost({ options: { chatMin: 99 }, exclusions: ['999'] })).status, 400);
+    assert.equal(require('../utils/customization').getOptions('111').chatMin, 7, 'Invalid batch cannot partially change settings');
     owner = false;
     assert.equal((await request('/api/guilds/111/settings', { method: 'POST', headers: postHeaders, body: payload })).status, 403, 'Permissions are checked again after revocation');
     assert.equal((await request('/api/logout', { method: 'POST', headers: postHeaders, body: '{}' })).status, 200);

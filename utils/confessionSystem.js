@@ -3,6 +3,13 @@ const {
   EmbedBuilder, MessageFlags, PermissionFlagsBits,
 } = require('discord.js');
 const store = require('./confessionStore');
+const { getOptions, template } = require('./customization');
+const { getDb } = require('./database');
+function cooldownTable() {
+  const db = getDb();
+  db.exec('CREATE TABLE IF NOT EXISTS confession_cooldowns (guild_id TEXT, user_id TEXT, sent_at INTEGER NOT NULL, PRIMARY KEY (guild_id, user_id))');
+  return db;
+}
 
 const queues = new Map();
 function serial(key, task) {
@@ -29,7 +36,7 @@ async function checkedChannel(guild, channelId) {
   const me = guild.members.me || await guild.members.fetchMe();
   if (!channel.permissionsFor(me)?.has([
     PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks,
-    PermissionFlagsBits.CreatePublicThreads,
+    ...(getOptions(guild.id).confessionThreads ? [PermissionFlagsBits.CreatePublicThreads] : []),
   ])) throw new Error('Bot cần quyền View Channel, Send Messages, Embed Links và Create Public Threads trong kênh confession.');
   return channel;
 }
@@ -40,6 +47,12 @@ async function confess(interaction) {
   if (!content || content.length > 4000) return interaction.reply({ content: 'Nội dung phải có từ 1 đến 4000 ký tự.', flags: MessageFlags.Ephemeral });
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   return serial(`post:${interaction.guildId}`, async () => {
+    const options = getOptions(interaction.guildId);
+    if (!options.confessionEnabled) return interaction.editReply('Server hiện đang tắt gửi confession.');
+    if (content.length > options.confessionMaxLength) return interaction.editReply(`Confession tối đa ${options.confessionMaxLength} ký tự.`);
+    const cooldown = cooldownTable().prepare('SELECT sent_at FROM confession_cooldowns WHERE guild_id = ? AND user_id = ?').get(interaction.guildId, interaction.user.id);
+    const remaining = Math.ceil(((cooldown?.sent_at || 0) + options.confessionCooldown * 1000 - Date.now()) / 1000);
+    if (remaining > 0) return interaction.editReply(`Bạn cần chờ ${remaining} giây trước khi gửi confession tiếp theo.`);
     const config = store.getConfig(interaction.guildId);
     if (!config) return interaction.editReply('Admin cần dùng /confessionconfig để chọn kênh confession trước.');
     let channel;
@@ -50,19 +63,23 @@ async function confess(interaction) {
     let message;
     try {
       message = await channel.send({
-        embeds: [new EmbedBuilder().setColor(0xe891b2).setTitle(`💌 CONFESSION #${label}`)
-          .setDescription(content).setFooter({ text: '— Ẩn danh · Bình luận trong luồng sẽ hiện tên tài khoản của bạn.' })],
-        components: components(number), allowedMentions: { parse: [] },
+        embeds: [new EmbedBuilder().setColor(options.confessionColor)
+          .setTitle(template(options.confessionTitle, { number: label, server: interaction.guild.name }).slice(0, 256))
+          .setDescription(content).setFooter({ text: `${options.confessionFooter}${options.confessionThreads ? ' · Bình luận trong luồng sẽ hiện tên tài khoản của bạn.' : ''}` })],
+        components: options.confessionLikes ? components(number) : [], allowedMentions: { parse: [] },
       });
     } catch {
       return interaction.editReply('Không gửi được confession. Kiểm tra quyền của bot rồi thử lại.');
     }
+    cooldownTable().prepare('INSERT INTO confession_cooldowns VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET sent_at = excluded.sent_at')
+      .run(interaction.guildId, interaction.user.id, Date.now());
     try { store.attachMessage(interaction.guildId, number, message.id); }
     catch {
       // The post already exists on Discord; do not invite the author to submit it again.
       await message.edit({ components: [] }).catch(() => {});
       return interaction.editReply(`✅ Đã đăng confession #${label}. Nút thích tạm thời không khả dụng.`);
     }
+    if (!options.confessionThreads) return interaction.editReply(`✅ Confession #${label} đã được đăng ẩn danh vào <#${channel.id}>.`);
     try {
       await message.startThread({
         name: `💬 Bình luận confession #${label}`,
@@ -98,6 +115,7 @@ async function handleConfessionButton(interaction) {
     return true;
   }
   await serial(`like:${interaction.message.id}`, async () => {
+    if (!getOptions(interaction.guildId).confessionLikes) return interaction.editReply('Server hiện đang tắt nút thích confession.');
     const number = Number(match[1]);
     const post = store.getPost(interaction.guildId, number);
     if (!post || post.message_id !== interaction.message.id || post.channel_id !== interaction.channelId

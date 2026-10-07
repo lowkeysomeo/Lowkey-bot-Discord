@@ -99,6 +99,9 @@ async function createLevelUpCard({
   totalXp,
   type = "chat", // "chat" | "voice"
   minutes = 0,
+  title: customTitle,
+  accentColor = '#ffd54d',
+  serverName = 'VietNam Legacy',
 }) {
   const width = 1100;
   const height = 360;
@@ -146,23 +149,23 @@ async function createLevelUpCard({
   drawCircleImage(ctx, avatar, 80, 90, 140);
 
   // Avatar border
-  ctx.strokeStyle = "#ffd54d";
+  ctx.strokeStyle = accentColor;
   ctx.lineWidth = 6;
   ctx.beginPath();
   ctx.arc(150, 160, 76, 0, Math.PI * 2);
   ctx.stroke();
 
   // Server name
-  ctx.fillStyle = "#ffd54d";
+  ctx.fillStyle = accentColor;
   ctx.font = `700 28px "${FONT_FAMILY}"`;
-  ctx.fillText("VietNam Legacy", 250, 75);
+  ctx.fillText(serverName, 250, 75, 700);
 
   // Title
-  const title = type === "voice" ? "VOICE LEVEL UP!" : "CHAT LEVEL UP!";
+  const title = customTitle || (type === "voice" ? "VOICE LEVEL UP!" : "CHAT LEVEL UP!");
   const icon = type === "voice" ? "🎙️" : "🎉";
   ctx.fillStyle = "#ffffff";
   ctx.font = `800 42px "${FONT_FAMILY}"`;
-  ctx.fillText(`${icon} ${title}`, 250, 125);
+  ctx.fillText(`${icon} ${title}`, 250, 125, 510);
 
   // Username line
   const safeName = username || "Unknown User";

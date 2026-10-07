@@ -4,6 +4,16 @@ Dashboard tiếng Việt, nền tối, chạy cùng tiến trình bot và dùng 
 Bao gồm đăng nhập Discord, chọn server, cấu hình kênh Level/Confession, role thưởng,
 Booster, role top tháng và xem bảng tổng XP. Cấu hình được áp dụng ngay sau khi lưu.
 
+## Các mục có thể chỉnh trên dashboard
+
+- **Mốc level & Role**: thêm mốc Chat/Voice bất kỳ (tối đa 50 mốc), chọn giữ role cao nhất hoặc giữ tất cả role đã đạt.
+- **XP & Kênh bỏ qua**: bật/tắt XP Chat/Voice, đặt XP tối thiểu/tối đa, cooldown Chat, XP Voice, Booster và kênh/danh mục không tính XP.
+- **Thông báo lên cấp**: chọn kênh chung hoặc riêng cho Chat/Voice, kiểu thẻ ảnh/embed/văn bản, màu, tiêu đề, nội dung và việc nhắc tên thành viên.
+- **Top tháng**: bật/tắt tổng kết và chuyển role, chỉnh tiêu đề, nội dung, màu và các role Top 1/2/3.
+- **Confession**: bật/tắt, cooldown, độ dài, luồng bình luận, nút thích, tiêu đề, chân trang và màu bài đăng.
+
+Các lựa chọn được lưu riêng theo từng server trong SQLite và có hiệu lực ngay sau khi bấm **Lưu thay đổi**.
+
 ## Bật trên Railway
 
 Thêm các biến môi trường vào đúng dịch vụ bot:
