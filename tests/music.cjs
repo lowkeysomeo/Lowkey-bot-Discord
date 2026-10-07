@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
 const { MusicSystem } = require('../utils/musicSystem');
-const { normalizeQuery } = require('../utils/musicSource');
+const { normalizeQuery, sourceFlags } = require('../utils/musicSource');
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function fixture() {
@@ -52,6 +52,12 @@ function fixture() {
 async function main() {
   assert.equal(normalizeQuery('  bài hát  '), 'scsearch1:bài hát');
   assert.equal(normalizeQuery('https://youtu.be/abc'), 'https://youtu.be/abc');
+  for (const query of ['https://youtu.be/FN7ALfpGxiI', 'https://www.youtube.com/watch?v=FN7ALfpGxiI',
+    'https://music.youtube.com/watch?v=FN7ALfpGxiI', 'ytsearch1:test']) {
+    assert.match(sourceFlags(query).extractorArgs, /player_client=android/);
+    assert.match(sourceFlags(query).extractorArgs, /player_skip=webpage,configs/);
+  }
+  assert.equal(sourceFlags('https://soundcloud.com/example/song').extractorArgs, undefined);
   for (const input of ['http://127.0.0.1/a', 'file:///etc/passwd', 'https://youtube.com.evil.test/a',
     'https://user:secret@youtube.com/a', 'https://youtube.com:8443/a', '', 'x'.repeat(501)]) {
     assert.throws(() => normalizeQuery(input));

@@ -38,9 +38,16 @@ function normalizeQuery(input) {
 const flags = { noConfig: true, noPlaylist: true, noWarnings: true, socketTimeout: 10,
   retries: 1, extractorRetries: 1, jsRuntimes: `node:${process.execPath}` };
 
+function sourceFlags(target) {
+  const youtube = target.startsWith('ytsearch1:') || /^https:\/\/(?:[^/]+\.)?youtube\.com\//.test(target) || target.startsWith('https://youtu.be/');
+  // The web client currently requests sign-in on server IPs. Android exposes
+  // a combined audio/video fallback; FFmpeg below reads only its audio track.
+  return youtube ? { ...flags, extractorArgs: 'youtube:player_client=android;player_skip=webpage,configs' } : flags;
+}
+
 async function resolveTrack(input) {
   const target = normalizeQuery(input);
-  const extract = query => yt(query, { ...flags, dumpSingleJson: true, skipDownload: true },
+  const extract = query => yt(query, { ...sourceFlags(query), dumpSingleJson: true, skipDownload: true },
     { timeout: 30_000, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024 });
   let data;
   try { data = await extract(target); }
@@ -60,7 +67,7 @@ async function resolveTrack(input) {
 function openAudio(track) {
   // Re-extract at playback time so queued tracks never rely on expired CDN URLs.
   const stream = new PassThrough();
-  const downloader = yt.exec(track.url, { ...flags, format: 'bestaudio/best', dumpSingleJson: true, skipDownload: true },
+  const downloader = yt.exec(track.url, { ...sourceFlags(track.url), format: 'bestaudio/best', dumpSingleJson: true, skipDownload: true },
     { timeout: 20_000, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024, detached: process.platform !== 'win32' });
   let encoder;
   let closed = false;
@@ -96,4 +103,4 @@ function openAudio(track) {
   } };
 }
 
-module.exports = { normalizeQuery, resolveTrack, openAudio };
+module.exports = { normalizeQuery, resolveTrack, openAudio, sourceFlags };

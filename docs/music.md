@@ -25,3 +25,5 @@ Máy Windows: Node >=22.12, `npm install`.
 youtube-dl-exec tải yt-dlp.exe độc lập; nếu máy chưa có Python, chỉ bỏ kiểm tra Python
 khi cài trên Windows: `$env:YOUTUBE_DL_SKIP_PYTHON_CHECK='1'; npm install`.
 Không cần bật bot thứ hai để chạy tests: `node tests/music.cjs`.
+
+Link YouTube dùng client Android và bỏ bước tải trang web; nếu không có audio-only, FFmpeg tách âm thanh từ định dạng kết hợp. Không dùng tài khoản/cookies cá nhân.
