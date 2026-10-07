@@ -66,6 +66,14 @@ async function main() {
   assert.equal(getDb().prepare('SELECT roles_assigned FROM monthly_results WHERE guild_id = ?').get(guild.id).roles_assigned, 1);
   // Confession cooldown survives module reads and disabled threads never create a thread.
   guild.channels.fetch = async () => channel;
+  await processMonthlyBoundary(client);
+  const ceremony = sent.at(-1);
+  assert.match(ceremony.content, new RegExp(`<@${member.id}>`));
+  assert.match(ceremony.embeds[0].data.title, /VINH DANH/);
+  assert.match(ceremony.embeds[0].data.fields[0].value, /<@&666>/);
+  assert.match(ceremony.embeds[0].data.fields[0].name, /TOP 3 CHAT/);
+  assert.match(ceremony.embeds[0].data.fields[1].name, /TOP 3 VOICE/);
+  assert.deepEqual(ceremony.allowedMentions, { parse: [], users: [member.id] });
   confession.setChannel(guild.id, channel.id);
   saveOptions(guild.id, { confessionThreads: false, confessionLikes: false, confessionCooldown: 60, confessionTitle: 'Story #{number}' });
   let reply;

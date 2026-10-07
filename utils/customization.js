@@ -26,8 +26,8 @@ const definitions = [
   ['noticeMention', 'notifications', 'Thông báo nhắc tên người lên cấp', 'boolean', true],
   ['monthlyAnnounce', 'monthly', 'Đăng tổng kết mỗi tháng', 'boolean', true],
   ['monthlyRoles', 'monthly', 'Chuyển role cho Top 1/2/3 mỗi tháng', 'boolean', true],
-  ['monthlyTitle', 'monthly', 'Tiêu đề tổng kết tháng', 'text', '🏆 {server} — TỔNG KẾT {month}', 180],
-  ['monthlyText', 'monthly', 'Nội dung tổng kết tháng', 'text', 'Xếp hạng theo XP tháng. XP tổng và level của thành viên được giữ nguyên.', 1500],
+  ['monthlyTitle', 'monthly', 'Tiêu đề tổng kết tháng', 'text', '🏆 {server} — VINH DANH {month}', 180],
+  ['monthlyText', 'monthly', 'Nội dung tổng kết tháng', 'text', '✨ Một tháng sôi nổi đã khép lại! Cảm ơn những thành viên đã góp phần giữ ngọn lửa cộng đồng luôn rực sáng.\n\n👑 Xin vinh danh **Top 3 Chat** và **Top 3 Voice** với thành tích nổi bật nhất tháng. Các bạn nhận **role vinh danh tương ứng với thứ hạng** được ghi bên dưới.\n\n🔥 Hành trình tháng mới đã bắt đầu — tiếp tục trò chuyện, kết nối và chinh phục vị trí tiếp theo!', 1500],
   ['monthlyColor', 'monthly', 'Màu tổng kết tháng', 'color', '#c31822'],
   ['confessionEnabled', 'confession', 'Bật gửi confession', 'boolean', true],
   ['confessionCooldown', 'confession', 'Chờ giữa hai confession (giây)', 'number', 0, 0, 86400],
@@ -42,6 +42,9 @@ const defaults = Object.fromEntries(definitions.map(([key, , , , value]) => [key
 function getOptions(guildId) {
   let saved = {};
   try { saved = JSON.parse(getGuildSetting(guildId, 'DASHBOARD_OPTIONS') || '{}'); } catch { /* defaults */ }
+  // Upgrade the original stock announcement while preserving custom wording.
+  if (saved.monthlyTitle === '🏆 {server} — TỔNG KẾT {month}') delete saved.monthlyTitle;
+  if (saved.monthlyText === 'Xếp hạng theo XP tháng. XP tổng và level của thành viên được giữ nguyên.') delete saved.monthlyText;
   return { ...defaults, ...saved };
 }
 function saveOptions(guildId, patch) {

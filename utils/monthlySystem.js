@@ -104,17 +104,20 @@ function closeMonthIfNeeded(guildId) {
   return monthToClose;
 }
 
-function formatTop(entries) {
+function formatTop(entries, guildId, type, options) {
   if (!entries.length) return 'Chưa có dữ liệu trong tháng này.';
 
   const medals = ['🥇', '🥈', '🥉'];
   return entries
-    .slice(0, 10)
+    .slice(0, 3)
     .map((entry, index) => {
       const prefix = medals[index] || `**#${index + 1}**`;
-      return `${prefix} <@${entry.userId}> — **${formatXp(entry.score)} XP**`;
+      const roleId = getGuildSetting(guildId, `MONTHLY_${type}_TOP${index + 1}_ROLE_ID`);
+      const reward = !options.monthlyRoles ? 'Trao role tháng đang tắt.'
+        : roleId ? `🎁 **Role vinh danh:** <@&${roleId}>` : '🎖️ Vinh danh Top tháng · Chưa cấu hình role thưởng.';
+      return `${prefix} **TOP ${index + 1}** — <@${entry.userId}>\n✦ **${formatXp(entry.score)} XP tháng**\n${reward}`;
     })
-    .join('\n');
+    .join('\n\n');
 }
 
 async function sendMonthlyAnnouncement(guild, monthKey, chatTop, voiceTop) {
@@ -136,20 +139,25 @@ async function sendMonthlyAnnouncement(guild, monthKey, chatTop, voiceTop) {
     .setDescription(template(options.monthlyText, values).slice(0, 4096))
     .addFields(
       {
-        name: '💬 TOP 10 CHAT',
-        value: formatTop(chatTop),
+        name: '💬 ĐẠI SẢNH VINH DANH — TOP 3 CHAT',
+        value: formatTop(chatTop, guild.id, 'CHAT', options),
         inline: false,
       },
       {
-        name: '🎙️ TOP 10 VOICE',
-        value: formatTop(voiceTop),
+        name: '🎙️ ĐẠI SẢNH VINH DANH — TOP 3 VOICE',
+        value: formatTop(voiceTop, guild.id, 'VOICE', options),
         inline: false,
       },
     )
-    .setFooter({ text: 'Top 1/2/3 Chat và Voice nhận role độc quyền của tháng.' })
+    .setFooter({ text: 'Role vinh danh được chuyển theo kết quả mỗi tháng • XP tổng và level được giữ nguyên.' })
     .setTimestamp();
 
-  return channel.send({ embeds: [embed] });
+  const winners = [...new Set([...chatTop.slice(0, 3), ...voiceTop.slice(0, 3)].map(entry => entry.userId))];
+  return channel.send({
+    content: winners.length ? `🎊 **Xin chúc mừng những gương mặt xuất sắc của ${monthLabel(monthKey)}!**\n${winners.map(id => `<@${id}>`).join(' ')}` : '🏆 Đại sảnh vinh danh tháng',
+    embeds: [embed],
+    allowedMentions: { parse: [], users: winners },
+  });
 }
 
 const MONTHLY_ROLE_CONFIG = [
