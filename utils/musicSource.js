@@ -4,6 +4,16 @@ const { spawn } = require('node:child_process');
 const yt = require('youtube-dl-exec');
 const ffmpeg = require('ffmpeg-static');
 
+function terminate(child) {
+  if (!child.pid) return;
+  if (process.platform === 'win32') {
+    // The Windows yt-dlp executable has a child process; cancel the entire tree.
+    const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'],
+      { windowsHide: true, stdio: 'ignore' });
+    killer.on('error', () => child.kill('SIGKILL'));
+  } else child.kill('SIGKILL');
+}
+
 function normalizeQuery(input) {
   const query = String(input || '').trim();
   if (!query || query.length > 500) throw new Error('Nhập tên bài hát hoặc link YouTube/SoundCloud (tối đa 500 ký tự).');
@@ -64,8 +74,11 @@ function openAudio(track) {
     if (closed) return;
     closed = true;
     downloader.stdout.unpipe(encoder.stdin);
-    downloader.kill('SIGKILL');
-    encoder.kill('SIGKILL');
+    terminate(downloader);
+    terminate(encoder);
+    downloader.stdout.destroy();
+    downloader.stderr.destroy();
+    encoder.stdin.destroy();
     encoder.stdout.destroy();
   } };
 }
