@@ -15,8 +15,8 @@ async function api(route, data) {
   return result;
 }
 const brand = `<div class="brand"><span class="brand-icon">V</span><span>VietNam Legacy<small>SERVER DASHBOARD</small></span></div>`;
-const labels = { overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp', monthly: 'Top tháng', confession: 'Confession', leaderboard: 'Bảng xếp hạng', test: 'Gửi thử' };
-const icons = { overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', leaderboard: '≋', test: '▷' };
+const labels = { overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp', monthly: 'Top tháng', confession: 'Confession', giveaway: 'Giveaway', leaderboard: 'Bảng xếp hạng', test: 'Gửi thử' };
+const icons = { overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', giveaway: '🎉', leaderboard: '≋', test: '▷' };
 function render() {
   if (!state.session?.user) {
     app.innerHTML = `<div class="login"><section class="login-art">${brand}<div class="login-copy"><span class="eyebrow">MỘT NƠI. CẢ CỘNG ĐỒNG.</span><h1>Server của bạn.<br><span>Theo cách của bạn.</span></h1><p>Chăm chút cộng đồng cùng VietNam Legacy. Quản lý level, role thưởng và những câu chuyện ẩn danh trong một nơi.</p><div class="login-pills"><span>↗ Level & Role</span><span>♡ Confession</span><span>≋ Bảng xếp hạng</span></div></div><p class="login-foot">VIETNAM LEGACY · DÀNH CHO CỘNG ĐỒNG CỦA BẠN</p></section><section class="login-panel"><div class="login-box"><span class="badge purple">BẢNG ĐIỀU KHIỂN</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng Discord để chọn server và bắt đầu quản lý.</p>${state.session?.configured ? '<a class="primary" href="/auth/discord">Đăng nhập bằng Discord <span>↗</span></a>' : '<button class="primary" disabled>Đăng nhập Discord</button><div class="error">Dashboard đang chờ hoàn tất kết nối đăng nhập Discord. Chủ bot cần cấu hình OAuth2 để mở đăng nhập.</div>'}<p class="subtle">Chỉ chủ server và thành viên có quyền Administrator được quản lý cấu hình.</p></div></section></div>`;
@@ -27,6 +27,15 @@ function render() {
   document.querySelectorAll('[data-page]').forEach(button => { button.onclick = () => changePage(button.dataset.page); });
   document.querySelectorAll('[data-guild]').forEach(button => { button.onclick = () => selectGuild(button.dataset.guild); });
   document.querySelector('#logout').onclick = async () => { if (!canLeave()) return; try { await api('/api/logout', {}); location.href = '/'; } catch (error) { notify(error.message); } };
+  const giveawayForm = document.querySelector('#giveaway-form');
+  if (giveawayForm) {
+    giveawayForm.onsubmit = event => { event.preventDefault(); giveawaySubmit('create'); };
+    giveawayForm.oninput = () => { state.dirty = true; };
+    document.querySelector('#giveaway-test').onclick = () => giveawaySubmit('test');
+  }
+  document.querySelectorAll('[data-giveaway-action]').forEach(button => { button.onclick = () => giveawayAction(button.dataset.giveawayId,button.dataset.giveawayAction); });
+  const refreshGiveaway = document.querySelector('#giveaway-refresh');
+  if (refreshGiveaway) refreshGiveaway.onclick = () => changePage('giveaway');
   const form = document.querySelector('#settings-form');
   const testForm = document.querySelector('#test-form');
   if (testForm) testForm.onsubmit = sendTest;
@@ -51,6 +60,7 @@ function heading(eyebrow, title, subtitle, right = '') { return `<div class="hea
 function content() {
   if (!state.guild) return heading('KHÔNG GIAN QUẢN LÝ', 'Chọn server của bạn', 'Các server mà bạn sở hữu hoặc có quyền Administrator.') + (state.guilds.length ? `<div class="server-grid">${state.guilds.map(guild => `<article class="server-card">${guild.icon ? `<img class="server-avatar" src="${h(guild.icon)}" alt="">` : `<div class="server-avatar">${h(guild.name.slice(0, 1))}</div>`}<h2>${h(guild.name)}</h2><p>${guild.installed ? 'VietNam Legacy đã sẵn sàng.' : 'Thêm VietNam Legacy để bắt đầu.'}</p>${guild.installed ? `<button class="primary" data-guild="${h(guild.id)}">Quản lý server →</button>` : `<a class="secondary" href="${h(guild.invite)}" target="_blank" rel="noopener noreferrer">Mời bot vào server ↗</a>`}</article>`).join('')}</div>` : '<div class="card empty"><h2>Chưa có server để quản lý</h2><p>Bạn cần là chủ server hoặc có quyền Administrator.</p><a class="secondary" href="/">Tải lại trang để kiểm tra</a></div>');
   if (!state.data) return '<div class="card empty"><h2>Chưa tải được dữ liệu</h2><p>Chọn lại server để thử lại.</p></div>';
+  if (state.page === 'giveaway') return giveawayPage();
   if (state.page === 'test') return testPage();
   if (state.page === 'level') return levelPage();
   if (['xp', 'notifications', 'monthly'].includes(state.page)) return customPage(state.page);
@@ -188,7 +198,12 @@ async function selectGuild(id) {
 }
 async function changePage(page) {
   if (!canLeave()) return;
-  state.dirty = false; state.page = page; render();
+  state.dirty = false; state.page = page; state.loading = page === 'giveaway'; render();
+  if (page === 'giveaway' && state.data) {
+    const id=state.guild.id, requestId=state.requestId;
+    try { const rows=await api(`/api/guilds/${id}/giveaways`); if (state.requestId===requestId && state.data) { state.data.giveaways=rows; if (state.page===page) { state.loading=false; render(); } } }
+    catch(error) { if (state.requestId===requestId && state.page===page) { state.loading=false; render(); } notify(error.message); }
+  }
   if (page === 'leaderboard' && state.data && !state.data.leaderboard) {
     const id = state.guild.id;
     const requestId = state.requestId;
@@ -252,3 +267,40 @@ async function boot() {
   }
 }
 boot();
+
+function giveawayPage() {
+  const rows=state.data.giveaways;
+  const statuses={active:'Đang mở',ended:'Đã kết thúc',cancelled:'Đã hủy',draft:'Chưa đăng hoàn tất'};
+  return heading('TRAO QUÀ · KẾT NỐI CỘNG ĐỒNG','Giveaway','Tạo một chương trình chỉn chu, để mỗi thành viên đều có cơ hội nhận niềm vui.', '<button class="secondary" id="giveaway-refresh">Làm mới</button>') +
+    '<form id="giveaway-form">'+panel('Một món quà mới','Mỗi người thắng nhận phần thưởng bạn nhập. Quà do ban tổ chức trao; bot chọn ngẫu nhiên và thông báo kết quả.',
+    '<div class="form-grid"><div class="field"><label for="giveaway-prize">Phần thưởng cho mỗi người thắng</label><input id="giveaway-prize" name="prize" type="text" maxlength="200" placeholder="Ví dụ: 1 tháng Discord Nitro" required></div>'+field('channelId','Kênh đăng giveaway','channel','').replace('name="channelId"','name="channelId" required').replace('Không sử dụng','Chọn kênh giveaway…')+
+    '<div class="field"><label for="giveaway-duration">Thời lượng</label><input id="giveaway-duration" name="duration" type="text" value="24h" placeholder="30m, 2h, 7d" required><small>5 phút đến 30 ngày</small></div><div class="field"><label for="giveaway-winners">Số người thắng</label><input id="giveaway-winners" name="winners" type="number" min="1" max="20" value="1" required></div><div class="field"><label for="giveaway-role">Role điều kiện (tùy chọn)</label><select id="giveaway-role" name="requiredRole"><option value="">Tất cả thành viên</option>'+state.data.roles.map(r=>'<option value="'+h(r.id)+'">@ '+h(r.name)+'</option>').join('')+'</select></div><div class="field"><label for="giveaway-description">Lời nhắn & hướng dẫn nhận quà</label><textarea id="giveaway-description" name="description" maxlength="1500" rows="4" placeholder="Một món quà nhỏ dành cho cộng đồng. Chúc bạn may mắn!"></textarea></div></div>')+
+    '<div class="note">Thành viên bấm nút để tham gia hoặc rút lượt. Bot kiểm tra lại thành viên và role khi quay, mỗi tài khoản có một lượt. Giveaway vẫn tiếp tục sau khi bot khởi động lại.</div><div class="savebar"><span id="giveaway-status">Gửi thử dùng nút tắt và không ghi nhận giveaway.</span><button type="button" id="giveaway-test" class="secondary">Gửi bản thử</button><button type="submit" class="primary">Đăng giveaway</button></div><div id="giveaway-result"></div></form>'+
+    panel('Các chương trình gần đây','Hiển thị tối đa 100 chương trình. Quay lại loại những người thắng của lượt hiện tại.', rows===undefined ? '<p>Nhấn Làm mới để tải danh sách giveaway.</p>' : !rows.length ? '<p>Chưa có giveaway. Món quà đầu tiên đang chờ bạn!</p>' : '<div class="giveaway-list">'+rows.map(row=>'<article class="giveaway-item"><div><span class="badge">'+h(statuses[row.status])+'</span><h3>'+h(row.prize)+'</h3><p>'+number(row.participants)+' lượt · '+row.winner_count+' người thắng · '+h(new Date(row.ends_at).toLocaleString('vi-VN'))+'</p><small>ID: '+h(row.id)+'</small>'+(row.winners.length ? '<p>Đã chọn '+row.winners.length+' người thắng · xem tại bài đăng Discord</p>' : '')+(row.last_error ? '<div class="note">'+h(row.last_error)+'</div>' : '')+'</div><div class="giveaway-actions">'+(row.messageUrl ? '<a class="secondary" target="_blank" rel="noopener noreferrer" href="'+h(row.messageUrl)+'">Xem bài đăng ↗</a>' : '')+(row.status==='active' ? '<button class="secondary" data-giveaway-id="'+row.id+'" data-giveaway-action="end">Kết thúc & quay</button><button class="text-button danger" data-giveaway-id="'+row.id+'" data-giveaway-action="cancel">Hủy giveaway</button>' : row.status==='ended' ? '<button class="secondary" data-giveaway-id="'+row.id+'" data-giveaway-action="reroll">Quay lại</button>' : '')+'</div></article>').join('')+'</div>');
+}
+async function giveawaySubmit(action) {
+  const form=document.querySelector('#giveaway-form');
+  if (state.saving || !form.reportValidity()) return;
+  const payload={...Object.fromEntries(new FormData(form)),action};
+  payload.winners=Number(payload.winners);
+  state.saving=true;
+  form.querySelectorAll('input,textarea,select,button').forEach(c=>{c.disabled=true;});
+  const status=form.querySelector('#giveaway-status'); status.textContent='Đang chuẩn bị bài đăng…';
+  try {
+    const result=await api(`/api/guilds/${state.guild.id}/giveaways`,payload);
+    status.textContent=action==='test' ? 'Đã gửi bản thử. Không có lượt tham gia thật.' : 'Giveaway đã được đăng. Thành viên có thể tham gia ngay!';
+    form.querySelector('#giveaway-result').innerHTML='<a class="secondary" target="_blank" rel="noopener noreferrer" href="'+h(result.messageUrl)+'">Mở bài đăng trên Discord ↗</a>';
+    if (action==='create') { state.dirty=false; state.data.giveaways=await api(`/api/guilds/${state.guild.id}/giveaways`); notify('Đã đăng giveaway. Bấm Làm mới để xem danh sách.'); }
+  } catch(error) { status.textContent=error.message; notify(error.message); }
+  finally { state.saving=false; form.querySelectorAll('input,textarea,select,button').forEach(c=>{c.disabled=false;}); }
+}
+async function giveawayAction(id,action) {
+  if (!canLeave()) return;
+  const question={end:'Kết thúc ngay và quay người thắng? Giveaway sẽ ngừng nhận lượt.',cancel:'Hủy giveaway này? Chương trình sẽ đóng và không quay người thắng.',reroll:'Quay lại người thắng? Những người thắng hiện tại sẽ bị loại khỏi lần quay này.'};
+  if (!window.confirm(question[action])) return;
+  state.saving=true;
+  document.querySelectorAll('[data-giveaway-action]').forEach(c=>{c.disabled=true;});
+  try { const result=await api(`/api/guilds/${state.guild.id}/giveaways`,{id,action}); notify(result.warning || 'Đã cập nhật giveaway.'); state.data.giveaways=await api(`/api/guilds/${state.guild.id}/giveaways`); }
+  catch(error) { notify(error.message); }
+  finally { state.saving=false; render(); }
+}

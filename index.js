@@ -23,6 +23,7 @@ const { startMonthlySystem } = require('./utils/monthlySystem');
 const { formatXp } = require('./utils/levelMath');
 const { getOptions } = require('./utils/customization');
 const { music } = require('./utils/musicSystem');
+const giveaway = require('./utils/giveawaySystem');
 
 
 initializeDatabase();
@@ -64,6 +65,7 @@ client.once(
     console.log(
       `[DB] ${getDatabasePath()}`
     );
+    giveaway.start(client);
 
 
     // ==============================
@@ -241,6 +243,15 @@ if (
 client.on(
   Events.InteractionCreate,
   async (interaction) => {
+    if (interaction.isButton() && interaction.customId.startsWith('giveaway:')) {
+      try { await giveaway.handleButton(interaction); }
+      catch {
+        const payload = { content: 'Chưa xử lý được lượt tham gia. Vui lòng thử lại sau.', flags: 64 };
+        if (interaction.deferred) await interaction.editReply(payload).catch(() => {});
+        else await interaction.reply(payload).catch(() => {});
+      }
+      return;
+    }
     if (interaction.isButton() && interaction.customId.startsWith('confession:')) {
       try {
         await handleConfessionButton(interaction);

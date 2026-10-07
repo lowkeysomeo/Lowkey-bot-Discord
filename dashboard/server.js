@@ -12,6 +12,8 @@ const { customizationData, validateCustomization } = require('./customization');
 const { getOptions, saveOptions, saveRewards, updateLegacyReward } = require('../utils/customization');
 const { replaceXpExclusions } = require('../utils/xpExclusions');
 const { sendTestMessage } = require('./testMessages');
+const giveaway = require('../utils/giveawaySystem');
+const giveawayStore = require('../utils/giveawayStore');
 
 const fields = [
   ['LEVEL_CHANNEL_ID', 'Kênh thông báo lên level', 'channel'],
@@ -166,9 +168,23 @@ function createDashboard(client, options = {}) {
             icon: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128` : null,
             installed: client.guilds.cache.has(guild.id), invite: invite(guild.id) })));
         }
-        const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test)$/.exec(route);
+        const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test|giveaways)$/.exec(route);
         if (!match) fail(404, 'Không tìm thấy trang.');
         const guild = await managedGuild(match[1], value);
+        if (match[2] === 'giveaways') {
+          if (req.method === 'GET') return json(res, 200, giveawayStore.list(guild.id).map(row => ({
+            ...row, participants: giveawayStore.count(row.id), winners: JSON.parse(row.winners),
+            messageUrl: row.message_id ? `https://discord.com/channels/${guild.id}/${row.channel_id}/${row.message_id}` : null,
+          })));
+          if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
+          rateLimit(`giveaway:${guild.id}:${value.user.id}`, 6);
+          const input = await body(req);
+          if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'Dữ liệu không hợp lệ.');
+          if (input.action === 'create' || input.action === 'test') return json(res, 200, await giveaway.create(guild,value.user.id,input,input.action === 'test'));
+          if (typeof input.id !== 'string' || !/^[a-f0-9]{16}$/.test(input.id)) fail(400, 'ID giveaway không hợp lệ.');
+          const result = await giveaway.act(guild,input.id,input.action);
+          return json(res, 200, {ok:true,warning:result.last_error || (result.notice_state === 'uncertain' ? 'Kết quả đã lưu; chưa xác nhận gửi tin tag người thắng.' : null)});
+        }
         if (match[2] === 'test') {
           if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
           rateLimit(`test:${guild.id}:${value.user.id}`, 6);
