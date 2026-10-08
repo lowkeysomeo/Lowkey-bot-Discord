@@ -87,7 +87,7 @@ async function main() {
   assert.equal(getChatProfile('other', 'disabled-user').totalXp, 0, 'Disabled Chat XP does not award points');
   await chat({ guild: null, author: a.member.user });
   let dmReply;
-  await handlers.get(Events.InteractionCreate)({ isButton: () => false, isChatInputCommand: () => true,
+  await handlers.get(Events.InteractionCreate)({ isModalSubmit: () => false, isButton: () => false, isChatInputCommand: () => true,
     inGuild: () => false, reply: async value => { dmReply = value; } });
   assert.equal(dmReply.flags, 64);
 

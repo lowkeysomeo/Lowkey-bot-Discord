@@ -41,9 +41,13 @@ async function checkedChannel(guild, channelId) {
   return channel;
 }
 
-async function confess(interaction) {
+async function confess(interaction, submission = null) {
   if (!interaction.inGuild()) return interaction.reply({ content: 'Lệnh này chỉ dùng trong server.', flags: MessageFlags.Ephemeral });
-  const content = interaction.options.getString('content', true).trim();
+  if (interaction.user.bot) return interaction.reply({content:'Tài khoản bot không thể gửi confession.',flags:64});
+  const mode = submission?.mode || interaction.options.getString('mode') || 'anonymous';
+  if (!['anonymous','public'].includes(mode)) return interaction.reply({content:'Chế độ đăng không hợp lệ.',flags:64});
+  const visibility = mode === 'public' ? 'công khai' : 'ẩn danh';
+  const content = (submission?.content ?? interaction.options.getString('content', true)).trim();
   if (!content || content.length > 4000) return interaction.reply({ content: 'Nội dung phải có từ 1 đến 4000 ký tự.', flags: MessageFlags.Ephemeral });
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   return serial(`post:${interaction.guildId}`, async () => {
@@ -65,7 +69,10 @@ async function confess(interaction) {
       message = await channel.send({
         embeds: [new EmbedBuilder().setColor(options.confessionColor)
           .setTitle(template(options.confessionTitle, { number: label, server: interaction.guild.name }).slice(0, 256))
-          .setDescription(content).setFooter({ text: `${options.confessionFooter}${options.confessionThreads ? ' · Bình luận trong luồng sẽ hiện tên tài khoản của bạn.' : ''}` })],
+          .setDescription(content)
+          .setAuthor(mode === 'public' ? {name: interaction.member?.displayName || interaction.user.globalName || interaction.user.username, iconURL: interaction.user.displayAvatarURL()} : {name:'Người gửi ẩn danh'})
+          .setFields(mode === 'public' ? [{name:'Người chia sẻ',value:`<@${interaction.user.id}>`}] : [])
+          .setFooter({ text: `${mode === 'public' ? 'Chia sẻ công khai' : options.confessionFooter}${options.confessionThreads ? ' · Bình luận trong luồng sẽ hiện tên tài khoản của bạn.' : ''}` })],
         components: options.confessionLikes ? components(number) : [], allowedMentions: { parse: [] },
       });
     } catch {
@@ -79,7 +86,7 @@ async function confess(interaction) {
       await message.edit({ components: [] }).catch(() => {});
       return interaction.editReply(`✅ Đã đăng confession #${label}. Nút thích tạm thời không khả dụng.`);
     }
-    if (!options.confessionThreads) return interaction.editReply(`✅ Confession #${label} đã được đăng ẩn danh vào <#${channel.id}>.`);
+    if (!options.confessionThreads) return interaction.editReply(`✅ Confession #${label} đã được đăng ${visibility} vào <#${channel.id}>.`);
     try {
       await message.startThread({
         name: `💬 Bình luận confession #${label}`,
@@ -88,9 +95,9 @@ async function confess(interaction) {
       });
     } catch {
       // The confession is already published. Never resend it if thread creation fails.
-      return interaction.editReply(`✅ Confession #${label} đã được đăng ẩn danh vào <#${channel.id}>, nhưng chưa tạo được luồng bình luận. Admin hãy kiểm tra quyền Create Public Threads hoặc tạo luồng từ bài đăng.`);
+      return interaction.editReply(`✅ Confession #${label} đã được đăng ${visibility} vào <#${channel.id}>, nhưng chưa tạo được luồng bình luận. Admin hãy kiểm tra quyền Create Public Threads hoặc tạo luồng từ bài đăng.`);
     }
-    return interaction.editReply(`✅ Confession #${label} của bạn đã được đăng ẩn danh vào <#${channel.id}>. Member có thể bình luận bằng tài khoản của mình trong luồng dưới bài đăng.`);
+    return interaction.editReply(`✅ Confession #${label} của bạn đã được đăng ${visibility} vào <#${channel.id}>. Member có thể bình luận bằng tài khoản của mình trong luồng dưới bài đăng.`);
   });
 }
 
@@ -108,6 +115,7 @@ async function configure(interaction) {
 
 async function handleConfessionButton(interaction) {
   if (!interaction.isButton() || !interaction.customId.startsWith('confession:')) return false;
+  if (interaction.customId.startsWith('confession:open:')) return require('./confessionPanel').openForm(interaction);
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const match = /^confession:like:([1-9]\d*)$/.exec(interaction.customId);
   if (!interaction.inGuild() || !match || !Number.isSafeInteger(Number(match[1]))) {

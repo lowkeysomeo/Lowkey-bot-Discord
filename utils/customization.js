@@ -37,6 +37,8 @@ const definitions = [
   ['confessionLikes', 'confession', 'Bật nút thích', 'boolean', true],
   ['confessionTitle', 'confession', 'Tiêu đề confession', 'text', '💌 CONFESSION #{number}', 150],
   ['confessionFooter', 'confession', 'Chân trang confession', 'text', '— Ẩn danh', 300],
+  ['confessionPanelTitle', 'confession', 'Tiêu đề bảng gửi confession', 'text', '💌 Trạm sẻ chia · {server}', 150],
+  ['confessionPanelText', 'confession', 'Lời giới thiệu bảng gửi confession', 'text', 'Có một câu chuyện bạn muốn kể, một lời cảm ơn chưa kịp nói hay đôi điều cần được lắng nghe? Hãy để lại những dòng của bạn tại đây.\n\nChọn cách chia sẻ bên dưới. Cùng giữ góc nhỏ này tử tế, tôn trọng và không tiết lộ thông tin riêng tư của người khác.', 2000],
   ['confessionColor', 'confession', 'Màu confession', 'color', '#e891b2'],
 ];
 const defaults = Object.fromEntries(definitions.map(([key, , , , value]) => [key, value]));

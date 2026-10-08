@@ -168,9 +168,15 @@ function createDashboard(client, options = {}) {
             icon: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128` : null,
             installed: client.guilds.cache.has(guild.id), invite: invite(guild.id) })));
         }
-        const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test|giveaways)$/.exec(route);
+        const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test|giveaways|confession-panel)$/.exec(route);
         if (!match) fail(404, 'Không tìm thấy trang.');
         const guild = await managedGuild(match[1], value);
+        if (match[2] === 'confession-panel') {
+          if (req.method !== 'POST') fail(405,'Thao tác không được hỗ trợ.');
+          rateLimit(`confession-panel:${guild.id}:${value.user.id}`,3);
+          try { return json(res,200,await require('../utils/confessionPanel').publishPanel(guild)); }
+          catch(error) { fail(400,error.message); }
+        }
         if (match[2] === 'giveaways') {
           if (req.method === 'GET') return json(res, 200, giveawayStore.list(guild.id).map(row => ({
             ...row, participants: giveawayStore.count(row.id), winners: JSON.parse(row.winners),

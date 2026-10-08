@@ -243,6 +243,15 @@ if (
 client.on(
   Events.InteractionCreate,
   async (interaction) => {
+    if (interaction.isModalSubmit() && interaction.customId.startsWith('confession:submit:')) {
+      try { await require('./utils/confessionPanel').submitForm(interaction); }
+      catch {
+        const payload = {content:'Chưa gửi được confession. Vui lòng mở lại ô viết và thử lại.',flags:64};
+        if (interaction.deferred) await interaction.editReply(payload).catch(() => {});
+        else await interaction.reply(payload).catch(() => {});
+      }
+      return;
+    }
     if (interaction.isButton() && interaction.customId.startsWith('giveaway:')) {
       try { await giveaway.handleButton(interaction); }
       catch {

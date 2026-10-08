@@ -37,6 +37,8 @@ function render() {
   const refreshGiveaway = document.querySelector('#giveaway-refresh');
   if (refreshGiveaway) refreshGiveaway.onclick = () => changePage('giveaway');
   const form = document.querySelector('#settings-form');
+  const panelButton = document.querySelector('#confession-panel-send');
+  if (panelButton) panelButton.onclick = sendConfessionPanel;
   const testForm = document.querySelector('#test-form');
   if (testForm) testForm.onsubmit = sendTest;
   if (form) {
@@ -127,7 +129,7 @@ function customPage(page) {
 }
 function confessionPage() {
   return heading('MỘT GÓC ĐỂ SẺ CHIA', 'Confession', 'Tùy chỉnh bài đăng, tương tác và thời gian chờ gửi bài.') +
-    '<form id="settings-form">' + panel('Bài đăng confession', 'Tiêu đề hỗ trợ {number} và {server}. Số thứ tự hiện tại luôn được giữ.',
+    '<div class="card card-body"><h2>Bảng chọn cách chia sẻ</h2><p>Hai nút Công khai và Ẩn danh mở ô viết riêng. Công khai hiện tên/avatar; ẩn danh không hiện người gửi. Bảng được đăng vào kênh confession đã lưu.</p><button class="secondary" id="confession-panel-send">Đăng / cập nhật bảng confession</button><div id="confession-panel-result"></div></div><form id="settings-form">' + panel('Bài đăng confession', 'Tiêu đề hỗ trợ {number} và {server}. Số thứ tự hiện tại luôn được giữ.',
       field('confessionChannel', 'Đăng confession tại', 'channel', state.data.confessionChannel, true) + optionControls('confession')) +
     '<div class="note">Thay đổi giao diện và bật/tắt luồng áp dụng cho bài mới. Bình luận trong luồng hiển thị tài khoản người viết. Bot cần Create Public Threads khi bật bình luận.</div>' + savebar + '</form>';
 }
@@ -303,4 +305,17 @@ async function giveawayAction(id,action) {
   try { const result=await api(`/api/guilds/${state.guild.id}/giveaways`,{id,action}); notify(result.warning || 'Đã cập nhật giveaway.'); state.data.giveaways=await api(`/api/guilds/${state.guild.id}/giveaways`); }
   catch(error) { notify(error.message); }
   finally { state.saving=false; render(); }
+}
+
+async function sendConfessionPanel() {
+  if (state.saving) return;
+  if (state.dirty) return notify('Hãy lưu thay đổi trước khi đăng bảng confession.');
+  const button=document.querySelector('#confession-panel-send');
+  state.saving=true; button.disabled=true; button.textContent='Đang cập nhật bảng…';
+  try {
+    const result=await api(`/api/guilds/${state.guild.id}/confession-panel`,{});
+    document.querySelector('#confession-panel-result').innerHTML='<p>Đã cập nhật bảng chọn cách chia sẻ.</p><a class="secondary" target="_blank" rel="noopener noreferrer" href="'+h(result.messageUrl)+'">Mở bảng trên Discord ↗</a>';
+    notify('Bảng confession đã sẵn sàng.');
+  } catch(error) {notify(error.message);}
+  finally {state.saving=false;button.disabled=false;button.textContent='Đăng / cập nhật bảng confession';}
 }

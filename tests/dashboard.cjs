@@ -137,9 +137,15 @@ async function main() {
     assert.equal((await giveawayPost({action:'reroll',id:giveawayId})).status,400);
     assert.equal((await giveawayPost({action:'cancel',id:'bad'})).status,400);
     assert.equal((await giveawayPost(giveawayInput)).status,429);
+    assert.equal((await request('/api/guilds/111/confession-panel',{method:'POST',headers,body:'{}'})).status,403);
+    assert.equal((await request('/api/guilds/222/confession-panel',{method:'POST',headers:postHeaders,body:'{}'})).status,403);
+    assert.equal((await request('/api/guilds/111/confession-panel',{method:'POST',headers:postHeaders,body:'{}'})).status,200);
+    assert.equal(testPosts.at(-1).components[0].toJSON().components.length,2);
+    assert.equal(confession.getConfig('111').counter,beforeConfession);
     owner = false;
     assert.equal((await testPost({ type: 'chat', channelId: '333' })).status, 403);
     assert.equal((await request('/api/guilds/111/giveaways',{headers})).status,403);
+    assert.equal((await request('/api/guilds/111/confession-panel',{method:'POST',headers:postHeaders,body:'{}'})).status,403);
     assert.equal((await request('/api/guilds/111/settings', { method: 'POST', headers: postHeaders, body: payload })).status, 403, 'Permissions are checked again after revocation');
     assert.equal((await request('/api/logout', { method: 'POST', headers: postHeaders, body: '{}' })).status, 200);
     assert.equal((await request('/api/guilds', { headers })).status, 401);

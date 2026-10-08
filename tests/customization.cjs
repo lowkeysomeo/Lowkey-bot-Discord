@@ -82,7 +82,7 @@ async function main() {
   saveOptions(guild.id, { confessionThreads: false, confessionLikes: false, confessionCooldown: 60, confessionTitle: 'Story #{number}' });
   let reply;
   const interaction = { guildId: guild.id, guild, user: member, inGuild: () => true,
-    options: { getString: () => 'Hello' }, deferReply: async () => {}, editReply: async value => { reply = value; } };
+    options: { getString: key => key === 'content' ? 'Hello' : null }, deferReply: async () => {}, editReply: async value => { reply = value; } };
   await confess(interaction); const post = sent.at(-1); assert.equal(post.embeds[0].data.title, 'Story #001'); assert.deepEqual(post.components, []);
   const before = sent.length; await confess(interaction); assert.equal(sent.length, before); assert.match(reply, /chờ/);
   assert(JSON.parse(getGuildSetting(guild.id, 'DASHBOARD_OPTIONS')).confessionCooldown === 60);
