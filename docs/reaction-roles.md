@@ -17,3 +17,5 @@ Dữ liệu bảng, tin nhắn và nút lưu SQLite, tách theo server. Tối đ
 Chưa hỗ trợ reaction emoji dưới tin nhắn, nhóm chỉ chọn một role hoặc sửa nội dung bảng đã đăng; có thể đóng bảng cũ rồi tạo bảng mới.
 
 Kiểm tra: `node tests/reaction-roles.cjs`, `node tests/dashboard.cjs`, `node tests/multiserver.cjs`.
+
+Emoji: Dashboard có ô Emoji riêng, gợi ý emoji server; nhận mã <:ten:ID>, :ten:, ID hoặc một emoji Unicode. Lệnh create có emoji1–emoji5. Mã emoji nhập nhầm trong Tên nút được tách thành emoji và giữ phần chữ; nếu chỉ nhập mã, dùng tên role làm nhãn. Bot chỉ nhận custom emoji từ chính server và kiểm tra khả dụng/quyền dùng. Kiểm tra: node tests/reaction-role-emoji.cjs.

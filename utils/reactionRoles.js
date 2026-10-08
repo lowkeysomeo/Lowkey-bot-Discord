@@ -15,7 +15,11 @@ async function checkedRole(guild,id,me){
 }
 function list(guildId){return db().prepare('SELECT * FROM reaction_role_panels WHERE guild_id=? ORDER BY rowid DESC LIMIT 100').all(guildId).map(r=>({...r,choices:JSON.parse(r.choices),messageUrl:r.message_id?`https://discord.com/channels/${r.guild_id}/${r.channel_id}/${r.message_id}`:null}));}
 function payload(row){const choices=typeof row.choices==='string'?JSON.parse(row.choices):row.choices;const rows=[];
- for(let i=0;i<choices.length;i+=5)rows.push(new ActionRowBuilder().addComponents(choices.slice(i,i+5).map((c,j)=>new ButtonBuilder().setCustomId(`rr:${row.id}:${i+j}`).setLabel(c.label).setStyle(ButtonStyle.Secondary).setDisabled(!row.active))));
+ for(let i=0;i<choices.length;i+=5)rows.push(new ActionRowBuilder().addComponents(choices.slice(i,i+5).map((c,j)=>{
+  const button=new ButtonBuilder().setCustomId(`rr:${row.id}:${i+j}`).setLabel(c.label).setStyle(ButtonStyle.Secondary).setDisabled(!row.active);
+  if(c.emoji)button.setEmoji(c.emoji);
+  return button;
+ })));
  return {embeds:[new EmbedBuilder().setColor(0xb994e8).setTitle(row.title).setDescription(row.description).setFooter({text:row.active?'Bấm để nhận role • Bấm lại để bỏ role · VietNam Legacy':'Bảng nhận role đã đóng · VietNam Legacy'})],components:rows,allowedMentions:{parse:[]}};
 }
 async function create(guild,input){return serial(`panel:${guild.id}`,async()=>{
@@ -24,7 +28,7 @@ async function create(guild,input){return serial(`panel:${guild.id}`,async()=>{
  if(db().prepare('SELECT COUNT(*) n FROM reaction_role_panels WHERE guild_id=? AND active=1').get(guild.id).n>=20)fail('Tối đa 20 bảng đang hoạt động. Hãy đóng bảng cũ trước.');
  if(typeof input.channelId!=='string'||!/^\d{17,20}$/.test(input.channelId))fail('Chọn kênh đăng bảng.');
  const me=await guild.members.fetchMe();const choices=[],seen=new Set();
- for(const c of input.choices){if(!c||typeof c.roleId!=='string'||!/^\d{17,20}$/.test(c.roleId)||seen.has(c.roleId))fail('Chọn các role khác nhau cho mỗi nút.');seen.add(c.roleId);const role=await checkedRole(guild,c.roleId,me);const label=c.label||role.name;if(typeof label!=='string'||!label.trim()||label.length>80)fail('Tên nút cần từ 1 đến 80 ký tự.');choices.push({roleId:role.id,label:label.trim()});}
+ for(const c of input.choices){if(!c||typeof c.roleId!=='string'||!/^\d{17,20}$/.test(c.roleId)||seen.has(c.roleId))fail('Chọn các role khác nhau cho mỗi nút.');seen.add(c.roleId);const role=await checkedRole(guild,c.roleId,me);choices.push(await require('./reactionRoleEmoji').normalizeChoice(guild,c,role));}
  const channel=await guild.channels.fetch(input.channelId);
  if(!channel||![0,5].includes(channel.type)||!channel.permissionsFor(me)?.has([P.ViewChannel,P.SendMessages,P.EmbedLinks]))fail('Bot cần quyền xem kênh, gửi tin và nhúng liên kết tại kênh đã chọn.');
  const row={id:randomBytes(8).toString('hex'),guild_id:guild.id,channel_id:channel.id,title:input.title.trim(),description:input.description.trim(),choices,active:0};

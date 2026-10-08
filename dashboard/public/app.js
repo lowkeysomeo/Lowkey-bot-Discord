@@ -335,12 +335,12 @@ async function sendConfessionPanel() {
 let rrSequence=0;
 function rrChoice(){
  const id=++rrSequence;
- return '<div class="form-grid" data-rr-choice>'+field('rr-role-'+id,'Role tự nhận','role','')+'<div class="field"><label for="rr-label-'+id+'">Tên nút</label><input id="rr-label-'+id+'" data-rr-label maxlength="80" placeholder="Để trống để dùng tên role; có thể thêm emoji"></div><button type="button" class="text-button danger" data-rr-remove>Xóa lựa chọn</button></div>';
+ return '<div class="form-grid" data-rr-choice>'+field('rr-role-'+id,'Role tự nhận','role','')+'<div class="field"><label for="rr-label-'+id+'">Tên nút</label><input id="rr-label-'+id+'" data-rr-label maxlength="80" placeholder="Ví dụ: Miền Bắc; để trống để dùng tên role"></div><div class="field"><label for="rr-emoji-'+id+'">Emoji (tùy chọn)</label><input id="rr-emoji-'+id+'" data-rr-emoji list="rr-emojis" maxlength="100" placeholder="Chọn emoji server hoặc nhập 💜"><small>Nhập :mien_bac: hoặc chọn emoji gợi ý.</small></div><button type="button" class="text-button danger" data-rr-remove>Xóa lựa chọn</button></div>';
 }
 function rrPage(){
  const rows=state.data.reactionroles;
  return heading('VAI TRÒ · KẾT NỐI','Reaction role','Member bấm nút để nhận hoặc bỏ role. Mỗi bảng có thể chọn nhiều role.')+
- '<form id="rr-form">'+panel('Tạo bảng nhận role','Dùng role sở thích, game hoặc thông báo. Các role có quyền điều hành sẽ bị chặn.',
+ '<form id="rr-form"><datalist id="rr-emojis">'+(state.data.emojis||[]).map(e=>'<option value="'+h('<'+(e.animated?'a':'')+':'+e.name+':'+e.id+'>')+'">'+h(e.name)+'</option>').join('')+'</datalist>'+panel('Tạo bảng nhận role','Dùng role sở thích, game hoặc thông báo. Các role có quyền điều hành sẽ bị chặn.',
  '<div class="form-grid"><div class="field"><label for="rr-title">Tiêu đề</label><input id="rr-title" name="title" maxlength="150" value="✨ Chọn vai trò của bạn" required></div>'+field('rr-channel','Kênh đăng bảng','channel','')+
  '<div class="field"><label for="rr-description">Lời giới thiệu</label><textarea id="rr-description" name="description" maxlength="2000" required>Chọn những điều bạn quan tâm để kết nối cùng mọi người. Bấm nút bên dưới để nhận role, bấm lại nếu muốn bỏ nhé!</textarea></div></div>'+
  '<div id="rr-choices">'+rrChoice()+'</div><button type="button" class="secondary" id="rr-add">+ Thêm role</button>')+
@@ -350,7 +350,7 @@ function rrPage(){
 async function rrSubmit(event){
  event.preventDefault();if(state.saving)return;
  const form=event.currentTarget,id=state.guild.id,requestId=state.requestId;
- const choices=[...form.querySelectorAll('[data-rr-choice]')].map(row=>({roleId:row.querySelector('select').value,label:row.querySelector('input').value.trim()})).filter(c=>c.roleId);
+ const choices=[...form.querySelectorAll('[data-rr-choice]')].map(row=>({roleId:row.querySelector('select').value,label:row.querySelector('[data-rr-label]').value.trim(),emoji:row.querySelector('[data-rr-emoji]').value.trim()})).filter(c=>c.roleId);
  if(!choices.length)return notify('Chọn ít nhất một role.');
  const input={action:'create',title:form.elements.title.value,description:form.elements.description.value,channelId:form.querySelector('#rr-channel').value,choices};
  state.saving=true;form.querySelector('button[type=submit]').disabled=true;

@@ -228,6 +228,7 @@ function createDashboard(client, options = {}) {
           const conf = confession.getConfig(guild.id);
           const count = getDb().prepare("SELECT COUNT(DISTINCT user_id) AS count FROM (SELECT user_id FROM chat_levels WHERE guild_id = ? UNION SELECT user_id FROM voice_levels WHERE guild_id = ?) WHERE length(user_id) BETWEEN 17 AND 20 AND user_id NOT GLOB '*[^0-9]*'").get(guild.id, guild.id).count;
           return json(res, 200, { settings: current, fields, ...customizationData(guild, channels), confessionChannel: conf?.channel_id || null,
+            emojis: [...(guild.emojis?.cache?.values() || [])].filter(e=>e.available!==false).map(e=>({id:e.id,name:e.name,animated:Boolean(e.animated)})),
             stats: { members: guild.memberCount, tracked: count, confessions: conf?.counter || 0 },
             channels: [...channels.values()].filter(channel => channel && [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)).map(channel => ({ id: channel.id, name: channel.name, type: channel.type })),
             roles: [...roles.values()].filter(role => role.id !== guild.id).map(role => ({ id: role.id, name: role.name, managed: role.managed,
