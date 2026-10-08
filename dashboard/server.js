@@ -168,9 +168,20 @@ function createDashboard(client, options = {}) {
             icon: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128` : null,
             installed: client.guilds.cache.has(guild.id), invite: invite(guild.id) })));
         }
-        const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test|giveaways|confession-panel)$/.exec(route);
+        const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test|giveaways|confession-panel|reaction-roles)$/.exec(route);
         if (!match) fail(404, 'Không tìm thấy trang.');
         const guild = await managedGuild(match[1], value);
+        if (match[2] === 'reaction-roles') {
+          const rr=require('../utils/reactionRoles');
+          if(req.method==='GET')return json(res,200,rr.list(guild.id));
+          if(req.method!=='POST')fail(405,'Thao tác không được hỗ trợ.');
+          rateLimit(`reaction-roles:${guild.id}:${value.user.id}`,6);
+          const input=await body(req);
+          if(!input||typeof input!=='object'||Array.isArray(input))fail(400,'Dữ liệu không hợp lệ.');
+          if(input.action==='create')return json(res,200,await rr.create(guild,input));
+          if(input.action==='disable'&&typeof input.id==='string')return json(res,200,await rr.disable(guild,input.id));
+          fail(400,'Thao tác không hợp lệ.');
+        }
         if (match[2] === 'confession-panel') {
           if (req.method !== 'POST') fail(405,'Thao tác không được hỗ trợ.');
           rateLimit(`confession-panel:${guild.id}:${value.user.id}`,3);

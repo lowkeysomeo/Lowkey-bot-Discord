@@ -142,7 +142,12 @@ async function main() {
     assert.equal((await request('/api/guilds/111/confession-panel',{method:'POST',headers:postHeaders,body:'{}'})).status,200);
     assert.equal(testPosts.at(-1).components[0].toJSON().components.length,2);
     assert.equal(confession.getConfig('111').counter,beforeConfession);
+    assert.equal((await request('/api/guilds/111/reaction-roles',{method:'POST',headers,body:'{}'})).status,403);
+    assert.equal((await request('/api/guilds/222/reaction-roles',{headers})).status,403);
+    assert.deepEqual(await (await request('/api/guilds/111/reaction-roles',{headers})).json(),[]);
+    assert.equal((await request('/api/guilds/111/reaction-roles',{method:'POST',headers:postHeaders,body:'{"action":"create"}'})).status,400);
     owner = false;
+    assert.equal((await request('/api/guilds/111/reaction-roles',{headers})).status,403);
     assert.equal((await testPost({ type: 'chat', channelId: '333' })).status, 403);
     assert.equal((await request('/api/guilds/111/giveaways',{headers})).status,403);
     assert.equal((await request('/api/guilds/111/confession-panel',{method:'POST',headers:postHeaders,body:'{}'})).status,403);

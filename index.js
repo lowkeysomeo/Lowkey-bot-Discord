@@ -243,6 +243,11 @@ if (
 client.on(
   Events.InteractionCreate,
   async (interaction) => {
+    if (interaction.isButton() && interaction.customId.startsWith('rr:')) {
+      try { await require('./utils/reactionRoles').handleButton(interaction); }
+      catch { const p={content:'Chưa xử lý được role. Vui lòng thử lại.',flags:64}; if(interaction.deferred)await interaction.editReply(p).catch(()=>{});else await interaction.reply(p).catch(()=>{}); }
+      return;
+    }
     if (interaction.isModalSubmit() && interaction.customId.startsWith('confession:submit:')) {
       try { await require('./utils/confessionPanel').submitForm(interaction); }
       catch {
