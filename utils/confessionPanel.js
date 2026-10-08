@@ -8,6 +8,7 @@ const publishing=new Map();
 function db(){
   const database=getDb();
   database.exec(`CREATE TABLE IF NOT EXISTS confession_panels (guild_id TEXT PRIMARY KEY,channel_id TEXT NOT NULL,message_id TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS confession_retired_panels (guild_id TEXT NOT NULL,channel_id TEXT NOT NULL,message_id TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS confession_forms (token TEXT PRIMARY KEY,guild_id TEXT NOT NULL,user_id TEXT NOT NULL,mode TEXT NOT NULL,expires INTEGER NOT NULL);`);
   database.prepare('DELETE FROM confession_forms WHERE expires <= ?').run(Date.now());
   return database;
@@ -25,27 +26,47 @@ function payload(guild){
     new ButtonBuilder().setCustomId('confession:open:public').setLabel('Đăng công khai').setEmoji('☀️').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('confession:open:anonymous').setLabel('Gửi ẩn danh').setEmoji('🌙').setStyle(ButtonStyle.Secondary))],allowedMentions:{parse:[]}};
 }
-async function publishPanel(guild){
-  if(publishing.has(guild.id))return publishing.get(guild.id);
-  const task=(async()=>{
+async function publishPanel(guild, {bump=false,existingOnly=false} = {}){
+  const task=(publishing.get(guild.id) || Promise.resolve()).catch(()=>{}).then(async()=>{
+    const previous=db().prepare('SELECT * FROM confession_panels WHERE guild_id=?').get(guild.id);
+    if(existingOnly && !previous)return null;
     const config=store.getConfig(guild.id);
     if(!config)throw new Error('Hãy lưu kênh confession trước khi đăng bảng.');
     const channel=await guild.channels.fetch(config.channel_id).catch(()=>null);
     const me=guild.members.me || await guild.members.fetchMe();
     if(!channel || channel.type!==ChannelType.GuildText || !channel.permissionsFor(me)?.has([P.ViewChannel,P.SendMessages,P.EmbedLinks,P.ReadMessageHistory]))throw new Error('Bot cần quyền xem kênh, gửi tin, nhúng liên kết và đọc lịch sử trong kênh confession.');
-    const previous=db().prepare('SELECT * FROM confession_panels WHERE guild_id=?').get(guild.id);
+    if(existingOnly && previous.channel_id!==channel.id)return null;
     let message;
     if(previous && previous.channel_id===channel.id){
       try {message=await channel.messages.fetch(previous.message_id);}
       catch(error){if(Number(error.code)!==10008)throw new Error('Chưa đọc được bảng cũ. Kiểm tra quyền bot rồi thử lại.');}
     }
-    if(message)await message.edit(payload(guild));
+    const oldMessage=message;
+    if(message && !bump)await message.edit(payload(guild));
     else message=await channel.send(payload(guild));
-    db().prepare('INSERT INTO confession_panels VALUES (?,?,?) ON CONFLICT(guild_id) DO UPDATE SET channel_id=excluded.channel_id,message_id=excluded.message_id').run(guild.id,channel.id,message.id);
+    try { db().transaction(()=>{
+      if(previous && previous.message_id!==message.id)db().prepare('INSERT OR IGNORE INTO confession_retired_panels VALUES (?,?,?)').run(guild.id,previous.channel_id,previous.message_id);
+      db().prepare('INSERT INTO confession_panels VALUES (?,?,?) ON CONFLICT(guild_id) DO UPDATE SET channel_id=excluded.channel_id,message_id=excluded.message_id').run(guild.id,channel.id,message.id);
+    }).immediate(); } catch(error) {
+      if(message.id!==previous?.message_id)await message.delete().catch(()=>{});
+      throw error;
+    }
+    for(const retired of db().prepare('SELECT * FROM confession_retired_panels WHERE guild_id=? LIMIT 20').all(guild.id)){
+      let old;
+      try {
+        const oldChannel=retired.channel_id===channel.id ? channel : await guild.channels.fetch(retired.channel_id);
+        old=oldMessage?.id===retired.message_id ? oldMessage : await oldChannel.messages.fetch(retired.message_id);
+        await old.delete();
+        db().prepare('DELETE FROM confession_retired_panels WHERE message_id=?').run(retired.message_id);
+      } catch(error) {
+        if(Number(error.code)===10008)db().prepare('DELETE FROM confession_retired_panels WHERE message_id=?').run(retired.message_id);
+        else if(old)await old.edit({components:[]}).catch(()=>{});
+      }
+    }
     return {messageUrl:`https://discord.com/channels/${guild.id}/${channel.id}/${message.id}`};
-  })();
+  });
   publishing.set(guild.id,task);
-  try{return await task;}finally{publishing.delete(guild.id);}
+  try{return await task;}finally{if(publishing.get(guild.id)===task)publishing.delete(guild.id);}
 }
 async function openForm(interaction){
   const mode=interaction.customId.split(':')[2];

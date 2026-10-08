@@ -11,3 +11,5 @@ Hai chế độ dùng chung số thứ tự, cooldown, giới hạn nội dung, 
 Bot cần View Channel, Send Messages, Embed Links, Read Message History để quản lý bảng; Create Public Threads nếu bật bình luận. Đổi kênh confession làm bảng tại kênh cũ hết hiệu lực; dùng đăng/cập nhật bảng tại kênh mới.
 
 Kiểm tra: node tests/confession-modes.cjs, node tests/dashboard.cjs, node tests/customization.cjs, node tests/multiserver.cjs.
+
+Sau mỗi confession mới (công khai hoặc ẩn danh), bot đăng lại bảng bên dưới bài và luồng bình luận rồi xóa bảng cũ. Chỉ áp dụng khi admin đã đăng bảng trong kênh hiện tại. Ô viết đang mở vẫn dùng được sau khi bảng di chuyển. Nếu gửi bảng mới thất bại, bảng cũ được giữ; nếu xóa bảng cũ thất bại, bot tắt nút cũ và thử dọn lại ở lần tiếp theo. Kiểm tra bổ sung: node tests/confession-sticky.cjs.

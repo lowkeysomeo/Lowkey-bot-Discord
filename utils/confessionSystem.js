@@ -78,6 +78,7 @@ async function confess(interaction, submission = null) {
     } catch {
       return interaction.editReply('Không gửi được confession. Kiểm tra quyền của bot rồi thử lại.');
     }
+    try {
     cooldownTable().prepare('INSERT INTO confession_cooldowns VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET sent_at = excluded.sent_at')
       .run(interaction.guildId, interaction.user.id, Date.now());
     try { store.attachMessage(interaction.guildId, number, message.id); }
@@ -98,6 +99,11 @@ async function confess(interaction, submission = null) {
       return interaction.editReply(`✅ Confession #${label} đã được đăng ${visibility} vào <#${channel.id}>, nhưng chưa tạo được luồng bình luận. Admin hãy kiểm tra quyền Create Public Threads hoặc tạo luồng từ bài đăng.`);
     }
     return interaction.editReply(`✅ Confession #${label} của bạn đã được đăng ${visibility} vào <#${channel.id}>. Member có thể bình luận bằng tài khoản của mình trong luồng dưới bài đăng.`);
+    } finally {
+      // Run after the thread starter message too, so the panel remains below it.
+      try { await require('./confessionPanel').publishPanel(interaction.guild,{bump:true,existingOnly:true}); }
+      catch(error) { console.warn('[CONFESSION] Panel refresh failed:',error.name); }
+    }
   });
 }
 
