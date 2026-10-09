@@ -8,7 +8,7 @@ module.exports.data = {
     options: [
         {
             name: "user",
-            description: "Chọn thành viên muốn xem avatar",
+            description: "Chọn thành viên muốn xem",
             type: 6,
             required: false
         }
@@ -19,7 +19,6 @@ module.exports.data = {
 };
 
 module.exports.execute = async (interaction) => {
-
     const user =
         interaction.options.getUser("user") ||
         interaction.user;
@@ -29,18 +28,7 @@ module.exports.execute = async (interaction) => {
         extension: "png"
     });
 
-    const embed = new EmbedBuilder()
-        .setColor("#ff0000")
-        .setAuthor({
-            name: `Avatar của ${user.username}`,
-            iconURL: user.displayAvatarURL()
-        })
-        .setImage(avatar)
-        .setFooter({
-            text: `Yêu cầu bởi ${interaction.user.username}`
-        });
-
     await interaction.reply({
-        embeds: [embed]
+        content: avatar
     });
 };
