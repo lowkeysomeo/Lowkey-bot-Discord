@@ -1,3 +1,12 @@
+const { syncRewards } = require('./customization');
+
+// syncLevelRole: API chính mà index.js và các command dùng
+const syncLevelRole = (member, level) => syncRewards(member, level, 'chat');
+
+// Danh sách level Chat có role thưởng — dùng cho botconfig.js
+const CHAT_ROLE_LEVELS = [1, 10, 20, 40, 65, 80, 95, 100];
+
+// ─── Legacy hard-coded table (dùng biến môi trường) ───────────────────────
 const LEVEL_ROLES = [
     {
         level: 1,
@@ -99,5 +108,8 @@ async function updateLevelRole(member, level) {
 }
 
 module.exports = {
-    updateLevelRole
+    syncLevelRole,
+    updateLevelRole,
+    CHAT_ROLE_LEVELS,
 };
+
