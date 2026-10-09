@@ -1,3 +1,5 @@
+const { requireLevelChannel } = require('../../utils/requireLevelChannel');
+
 const {
   SlashCommandBuilder,
   AttachmentBuilder,
@@ -13,6 +15,7 @@ module.exports.data = new SlashCommandBuilder()
   .setDescription('Xem bảng tổng XP Chat và Voice tích lũy');
 
 module.exports.execute = async (interaction) => {
+  if (!await requireLevelChannel(interaction)) return;
   await interaction.deferReply();
 
   const chatRows = getChatLeaderboard(interaction.guild.id, 'total', 100);

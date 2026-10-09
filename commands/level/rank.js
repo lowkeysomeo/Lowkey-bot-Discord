@@ -1,3 +1,5 @@
+const { requireLevelChannel } = require('../../utils/requireLevelChannel');
+
 const {
   SlashCommandBuilder,
   AttachmentBuilder,
@@ -21,6 +23,7 @@ module.exports.data = new SlashCommandBuilder()
   );
 
 module.exports.execute = async (interaction) => {
+  if (!await requireLevelChannel(interaction)) return;
   await interaction.deferReply();
 
   const user = interaction.options.getUser('user') || interaction.user;

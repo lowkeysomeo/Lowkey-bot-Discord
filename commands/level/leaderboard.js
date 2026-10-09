@@ -1,3 +1,5 @@
+const { requireLevelChannel } = require('../../utils/requireLevelChannel');
+
 const {
   SlashCommandBuilder,
   AttachmentBuilder,
@@ -13,6 +15,7 @@ module.exports.data = new SlashCommandBuilder()
   .setDescription('Xem bảng xếp hạng hoạt động của server');
 
 module.exports.execute = async (interaction) => {
+  if (!await requireLevelChannel(interaction)) return;
   await interaction.deferReply();
 
   const rows = getChatLeaderboard(interaction.guild.id, 'monthly', 100);
