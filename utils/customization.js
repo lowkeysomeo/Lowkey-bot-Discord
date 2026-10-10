@@ -44,8 +44,8 @@ const definitions = [
 const defaults = Object.fromEntries(definitions.map(([key, , , , value]) => [key, value]));
 function getOptions(guildId) {
   let saved = {};
-  try { saved = JSON.parse(getGuildSetting(guildId, 'DASHBOARD_OPTIONS') || '{}'); } catch { /* defaults */ }
-  // Upgrade the original stock announcement while preserving custom wording.
+  try { saved = JSON.parse(getGuildSetting(guildId, 'DASHBOARD_OPTIONS') || '{}'); } catch { /* Dùng cấu hình mặc định nếu dữ liệu cũ bị lỗi. */ }
+  // Đổi mẫu thông báo cũ, giữ nguyên nội dung người dùng đã tự sửa.
   if (saved.monthlyTitle === '🏆 {server} — TỔNG KẾT {month}') delete saved.monthlyTitle;
   if (saved.monthlyText === 'Xếp hạng theo XP tháng. XP tổng và level của thành viên được giữ nguyên.') delete saved.monthlyText;
   return { ...defaults, ...saved };
@@ -56,7 +56,7 @@ function saveOptions(guildId, patch) {
 function getRewards(guildId, type) {
   const saved = getGuildSetting(guildId, type === 'voice' ? 'VOICE_REWARDS' : 'CHAT_REWARDS');
   if (saved !== null) {
-    try { const parsed = JSON.parse(saved); if (Array.isArray(parsed)) return parsed; } catch { /* legacy fallback */ }
+    try { const parsed = JSON.parse(saved); if (Array.isArray(parsed)) return parsed; } catch { /* Đọc các mốc cũ nếu danh sách mới bị lỗi. */ }
   }
   const levels = type === 'voice' ? [1, 10, 20, 40, 65, 80, 100] : [1, 10, 20, 40, 65, 80, 95, 100];
   return levels.map(level => ({ level,

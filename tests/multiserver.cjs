@@ -55,14 +55,14 @@ async function main() {
   assert.equal(getVoiceProfile('home', 'same-user').totalXp, 2.2);
   assert.equal(getVoiceProfile('other', 'same-user').totalXp, 1);
 
-  // Execute the real event handler with a fake gateway: never log in or load .env.
+  // Thử bộ xử lý sự kiện bằng kết nối giả, không đăng nhập hay đọc .env.
   const handlers = new Map();
   const localRequire = createRequire(path.join(root, 'index.js'));
   class FakeClient {
     constructor() { this.guilds = client.guilds; }
     on(event, handler) { handlers.set(event, handler); }
     once() {}
-    login() {}
+    async login() {}
   }
   vm.runInNewContext(fs.readFileSync(path.join(root, 'index.js'), 'utf8'), {
     require: name => name === 'discord.js' ? { ...require('discord.js'), Client: FakeClient }
@@ -115,7 +115,7 @@ async function main() {
   assert.match(response, /server này/);
   assert.equal(getGuildSetting('other', 'LEVEL_CHANNEL_ID'), 'other-level');
 
-  // A failure in one server must not prevent the other server closing its month.
+  // Một server gặp lỗi không được cản các server khác chốt tháng.
   for (const id of ['home', 'other']) getDb().prepare('INSERT INTO monthly_state VALUES (?, ?)').run(id, '2000-01');
   setGuildSetting('home', 'MONTHLY_RANK_CHANNEL_ID', 'bad-channel');
   a.guild.channels.fetch = async () => { throw new Error('expected test failure'); };

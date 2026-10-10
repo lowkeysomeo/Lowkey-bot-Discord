@@ -8,12 +8,12 @@ const {
 } = require('./canvasCommon');
 
 function drawColumn(ctx, x, width, title, entries, type) {
-  // Tiêu đề cột được hạ xuống để không đè subtitle
+  // Hạ tiêu đề cột xuống để không đè lên dòng mô tả.
   ctx.font = `700 34px "${fontFamily()}"`;
   ctx.fillStyle = '#ffd869';
   ctx.fillText(title, x, 172);
 
-  // Hạ hàng #1 xuống để tạo khoảng cách đẹp hơn
+  // Chừa khoảng cách giữa tiêu đề và hàng đầu tiên.
   const startY = 200;
   const rowH = 66;
 
@@ -120,9 +120,7 @@ async function createTotalLeaderboardCard(
     height
   );
 
-  // ==============================
-  // HEADER
-  // ==============================
+  // Phần đầu bảng
 
   ctx.font = `700 48px "${fontFamily()}"`;
   ctx.fillStyle = '#ffd869';
@@ -133,7 +131,7 @@ async function createTotalLeaderboardCard(
     80
   );
 
-  // Subtitle nằm riêng một dòng
+  // Dòng mô tả nằm riêng dưới tiêu đề.
   ctx.font = `500 22px "${fontFamily()}"`;
   ctx.fillStyle = '#f8e8c0';
 
@@ -143,9 +141,7 @@ async function createTotalLeaderboardCard(
     120
   );
 
-  // ==============================
-  // CHAT / VOICE
-  // ==============================
+  // Hai cột xếp hạng Chat và Voice
 
   drawColumn(
     ctx,

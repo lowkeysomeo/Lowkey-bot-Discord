@@ -19,8 +19,9 @@ async function resolveLeaderboardEntries(guild, rows, scoreField, limit = 10) {
         minutes: row.minutes || 0,
         score: Number(row[scoreField]) || 0,
       });
-    } catch {
-      // User đã rời server hoặc Discord không trả về member.
+    } catch (error) {
+      // Chỉ bỏ qua người đã rời server. Lỗi mạng phải thử lại, tránh trao nhầm top.
+      if (Number(error.code) !== 10007) throw error;
     }
   }
 

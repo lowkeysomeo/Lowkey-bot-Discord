@@ -17,7 +17,7 @@ function profileFromTotalXp(totalXp) {
     remaining -= xpNeededForLevel(level);
     level += 1;
 
-    // Safety guard for corrupted/unreasonably large values.
+    // Dừng vòng lặp nếu dữ liệu lỗi hoặc XP quá lớn.
     if (level > 100000) break;
   }
 

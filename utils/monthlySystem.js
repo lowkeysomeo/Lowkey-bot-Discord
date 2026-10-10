@@ -220,8 +220,8 @@ async function updateMonthlyWinnerRoles(guild, chatTop, voiceTop) {
           `[MONTHLY ROLE] Không gỡ được ${config.key} khỏi ${oldHolder.user_id}:`,
           error.message,
         );
-        // Departed members no longer hold server roles. Other errors must retry
-        // before recording a different holder, or the old role could be stranded.
+        // Người đã rời server không còn giữ role. Với lỗi khác, cần thử lại
+        // trước khi ghi người nhận mới, tránh để sót role ở người cũ.
         if (error.code !== 10007) throw error;
       }
     }
@@ -280,7 +280,7 @@ async function processPendingResults(guild) {
     let rolesAssigned = Boolean(result.roles_assigned);
     const options = getOptions(guild.id);
 
-    // Role rotation must not depend on the announcement channel being available.
+    // Vẫn chuyển role tháng khi kênh thông báo đang gặp lỗi.
     if (!rolesAssigned) {
       if (options.monthlyRoles) await updateMonthlyWinnerRoles(guild, chatTop, voiceTop);
       rolesAssigned = true;
@@ -325,7 +325,7 @@ async function processMonthlyBoundary(client) {
   try {
     const guilds = [...client.guilds.cache.values()];
     const ready = [];
-    // Close every server synchronously before awaiting any Discord request.
+    // Chốt dữ liệu tất cả server trước khi gọi Discord.
     for (const guild of guilds) {
       try {
         closeMonthIfNeeded(guild.id);
@@ -345,7 +345,7 @@ async function processMonthlyBoundary(client) {
 
 async function startMonthlySystem(client) {
 
-  // Chạy ngay khi bot ready để chốt tháng cũ trước khi hệ thống hoạt động lâu.
+  // Khi bot kết nối, xử lý ngay những tháng chưa chốt.
   await processMonthlyBoundary(client);
 
   if (timer) clearInterval(timer);

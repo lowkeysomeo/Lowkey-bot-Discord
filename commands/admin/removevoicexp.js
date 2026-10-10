@@ -85,7 +85,7 @@ module.exports.execute = async (interaction) => {
     }
   );
 
-  // Đồng bộ lại Voice Role nếu bị tụt level
+  // Cập nhật role Voice nếu thành viên bị hạ cấp.
   await syncVoiceLevelRole(
     member,
     profile.level

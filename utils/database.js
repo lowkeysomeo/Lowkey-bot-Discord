@@ -121,7 +121,7 @@ function extractLegacyRows(data, fallbackGuildId) {
   const topEntries = Object.entries(data);
   if (topEntries.length === 0) return rows;
 
-  // Format A: { "userId": { level, xp, totalXp } }
+  // Dữ liệu cũ theo người dùng: { "userId": { level, xp, totalXp } }
   if (topEntries.every(([, value]) => looksLikeProfile(value))) {
     if (!fallbackGuildId) {
       console.warn('[DB MIGRATION] Không có GUILD_ID nên bỏ qua JSON dạng userId -> profile.');
@@ -134,7 +134,7 @@ function extractLegacyRows(data, fallbackGuildId) {
     return rows;
   }
 
-  // Format B: { "guildId": { "userId": { ... } } }
+  // Dữ liệu cũ theo server: { "guildId": { "userId": { ... } } }
   for (const [guildId, users] of topEntries) {
     if (!users || typeof users !== 'object' || Array.isArray(users)) continue;
 

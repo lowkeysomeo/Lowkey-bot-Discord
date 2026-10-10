@@ -78,9 +78,7 @@ module.exports.execute = async (interaction) => {
   const subcommand =
     interaction.options.getSubcommand();
 
-  // ==========================
-  // ADD
-  // ==========================
+  // Thêm kênh bỏ qua XP
   if (subcommand === 'add') {
     const target =
       interaction.options.getChannel(
@@ -112,9 +110,7 @@ module.exports.execute = async (interaction) => {
     });
   }
 
-  // ==========================
-  // REMOVE
-  // ==========================
+  // Gỡ kênh khỏi danh sách bỏ qua XP
   if (subcommand === 'remove') {
     const target =
       interaction.options.getChannel(
@@ -137,9 +133,7 @@ module.exports.execute = async (interaction) => {
     });
   }
 
-  // ==========================
-  // LIST
-  // ==========================
+  // Xem danh sách kênh bỏ qua XP
   if (subcommand === 'list') {
     const rows =
       listXpExclusions(

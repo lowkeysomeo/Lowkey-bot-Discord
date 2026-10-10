@@ -48,7 +48,7 @@ function validateCustomization(input, guild, channels, roles, me) {
         if (levels.has(entry.level) || roleIds.has(entry.roleId)) invalid('Không lặp level hoặc role trong cùng danh sách thưởng.');
         levels.add(entry.level); roleIds.add(entry.roleId);
         const role = roles.get(entry.roleId);
-        // Existing inaccessible mappings may be kept; new or changed mappings must be assignable.
+        // Cho giữ mốc cũ; khi thêm hoặc đổi mốc, bot phải cấp được role đã chọn.
         const unchanged = getRewards(guild.id, type).some(old => old.level === entry.level && old.roleId === entry.roleId);
         if (!role || role.id === guild.id) invalid('Role thưởng không còn khả dụng trong server.');
         if (!unchanged && (role.managed || !me.permissions.has(P.ManageRoles) || me.roles.highest.comparePositionTo(role) <= 0)) invalid(`Bot không thể cấp role ${role.name}. Đặt role bot cao hơn và cấp Manage Roles.`);

@@ -94,8 +94,8 @@ module.exports.execute = async (interaction) => {
     result.profile.level
   );
 
-  // Nếu XP admin cấp làm người chơi lên level
-  // thì gửi Level Up Card.
+  // Nếu XP được cấp làm thành viên lên cấp Chat
+  // thì gửi ảnh thông báo lên cấp.
   if (result.leveledUp) {
     await sendLevelUp(
       interaction.client,

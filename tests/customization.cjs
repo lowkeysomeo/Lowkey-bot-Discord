@@ -55,7 +55,7 @@ async function main() {
   saveOptions(guild.id, { voiceSolo: 8, voiceSkipSelfDeaf: true, voiceNotice: false });
   member.voice.selfDeaf = true; await voiceXpTick(client); assert.equal(getVoiceProfile(guild.id, member.id).totalXp, 0);
   member.voice.selfDeaf = false; await voiceXpTick(client); assert.equal(getVoiceProfile(guild.id, member.id).totalXp, 12);
-  // A failed announcement must not block transferring the monthly role.
+  // Gửi thông báo bị lỗi vẫn phải xử lý việc chuyển role tháng.
   addChatXp(guild.id, member.id, 30);
   setGuildSetting(guild.id, 'MONTHLY_CHAT_TOP1_ROLE_ID', '666');
   setGuildSetting(guild.id, 'MONTHLY_RANK_CHANNEL_ID', 'bad');
@@ -64,7 +64,7 @@ async function main() {
   await processMonthlyBoundary(client);
   assert(member.roles.cache.has('666'));
   assert.equal(getDb().prepare('SELECT roles_assigned FROM monthly_results WHERE guild_id = ?').get(guild.id).roles_assigned, 1);
-  // Confession cooldown survives module reads and disabled threads never create a thread.
+  // Thời gian chờ confession được lưu lại; tắt bình luận thì không tạo luồng.
   guild.channels.fetch = async () => channel;
   guild.roles = { fetch: async () => new Collection([['666', { name: 'Champion' }]]) };
   await processMonthlyBoundary(client);

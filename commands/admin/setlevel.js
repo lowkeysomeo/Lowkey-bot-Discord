@@ -76,7 +76,7 @@ module.exports.execute = async (interaction) => {
     profile.level
   );
 
-  // Chỉ thông báo nếu level mới CAO HƠN level cũ
+  // Chỉ thông báo khi cấp mới cao hơn cấp cũ.
   if (profile.level > before.level) {
     await sendLevelUp(
       interaction.client,

@@ -39,20 +39,15 @@ const client = new Client({
 client.commands = loadCommands();
 client.on(Events.VoiceStateUpdate, (oldState, newState) => music.handleVoiceState(oldState, newState));
 client.on(Events.GuildDelete, guild => { const session = music.session(guild.id); if (session) music.destroy(session); });
-require('./dashboard/server').startDashboard(client);
+const dashboardServer = require('./dashboard/server').startDashboard(client);
+client.on(Events.Error, error => console.error('[DISCORD]', error.message));
 
 const chatCooldowns = new Map();
 
 let voiceTimer = null;
 
 
-// ==============================
-// DEPLOY SLASH COMMANDS
-// ==============================
-
-// ==============================
-// BOT READY
-// ==============================
+// Khởi động các tính năng sau khi bot kết nối
 
 client.once(
   Events.ClientReady,
@@ -68,9 +63,7 @@ client.once(
     giveaway.start(client);
 
 
-    // ==============================
-    // DEPLOY COMMANDS
-    // ==============================
+    // Cập nhật danh sách lệnh
 
     try {
       await deployCommands(client.commands);
@@ -82,9 +75,7 @@ client.once(
     }
 
 
-    // ==============================
-    // MONTHLY SYSTEM
-    // ==============================
+    // Chốt bảng xếp hạng hằng tháng
 
     try {
       await startMonthlySystem(client);
@@ -96,9 +87,7 @@ client.once(
     }
 
 
-    // ==============================
-    // VOICE XP SYSTEM
-    // ==============================
+    // Cộng XP khi tham gia voice
 
     if (voiceTimer) {
       clearInterval(voiceTimer);
@@ -116,9 +105,7 @@ client.once(
 );
 
 
-// ==============================
-// CHAT XP SYSTEM
-// ==============================
+// Cộng XP khi nhắn tin
 
 client.on(
   Events.MessageCreate,
@@ -127,7 +114,7 @@ client.on(
     const options = getOptions(message.guild.id);
     if (!options.chatEnabled) return;
 
- // Không cộng Chat XP trong channel/category bị chặn
+ // Không cộng XP ở kênh hoặc danh mục đã loại trừ.
 if (
   isXpExcluded(
     message.guild.id,
@@ -236,9 +223,7 @@ if (
 );
 
 
-// ==============================
-// SLASH COMMAND HANDLER
-// ==============================
+// Xử lý lệnh và tương tác
 
 client.on(
   Events.InteractionCreate,
@@ -343,9 +328,7 @@ client.on(
 );
 
 
-// ==============================
-// ERROR HANDLERS
-// ==============================
+// Ghi lại lỗi chưa được xử lý
 
 process.on(
   'unhandledRejection',
@@ -371,10 +354,13 @@ process.on(
 );
 
 
-// ==============================
-// LOGIN
-// ==============================
+// Kết nối bot với Discord
 
-client.login(
-  process.env.TOKEN
-);
+client.login(process.env.TOKEN).catch(error => {
+  // Dừng tiến trình nếu không đăng nhập được để Railway biết bot đã lỗi.
+  console.error('[LOGIN] Không kết nối được Discord:', error.message);
+  if (voiceTimer) clearInterval(voiceTimer);
+  client.destroy();
+  dashboardServer?.close();
+  process.exitCode = 1;
+});

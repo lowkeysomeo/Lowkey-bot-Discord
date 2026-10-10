@@ -8,7 +8,7 @@ const ffmpeg = require('ffmpeg-static');
 function terminate(child, group = false) {
   if (!child?.pid || child.exitCode != null || child.signalCode != null) return;
   if (process.platform === 'win32') {
-    // The Windows yt-dlp executable has a child process; cancel the entire tree.
+    // Trên Windows, dừng cả tiến trình con của yt-dlp để không bị chạy sót.
     const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'],
       { windowsHide: true, stdio: 'ignore' });
     killer.on('error', () => child.kill('SIGKILL'));
@@ -42,7 +42,7 @@ function youtubeProxy(env = process.env) {
   if (!env.YOUTUBE_PROXY_URL) return null;
   let url;
   try { url = new URL(env.YOUTUBE_PROXY_URL); } catch { throw new Error('Cấu hình proxy YouTube không hợp lệ.'); }
-  // FFmpeg and yt-dlp must use the same egress address; both support HTTP CONNECT.
+  // FFmpeg và yt-dlp phải đi qua cùng proxy HTTP CONNECT.
   if (url.protocol !== 'http:' || url.pathname !== '/' || url.search || url.hash) {
     throw new Error('Proxy YouTube phải là HTTP CONNECT, dạng http://user:password@host:port.');
   }
@@ -51,8 +51,8 @@ function youtubeProxy(env = process.env) {
 
 function sourceFlags(target, env = process.env) {
   const youtube = target.startsWith('ytsearch1:') || /^https:\/\/(?:[^/]+\.)?youtube\.com\//.test(target) || target.startsWith('https://youtu.be/');
-  // The web client currently requests sign-in on server IPs. Android exposes
-  // a combined audio/video fallback; FFmpeg below reads only its audio track.
+  // YouTube có thể yêu cầu đăng nhập với IP máy chủ. Dùng nguồn Android
+  // làm phương án dự phòng; FFmpeg chỉ lấy phần âm thanh.
   if (!youtube) return flags;
   const proxy = youtubeProxy(env);
   return { ...flags, extractorArgs: 'youtube:player_client=android;player_skip=webpage,configs',
@@ -85,13 +85,13 @@ async function resolveTrack(input) {
   if (!item?.webpage_url || item.is_live || item.live_status === 'is_live') {
     throw new Error('Không tìm thấy bài hát phù hợp. Hiện chưa hỗ trợ livestream.');
   }
-  // Validate the resolved webpage as well; never accept arbitrary user-supplied URLs.
+  // Kiểm tra cả link trả về từ nguồn nhạc, chỉ nhận các trang được hỗ trợ.
   const url = normalizeQuery(item.webpage_url);
   return { title: String(item.title || 'Bài hát').slice(0, 200), url, duration: Number(item.duration) || 0 };
 }
 
 function openAudio(track) {
-  // Re-extract at playback time so queued tracks never rely on expired CDN URLs.
+  // Lấy lại link lúc phát vì link âm thanh có thể hết hạn khi đang chờ.
   const stream = new PassThrough();
   const downloader = yt.exec(track.url, { ...sourceFlags(track.url), format: 'bestaudio/best', dumpSingleJson: true, skipDownload: true },
     { timeout: 20_000, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024, detached: process.platform !== 'win32' });
@@ -107,7 +107,7 @@ function openAudio(track) {
       const value = info.http_headers?.[name];
       return value && !/[\r\n]/.test(value) ? [`${name}: ${value}\r\n`] : [];
     }).join('');
-    // FFmpeg streams the CDN directly: no song files or HLS fragment files on disk.
+    // FFmpeg đọc trực tiếp nguồn âm thanh, không lưu bài hát xuống đĩa.
     const proxy = sourceFlags(track.url).proxy;
     encoder = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-rw_timeout', '15000000',
       ...(proxy ? ['-http_proxy', proxy] : []),

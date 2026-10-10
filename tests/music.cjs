@@ -83,7 +83,7 @@ async function main() {
   assert.equal(session.current.title, 'second');
   assert(f.events.includes('closed:first'));
   assert.equal(f.music.session('two').current.title, 'server two');
-  // Error callbacks from a cancelled source cannot skip the replacement track.
+  // Lỗi trả về muộn từ bài đã hủy không được làm bỏ qua bài mới.
   f.music.fail(session, { title: 'first' });
   assert.equal(session.current.title, 'second');
   session.current.audio.fail(new Error('stream failed'));
@@ -94,7 +94,7 @@ async function main() {
   f.music.destroy(f.music.session('two'));
   assert(f.events.includes('closed:server two'));
 
-  // Stop while connection or metadata is pending must not resurrect audio/voice.
+  // Đã dừng thì kết quả tìm bài hoặc kết nối đến muộn cũng không được phát lại.
   const g = fixture();
   let ready;
   g.block(new Promise(resolve => { ready = resolve; }));

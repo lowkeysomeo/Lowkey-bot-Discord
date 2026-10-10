@@ -1,49 +1,49 @@
-# Prerequisites
+# Tệp phụ thuộc khi biên dịch
 *.d
 
-# Compiled Object files
+# Tệp đối tượng đã biên dịch
 *.slo
 *.lo
 *.o
 *.obj
 
-# Precompiled Headers
+# Tệp tiêu đề đã biên dịch sẵn
 *.gch
 *.pch
 
-# Linker files
+# Tệp của bộ liên kết
 *.ilk
 
-# Debugger Files
+# Tệp phục vụ gỡ lỗi
 *.pdb
 
-# Compiled Dynamic libraries
+# Thư viện động đã biên dịch
 *.so
 *.dylib
 *.dll
 *.so.*
 
-# Fortran module files
+# Tệp mô-đun Fortran
 *.mod
 *.smod
 
-# Compiled Static libraries
+# Thư viện tĩnh đã biên dịch
 *.lai
 *.la
 *.a
 *.lib
 
-# Executables
+# Tệp thực thi
 *.exe
 *.out
 *.app
 
-# Build directories
+# Thư mục kết quả biên dịch
 build/
 Build/
 build-*/
 
-# CMake generated files
+# Tệp do CMake tạo
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
@@ -51,19 +51,19 @@ Makefile
 install_manifest.txt
 compile_commands.json
 
-# Temporary files
+# Tệp tạm
 *.tmp
 *.log
 *.bak
 *.swp
 
-# vcpkg
+# Thư viện do vcpkg cài
 vcpkg_installed/
 
-# debug information files
+# Thông tin gỡ lỗi
 *.dwo
 
-# test output & cache
+# Kết quả kiểm thử và bộ nhớ đệm
 Testing/
 .cache/
 node_modules

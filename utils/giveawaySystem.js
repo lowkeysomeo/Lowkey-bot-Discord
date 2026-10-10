@@ -68,7 +68,7 @@ async function create(guild,hostId,input,test = false) {
 async function eligible(guild,row) {
   const result = [];
   const ids = store.entries(row.id);
-  // Fetch current memberships in small batches; never draw against an incomplete cache.
+  // Kiểm tra thành viên theo từng nhóm nhỏ trước khi quay thưởng.
   for (let i=0;i<ids.length;i+=10) {
     const batch = await Promise.all(ids.slice(i,i+10).map(async id => {
       try { const member = await guild.members.fetch({user:id,force:true}); return !member.user.bot && (!row.required_role || member.roles.cache.has(row.required_role)) ? id : null; }
@@ -86,7 +86,7 @@ async function publish(guild,row) {
   const winners = JSON.parse(row.winners);
   if (row.status !== 'ended' || !winners.length) { store.patch(row.id,{notice_state:'sent'}); return; }
   if (row.notice_state !== 'pending') return;
-  // Persist intent first: recovery never sends a second winner ping after a crash.
+  // Lưu trạng thái trước khi gửi để bot khởi động lại không tag người thắng lần nữa.
   store.patch(row.id,{notice_state:'sending'});
   try {
     const notice = await channel.send({content:`🎊 **${row.round > 1 ? 'KẾT QUẢ QUAY LẠI' : 'GIVEAWAY ĐÃ TÌM ĐƯỢC CHỦ NHÂN MAY MẮN!'}**\n\nChúc mừng ${winners.map(id=>`<@${id}>`).join(', ')}!\n🎁 Bạn đã được chọn nhận **${clean(row.prize)}**.\n\nVui lòng liên hệ ban tổ chức <@${row.host_id}> để nhận quà. Cảm ơn mọi người đã cùng tham gia và tạo nên một cộng đồng thật vui! 💜\n\n📌 https://discord.com/channels/${row.guild_id}/${row.channel_id}/${row.message_id}`,
@@ -143,7 +143,7 @@ async function tick(client) {
         const message = recent.find(m => m.author.id === client.user.id && m.components.some(actionRow => actionRow.components.some(c => c.customId === `giveaway:join:${row.id}`)));
         if (message) store.patch(row.id,{message_id:message.id,status:'active'});
         else store.patch(row.id,{status:'cancelled',updated:1,notice_state:'sent',last_error:'Bài đăng chưa hoàn tất trước khi bot khởi động lại. Hãy tạo giveaway mới.'});
-      } catch { /* Keep draft for recovery when channel permissions return. */ }
+      } catch { /* Giữ bản nháp để thử lại khi bot có quyền trong kênh. */ }
     });
   }
   for (const row of store.pending(Date.now())) {

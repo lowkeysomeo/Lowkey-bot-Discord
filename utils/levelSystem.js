@@ -151,7 +151,7 @@ function resetChatMonthlyXp(guildId) {
   `).run(Date.now(), guildId);
 }
 
-// Compatibility aliases for older files.
+// Giữ tên hàm cũ cho các tệp chưa chuyển sang cách gọi mới.
 const getProfile = getChatProfile;
 const addXp = addChatXp;
 const removeXp = removeChatXp;

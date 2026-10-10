@@ -83,7 +83,7 @@ async function confess(interaction, submission = null) {
       .run(interaction.guildId, interaction.user.id, Date.now());
     try { store.attachMessage(interaction.guildId, number, message.id); }
     catch {
-      // The post already exists on Discord; do not invite the author to submit it again.
+      // Bài đã đăng rồi; báo rõ để người gửi không đăng lại.
       await message.edit({ components: [] }).catch(() => {});
       return interaction.editReply(`✅ Đã đăng confession #${label}. Nút thích tạm thời không khả dụng.`);
     }
@@ -95,12 +95,12 @@ async function confess(interaction, submission = null) {
         reason: `Bình luận confession #${label}`,
       });
     } catch {
-      // The confession is already published. Never resend it if thread creation fails.
+      // Tạo luồng bị lỗi thì chỉ báo lại, không gửi thêm một bài confession.
       return interaction.editReply(`✅ Confession #${label} đã được đăng ${visibility} vào <#${channel.id}>, nhưng chưa tạo được luồng bình luận. Admin hãy kiểm tra quyền Create Public Threads hoặc tạo luồng từ bài đăng.`);
     }
     return interaction.editReply(`✅ Confession #${label} của bạn đã được đăng ${visibility} vào <#${channel.id}>. Member có thể bình luận bằng tài khoản của mình trong luồng dưới bài đăng.`);
     } finally {
-      // Run after the thread starter message too, so the panel remains below it.
+      // Đưa bảng chọn xuống cuối sau khi đã tạo luồng bình luận.
       try { await require('./confessionPanel').publishPanel(interaction.guild,{bump:true,existingOnly:true}); }
       catch(error) { console.warn('[CONFESSION] Panel refresh failed:',error.name); }
     }

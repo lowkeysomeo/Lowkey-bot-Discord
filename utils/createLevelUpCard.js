@@ -97,7 +97,7 @@ async function createLevelUpCard({
   username,
   level,
   totalXp,
-  type = "chat", // "chat" | "voice"
+  type = "chat", // Loại hoạt động: "chat" hoặc "voice"
   minutes = 0,
   title: customTitle,
   accentColor = '#ffd54d',
@@ -108,7 +108,7 @@ async function createLevelUpCard({
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext("2d");
 
-  // Background
+  // Nền ảnh
   const bg = ctx.createLinearGradient(0, 0, width, height);
   bg.addColorStop(0, "#2b0010");
   bg.addColorStop(0.5, "#410014");
@@ -116,7 +116,7 @@ async function createLevelUpCard({
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, width, height);
 
-  // Decorative circles
+  // Các vòng tròn trang trí
   ctx.strokeStyle = "rgba(255, 215, 100, 0.12)";
   ctx.lineWidth = 3;
   for (let i = 0; i < 4; i++) {
@@ -125,7 +125,7 @@ async function createLevelUpCard({
     ctx.stroke();
   }
 
-  // Left accent bar
+  // Dải màu bên trái
   const accent = ctx.createLinearGradient(0, 0, 0, height);
   accent.addColorStop(0, "#ff2b45");
   accent.addColorStop(1, "#ff9f1a");
@@ -133,41 +133,41 @@ async function createLevelUpCard({
   roundRect(ctx, 20, 20, 12, height - 40, 10);
   ctx.fill();
 
-  // Main container
+  // Khung nội dung chính
   ctx.fillStyle = "rgba(255,255,255,0.04)";
   roundRect(ctx, 45, 20, width - 65, height - 40, 24);
   ctx.fill();
 
-  // Stars
+  // Các ngôi sao trang trí
   drawStar(ctx, 930, 85, 18, "#ffd54d", 0.25);
   drawStar(ctx, 985, 120, 12, "#ffd54d", 0.22);
   drawStar(ctx, 875, 145, 10, "#ffd54d", 0.18);
   drawStar(ctx, 960, 250, 16, "#ffd54d", 0.14);
 
-  // Avatar
+  // Ảnh đại diện
   const avatar = await loadImage(avatarUrl);
   drawCircleImage(ctx, avatar, 80, 90, 140);
 
-  // Avatar border
+  // Viền ảnh đại diện
   ctx.strokeStyle = accentColor;
   ctx.lineWidth = 6;
   ctx.beginPath();
   ctx.arc(150, 160, 76, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Server name
+  // Tên server
   ctx.fillStyle = accentColor;
   ctx.font = `700 28px "${FONT_FAMILY}"`;
   ctx.fillText(serverName, 250, 75, 700);
 
-  // Title
+  // Tiêu đề
   const title = customTitle || (type === "voice" ? "VOICE LEVEL UP!" : "CHAT LEVEL UP!");
   const icon = type === "voice" ? "🎙️" : "🎉";
   ctx.fillStyle = "#ffffff";
   ctx.font = `800 42px "${FONT_FAMILY}"`;
   ctx.fillText(`${icon} ${title}`, 250, 125, 510);
 
-  // Username line
+  // Tên thành viên
   const safeName = username || "Unknown User";
   const nameSize = fitText(ctx, safeName, 420, 34, 22);
   ctx.font = `700 ${nameSize}px "${FONT_FAMILY}"`;
@@ -178,7 +178,7 @@ async function createLevelUpCard({
   ctx.fillStyle = "#ffd7dc";
   ctx.fillText("đã đạt mốc mới trong hệ thống hoạt động của server!", 250, 214);
 
-  // Level badge
+  // Huy hiệu cấp độ
   const badgeX = 775;
   const badgeY = 78;
   roundRect(ctx, badgeX, badgeY, 240, 92, 22);
@@ -198,7 +198,7 @@ async function createLevelUpCard({
   ctx.fillStyle = "#ffffff";
   ctx.fillText(`LEVEL ${level}`, badgeX + 26, badgeY + 72);
 
-  // Info box
+  // Ô thông tin
   roundRect(ctx, 250, 240, 765, 82, 20);
   ctx.fillStyle = "rgba(255,255,255,0.05)";
   ctx.fill();

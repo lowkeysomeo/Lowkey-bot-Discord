@@ -27,7 +27,7 @@ async function main() {
         channelId,
         channel: { parentId: LEVEL_COMMAND_CHANNEL_ID },
         commandName: name,
-        memberPermissions: { has: () => true }, // Admins also use the designated channel.
+        memberPermissions: { has: () => true }, // Admin cũng phải dùng đúng kênh.
         reply: async payload => replies.push(payload),
         deferReply() { assert.fail(`${name}: public defer in wrong channel`); },
         editReply() { assert.fail(`${name}: result/image in wrong channel`); },
@@ -46,7 +46,7 @@ async function main() {
     }), /reply unavailable/);
   }
 
-  // Run each real command body in the allowed channel, mocking only Discord data and rendering.
+  // Chạy lệnh trong đúng kênh; dùng dữ liệu và bộ vẽ giả để không gọi Discord.
   for (const file of files) {
     const filename = path.join(root, 'commands/level', file);
     const localRequire = createRequire(filename);
@@ -92,7 +92,7 @@ async function main() {
     assert.equal(output.files.length, 1);
   }
 
-  // The restriction is attached only to viewing commands, not admin/music/confession/etc.
+  // Chỉ giới hạn lệnh xem rank; các lệnh quản trị, nhạc và confession vẫn như cũ.
   for (const [name, command] of commands) {
     if (!expected.includes(name)) assert(!command.execute.toString().includes('requireLevelChannel'), `${name} unexpectedly restricted`);
   }

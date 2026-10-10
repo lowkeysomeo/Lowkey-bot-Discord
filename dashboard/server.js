@@ -150,7 +150,7 @@ function createDashboard(client, options = {}) {
       }
       if (req.method === 'GET' && route === '/api/session') {
         let value;
-        try { value = session(req); } catch { /* visitor */ }
+        try { value = session(req); } catch { /* Chưa đăng nhập. */ }
         return json(res, 200, { user: value?.user || null, csrf: value?.csrf, configured, ready: client.isReady(), invite: invite() });
       }
       if (route.startsWith('/api/')) {
@@ -260,7 +260,7 @@ function createDashboard(client, options = {}) {
           const custom = { ...getOptions(guild.id), ...optionsPatch };
           if (!channel.permissionsFor(me)?.has([P.ViewChannel, P.SendMessages, P.EmbedLinks, ...(custom.confessionThreads ? [P.CreatePublicThreads] : [])])) fail(400, 'Bot thiếu quyền gửi bài hoặc tạo luồng trong kênh confession.');
         }
-        // Initialize tables before the transaction, then persist all validated changes together.
+        // Tạo bảng trước, rồi lưu các thay đổi hợp lệ trong cùng một giao dịch.
         getGuildSetting(guild.id, 'LEVEL_CHANNEL_ID'); confession.getConfig(guild.id);
         getDb().transaction(() => {
           for (const [key, id] of Object.entries(changes)) {

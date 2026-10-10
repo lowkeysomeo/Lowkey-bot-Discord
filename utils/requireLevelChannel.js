@@ -3,7 +3,7 @@ const { MessageFlags } = require('discord.js');
 const LEVEL_COMMAND_CHANNEL_ID = '1556699295212896289';
 
 async function requireLevelChannel(interaction) {
-  // Check the exact channel, so threads under it do not bypass the restriction.
+  // So khớp đúng ID kênh; luồng bên trong kênh cũng không được dùng lệnh.
   if (interaction.channelId === LEVEL_COMMAND_CHANNEL_ID) return true;
 
   await interaction.reply({

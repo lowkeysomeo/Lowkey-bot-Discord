@@ -155,7 +155,7 @@ function resetVoiceMonthlyXp(guildId) {
   `).run(Date.now(), guildId);
 }
 
-// Compatibility aliases.
+// Giữ tên hàm cũ để các lệnh trước đây vẫn dùng được.
 const addXp = addVoiceXp;
 const setLevel = setVoiceLevel;
 

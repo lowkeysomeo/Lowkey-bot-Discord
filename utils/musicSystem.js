@@ -30,7 +30,7 @@ class MusicSystem {
     this.requests.add(requestId);
     try {
       const track = await this.media.resolveTrack(query);
-      // Recheck after extraction: the member or another request may have changed channels.
+      // Kiểm tra lại kênh voice vì thành viên có thể đã chuyển kênh trong lúc tìm bài.
       const member = await interaction.guild.members.fetch(interaction.user.id);
       if ((this.revisions.get(guildId) || 0) !== revision) throw new Error('Bạn đã dừng phiên nhạc. Hãy dùng /play lại.');
       if (member.voice.channelId !== channel.id) throw new Error('Bạn đã rời kênh voice. Vào lại kênh rồi dùng /play.');
