@@ -38,7 +38,7 @@ async function main() {
       ['other', {targetId:'other',executor:{id:'wrong'},createdTimestamp:Date.now(),changes:[{key:'$add',new:[{id:'special'}]}]}],
       ['remove', {targetId:member.id,executor:{id:'wrong'},createdTimestamp:Date.now(),changes:[{key:'$remove',new:[{id:'special'}]}]}],
       ['old', {targetId:member.id,executor:{id:'wrong'},createdTimestamp:Date.now()-60000,changes:[{key:'$add',new:[{id:'special'}]}]}],
-      ['right', {targetId:member.id,executor:{id:'555555555555555555'},createdTimestamp:Date.now(),changes:[{key:'$add',new:[{id:'special'}]}]}],
+      ['right', {targetId:member.id,executor:{id:'555555555555555555',bot:false},createdTimestamp:Date.now(),changes:[{key:'$add',new:[{id:'special'}]}]}],
     ]) };
   };
   member.roles.cache.set('special',{});
@@ -46,7 +46,7 @@ async function main() {
   assert.equal(sent.length,2,'Nhận role đặc biệt từ bên ngoài');
   assert.equal(auditCalls,2,'Thử lại khi nhật ký đến chậm');
   assert(sent[1].embeds[0].toJSON().fields[1].value.includes('<@555555555555555555>'));
-  assert(!sent[1].embeds[0].toJSON().fields[0].value.includes('Level'));
+  assert(sent[1].embeds[0].toJSON().fields[0].value.includes('Admin bổ nhiệm'));
   guild.members.me.permissions = { has: () => false };
   assert.equal((await findGrantors(member,['special'],Date.now())).size,0);
   assert.equal(auditCalls,2,'Không đọc nhật ký khi thiếu quyền');
@@ -63,6 +63,7 @@ async function main() {
   failing=true; await notifyRoles(member,['special']); failing=false;
   await notifyRoles(member,['special']);
   assert.equal(sent.length,3,'Lỗi gửi không đánh dấu là đã gửi');
+  assert(sent[2].embeds[0].toJSON().fields[0].value.includes('Được trao role trong server.'));
   saveOptions(guild.id,{roleNoticeMention:false});
   getDb().prepare('DELETE FROM role_notice_history').run();
   await notifyRoles(member,['special','level']);
@@ -95,6 +96,17 @@ async function main() {
   const last=sent[sent.length-1].embeds[0].toJSON();
   assert(last.fields[0].value.includes('Voice Level 20'));
   assert(last.fields[0].value.includes('hiện tại Level 25'));
+  getDb().prepare('DELETE FROM role_notice_history').run();
+  guild.members.me.permissions = { has: () => true };
+  guild.fetchAuditLogs = async () => ({ entries: new Collection([
+    ['bot', { targetId:member.id, executor:{id:'666666666666666666',bot:true}, createdTimestamp:Date.now(), changes:[{key:'$add',new:[{id:'special'}]}] }],
+  ]) });
+  await notifyRoles(member,['special']);
+  const botNotice = sent[sent.length-1];
+  assert(botNotice.embeds[0].toJSON().fields[0].value.includes('Được cấp tự động bởi <@666666666666666666>'));
+  assert(!botNotice.embeds[0].toJSON().fields[0].value.includes('Admin bổ nhiệm'));
+  assert(botNotice.embeds[0].toJSON().fields[1].value.includes('<@666666666666666666>'));
+  assert.deepEqual(botNotice.allowedMentions.users,[]);
   console.log('Đạt: role level/role khác, bộ lọc, chống trùng, không ping cả role, quyền kênh, lỗi gửi và cấu hình từng server.');
   getDb().close();
 }

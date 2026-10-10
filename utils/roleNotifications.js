@@ -30,7 +30,7 @@ async function findGrantors(member, roleIds, since) {
       if ((entry.targetId || entry.target?.id) !== member.id || !entry.executor?.id
         || entry.createdTimestamp < since - 5000 || entry.createdTimestamp > since + 5000) continue;
       const added = entry.changes?.find(change => change.key === '$add')?.new || [];
-      for (const id of roleIds) if (!found.has(id) && added.some(role => role.id === id)) found.set(id, entry.executor.id);
+      for (const id of roleIds) if (!found.has(id) && added.some(role => role.id === id)) found.set(id, { id: entry.executor.id, bot: entry.executor.bot });
     }
     if (roleIds.every(id => found.has(id))) break;
   }
@@ -75,13 +75,16 @@ async function notifyRoles(member, added) {
     const actors = await findGrantors(member, roles.filter(id => !sources.get(id)), receivedAt);
     const reasons = roles.map(id => {
       const source = sources.get(id);
+      const actor = actors.get(id);
       const reason = source
         ? 'Đạt mốc **' + (source.type === 'voice' ? 'Voice' : 'Chat') + ' Level ' + source.threshold + '**' + (source.level > source.threshold ? ' (hiện tại Level ' + source.level + ')' : '') + '.'
-        : 'Admin bổ nhiệm';
+        : actor?.bot === true ? 'Được cấp tự động bởi <@' + actor.id + '>.'
+          : actor?.bot === false ? 'Admin bổ nhiệm'
+          : 'Được trao role trong server.';
       return '<@&' + id + '> — ' + reason;
     }).join('\n');
     const grantors = roles.map(id => {
-      const actor = sources.get(id) ? (me.id || me.user?.id) : actors.get(id);
+      const actor = sources.get(id) ? (me.id || me.user?.id) : actors.get(id)?.id;
       return '<@&' + id + '> — ' + (actor ? '<@' + actor + '>' : 'Chưa xác định được người cấp.');
     }).join('\n');
     const values = { reason: reasons, grantedBy: grantors, user: `<@${member.id}>`, username: member.displayName || member.user.username,
