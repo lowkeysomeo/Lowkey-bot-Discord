@@ -23,6 +23,13 @@ function validateCustomization(input, guild, channels, roles, me) {
     if (type === 'select' && !a.includes(value)) invalid(`${label}: lựa chọn không hợp lệ.`);
     if (type === 'text' && (typeof value !== 'string' || !value.trim() || value.length > a)) invalid(`${label}: nhập từ 1 đến ${a} ký tự.`);
     if (type === 'color' && (typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value))) invalid(`${label}: màu không hợp lệ.`);
+    if (type === 'roles') {
+      if (!Array.isArray(value) || value.length > 100 || new Set(value).size !== value.length) invalid(label + ': chọn tối đa 100 role, không trùng nhau.');
+      for (const id of value) {
+        const role = typeof id === 'string' && roles.get(id);
+        if (!role || role.id === guild.id || role.managed) invalid(label + ': role không hợp lệ trong server này.');
+      }
+    }
     if (type === 'channel') {
       if (typeof value !== 'string') invalid(`${label}: chọn kênh hợp lệ.`);
       if (!value) continue;
@@ -30,11 +37,13 @@ function validateCustomization(input, guild, channels, roles, me) {
       if (!channel || channel.guildId !== guild.id || ![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)) invalid(`${label}: kênh không hợp lệ.`);
       const mode = key.startsWith('voice') ? 'voice' : 'chat';
       const perms = [P.ViewChannel, P.SendMessages];
-      if (merged[`${mode}NoticeStyle`] === 'card') perms.push(P.AttachFiles);
-      if (merged[`${mode}NoticeStyle`] === 'embed') perms.push(P.EmbedLinks);
+      if (key === 'roleNoticeChannel') perms.push(P.EmbedLinks);
+      if (key !== 'roleNoticeChannel' && merged[`${mode}NoticeStyle`] === 'card') perms.push(P.AttachFiles);
+      if (key !== 'roleNoticeChannel' && merged[`${mode}NoticeStyle`] === 'embed') perms.push(P.EmbedLinks);
       if (!channel.permissionsFor(me)?.has(perms)) invalid(`${label}: bot thiếu quyền gửi kiểu thông báo đã chọn.`);
     }
   }
+  if (merged.roleNoticeEnabled && !merged.roleNoticeChannel) invalid('Hãy chọn kênh chúc mừng trước khi bật thông báo nhận role.');
   if (merged.chatMin > merged.chatMax) invalid('XP Chat tối thiểu không được lớn hơn XP tối đa.');
   if (input.rewards !== undefined) {
     if (!object(input.rewards)) invalid('Danh sách mốc level không hợp lệ.');

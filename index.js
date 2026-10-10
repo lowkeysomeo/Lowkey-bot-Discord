@@ -31,12 +31,17 @@ initializeDatabase();
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildVoiceStates,
   ],
 });
 
 client.commands = loadCommands();
+client.on(Events.GuildMemberUpdate, (before, after) => {
+  require('./utils/roleNotifications').handleRoleUpdate(before, after)
+    .catch(error => console.error('[ROLE NOTICE]', error.message));
+});
 client.on(Events.VoiceStateUpdate, (oldState, newState) => music.handleVoiceState(oldState, newState));
 client.on(Events.GuildDelete, guild => { const session = music.session(guild.id); if (session) music.destroy(session); });
 const dashboardServer = require('./dashboard/server').startDashboard(client);
@@ -61,6 +66,12 @@ client.once(
       `[DB] ${getDatabasePath()}`
     );
     giveaway.start(client);
+    // Nạp thành viên để phân biệt role có sẵn với role vừa được cấp.
+    for (const guild of client.guilds.cache.values()) {
+      if (getOptions(guild.id).roleNoticeEnabled) {
+        guild.members.fetch().catch(error => console.error('[ROLE NOTICE] Chưa nạp được thành viên:', error.message));
+      }
+    }
 
 
     // Cập nhật danh sách lệnh

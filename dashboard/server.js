@@ -260,6 +260,11 @@ function createDashboard(client, options = {}) {
           const custom = { ...getOptions(guild.id), ...optionsPatch };
           if (!channel.permissionsFor(me)?.has([P.ViewChannel, P.SendMessages, P.EmbedLinks, ...(custom.confessionThreads ? [P.CreatePublicThreads] : [])])) fail(400, 'Bot thiếu quyền gửi bài hoặc tạo luồng trong kênh confession.');
         }
+        if (optionsPatch.roleNoticeEnabled === true && !getOptions(guild.id).roleNoticeEnabled) {
+          // Có trạng thái role ban đầu trước khi bắt đầu theo dõi thay đổi.
+          try { await guild.members.fetch(); }
+          catch { fail(503, 'Chưa tải được thành viên. Hãy bật Server Members Intent cho bot và thử lại.'); }
+        }
         // Tạo bảng trước, rồi lưu các thay đổi hợp lệ trong cùng một giao dịch.
         getGuildSetting(guild.id, 'LEVEL_CHANNEL_ID'); confession.getConfig(guild.id);
         getDb().transaction(() => {

@@ -1,5 +1,14 @@
 const { getGuildSetting, setGuildSetting } = require('./guildSettings');
 const definitions = [
+  ['roleNoticeEnabled', 'roleNotifications', 'Bật chúc mừng nhận role', 'boolean', false],
+  ['roleNoticeChannel', 'roleNotifications', 'Kênh chúc mừng nhận role', 'channel', ''],
+  ['roleNoticeLevelRewards', 'roleNotifications', 'Tự thông báo các role thưởng level Chat và Voice', 'boolean', true],
+  ['roleNoticeRoles', 'roleNotifications', 'Các role khác được chúc mừng', 'roles', []],
+  ['roleNoticeExcludedRoles', 'roleNotifications', 'Role luôn bỏ qua (Member, game, ping…)', 'roles', []],
+  ['roleNoticeMention', 'roleNotifications', 'Tag người nhận role', 'boolean', true],
+  ['roleNoticeTitle', 'roleNotifications', 'Tiêu đề chúc mừng', 'text', '🎉 Một dấu mốc mới, một lời chúc mừng!', 150],
+  ['roleNoticeText', 'roleNotifications', 'Nội dung chúc mừng', 'text', 'Chúc mừng {user} vừa nhận được {roles}! ✨\n\nCảm ơn bạn đã là một phần của **{server}**. Mong rằng dấu mốc này sẽ mở ra thêm nhiều trải nghiệm thật đáng nhớ cùng mọi người! 💛', 1500],
+  ['roleNoticeColor', 'roleNotifications', 'Màu thông báo nhận role', 'color', '#f4bd5b'],
   ['chatEnabled', 'xp', 'Bật XP Chat', 'boolean', true],
   ['chatMin', 'xp', 'XP Chat tối thiểu / lượt', 'number', 10, 0, 1000],
   ['chatMax', 'xp', 'XP Chat tối đa / lượt', 'number', 20, 0, 1000],
@@ -88,7 +97,11 @@ async function syncRewards(member, level, type) {
   for (const roleId of new Set(rewards.map(item => item.roleId))) {
     if (targets.has(roleId) === member.roles.cache.has(roleId)) continue;
     try {
-      if (targets.has(roleId)) await member.roles.add(roleId);
+      if (targets.has(roleId)) {
+        await member.roles.add(roleId);
+        // Thông báo sau khi Discord đã cấp role thành công; sự kiện trùng sẽ được bỏ qua.
+        await require('./roleNotifications').notifyRoles(member, [roleId]);
+      }
       else await member.roles.remove(roleId);
     } catch (error) { console.error(`[${type.toUpperCase()} ROLE] ${roleId}:`, error.message); }
   }

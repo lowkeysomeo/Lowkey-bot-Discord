@@ -15,7 +15,7 @@ async function api(route, data) {
   return result;
 }
 const brand = `<div class="brand"><span class="brand-icon">V</span><span>VietNam Legacy<small>SERVER DASHBOARD</small></span></div>`;
-const labels = { overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp', monthly: 'Top tháng', confession: 'Confession', giveaway: 'Giveaway', reactionroles: 'Reaction role', leaderboard: 'Bảng xếp hạng', test: 'Gửi thử' };
+const labels = { overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp & role', monthly: 'Top tháng', confession: 'Confession', giveaway: 'Giveaway', reactionroles: 'Reaction role', leaderboard: 'Bảng xếp hạng', test: 'Gửi thử' };
 const icons = { overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', giveaway: '🎉', reactionroles: '✧', leaderboard: '≋', test: '▷' };
 function render() {
   if (!state.session?.user) {
@@ -99,6 +99,8 @@ function optionControls(group) {
   return '<div class="form-grid">' + state.data.optionDefinitions.filter(d => d[1] === group).map(([key, , label, type, , a, b]) => {
     const value = state.data.options[key], id = 'option_' + key;
     if (type === 'boolean') return '<label class="toggle-field" for="' + id + '"><span>' + h(label) + '</span><input type="checkbox" id="' + id + '" name="' + id + '" ' + (value ? 'checked' : '') + '></label>';
+    if (type === 'roles') return '<div class="field"><label>' + h(label) + '</label><input type="hidden" name="' + id + '"><div class="exclusion-list">' + state.data.roles.filter(role => !role.managed).map(role => '<label class="check-row"><input type="checkbox" data-role-option="' + key + '" value="' + h(role.id) + '" ' + (value.includes(role.id) ? 'checked' : '') + '><span>' + h(role.name) + '</span></label>').join('') + '</div></div>';
+    if (type === 'channel' && key === 'roleNoticeChannel') return field(id, label, 'channel', value);
     if (type === 'channel') return field(id, label, 'channel', value).replace('Không sử dụng', 'Dùng kênh thông báo chung');
     let input;
     if (type === 'select') input = '<select id="' + id + '" name="' + id + '">' + a.map(v => '<option value="' + h(v) + '" ' + (v === value ? 'selected' : '') + '>' + h(choiceLabels[v] || v) + '</option>').join('') + '</select>';
@@ -124,7 +126,7 @@ function customPage(page) {
       panel('Kênh và danh mục bỏ qua XP', 'Chọn danh mục sẽ bỏ qua cả các kênh bên trong. Áp dụng cho Chat và Voice.',
         '<div class="exclusion-list">' + state.data.exclusionChannels.map(channel => '<label class="check-row"><input type="checkbox" name="exclusion" value="' + h(channel.id) + '" ' + (state.data.exclusions.includes(channel.id) ? 'checked' : '') + '><span>' + (channel.type === 'category' ? '▤ ' : '# ') + h(channel.name) + '</span></label>').join('') + '</div>');
   } else if (page === 'notifications') {
-    body = panel('Thông báo lên cấp', 'Chọn kênh chung hoặc kênh riêng cho Chat và Voice.', legacyFields(['LEVEL_CHANNEL_ID']) + optionControls('notifications')) +
+    body = panel('Chúc mừng nhận role', 'Tự chúc mừng khi nhận role thưởng level hoặc role bạn chọn bên dưới. Role trong danh sách bỏ qua luôn được ưu tiên. Bỏ chọn Member, game, ping để tránh thông báo không cần thiết. Hỗ trợ {user}, {username}, {roles}, {server}. Chỉ thông báo role mới nhận sau khi bật.', optionControls('roleNotifications')) + panel('Thông báo lên cấp', 'Chọn kênh chung hoặc kênh riêng cho Chat và Voice.', legacyFields(['LEVEL_CHANNEL_ID']) + optionControls('notifications')) +
       panel('Xem trước nội dung', 'Các biến dùng được: {user}, {username}, {level}, {xp}, {server}, {type}. Xem trước không gửi tin lên Discord.',
         '<div class="notice-preview" id="notice-preview"><h3 id="notice-preview-title"></h3><p id="notice-preview-chat"></p><hr><p id="notice-preview-voice"></p></div>');
   } else {
@@ -239,7 +241,7 @@ async function save(event) {
   for (const [key, , , type] of state.data.optionDefinitions) {
     const control = form.elements.namedItem('option_' + key);
     if (!control) continue;
-    const value = type === 'boolean' ? control.checked : type === 'number' ? Number(control.value) : control.value;
+    const value = type === 'roles' ? [...form.querySelectorAll('[data-role-option="' + key + '"]:checked')].map(input => input.value) : type === 'boolean' ? control.checked : type === 'number' ? Number(control.value) : control.value;
     if (value !== state.data.options[key]) payload.options[key] = value;
   }
   if (state.page === 'level') {
