@@ -77,7 +77,7 @@ async function notifyRoles(member, added) {
       const source = sources.get(id);
       const reason = source
         ? 'Đạt mốc **' + (source.type === 'voice' ? 'Voice' : 'Chat') + ' Level ' + source.threshold + '**' + (source.level > source.threshold ? ' (hiện tại Level ' + source.level + ')' : '') + '.'
-        : 'Chưa có lý do cụ thể được cung cấp.';
+        : 'Admin bổ nhiệm';
       return '<@&' + id + '> — ' + reason;
     }).join('\n');
     const grantors = roles.map(id => {
