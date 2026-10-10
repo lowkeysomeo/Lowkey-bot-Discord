@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 process.env.DB_PATH = ':memory:';
 const { Collection } = require('discord.js');
 const { saveOptions, saveRewards, syncRewards, getOptions } = require('../utils/customization');
-const { handleRoleUpdate, notifyRoles } = require('../utils/roleNotifications');
+const { handleRoleUpdate, notifyRoles, findGrantors } = require('../utils/roleNotifications');
 const { validateCustomization } = require('../dashboard/customization');
 const { getDb } = require('../utils/database');
 async function main() {
@@ -11,7 +11,7 @@ async function main() {
   let failing = false;
   const guild = { id: '111111111111111111', name: 'Server thử',
     roles: { cache: new Collection(['level','special','member','game','ping','managed'].map(id => [id, {id, managed:id === 'managed'}])) },
-    members: { me: {} }, channels: {} };
+    members: { me: { id: '444444444444444444' } }, channels: {} };
   const channel = { id:'222222222222222222', guildId:guild.id, type:0,
     permissionsFor:()=>({has:()=>canSend}), send:async payload=>{ if(failing) throw new Error('Mạng tạm lỗi'); sent.push(payload); } };
   guild.channels.fetch = async () => channel;
@@ -27,9 +27,29 @@ async function main() {
   assert.equal(sent.length,0,'Bỏ qua role thường, role hệ thống và danh sách loại trừ');
   await Promise.all([syncRewards(member,2,'chat'),notifyRoles(member,['level'])]);
   assert.equal(sent.length,1,'Lệnh cấp role và sự kiện không gửi trùng');
+  const first = sent[0].embeds[0].toJSON();
+  assert(first.fields[0].value.includes('Chat Level 2'));
+  assert(first.fields[1].value.includes('<@444444444444444444>'));
+  let auditCalls = 0;
+  guild.members.me.permissions = { has: () => true };
+  guild.fetchAuditLogs = async () => {
+    auditCalls++;
+    return { entries: new Collection(auditCalls === 1 ? [] : [
+      ['other', {targetId:'other',executor:{id:'wrong'},createdTimestamp:Date.now(),changes:[{key:'$add',new:[{id:'special'}]}]}],
+      ['remove', {targetId:member.id,executor:{id:'wrong'},createdTimestamp:Date.now(),changes:[{key:'$remove',new:[{id:'special'}]}]}],
+      ['old', {targetId:member.id,executor:{id:'wrong'},createdTimestamp:Date.now()-60000,changes:[{key:'$add',new:[{id:'special'}]}]}],
+      ['right', {targetId:member.id,executor:{id:'555555555555555555'},createdTimestamp:Date.now(),changes:[{key:'$add',new:[{id:'special'}]}]}],
+    ]) };
+  };
   member.roles.cache.set('special',{});
   await handleRoleUpdate(snapshot('level'),member);
   assert.equal(sent.length,2,'Nhận role đặc biệt từ bên ngoài');
+  assert.equal(auditCalls,2,'Thử lại khi nhật ký đến chậm');
+  assert(sent[1].embeds[0].toJSON().fields[1].value.includes('<@555555555555555555>'));
+  assert(!sent[1].embeds[0].toJSON().fields[0].value.includes('Level'));
+  guild.members.me.permissions = { has: () => false };
+  assert.equal((await findGrantors(member,['special'],Date.now())).size,0);
+  assert.equal(auditCalls,2,'Không đọc nhật ký khi thiếu quyền');
   assert.deepEqual(sent[1].allowedMentions,{parse:[],users:[member.id],roles:[]});
   assert(sent[1].embeds[0].toJSON().description.includes('<@&special>'));
   await handleRoleUpdate(snapshot('level','special'),member);
@@ -63,6 +83,18 @@ async function main() {
   assert.throws(()=>validate({roleNoticeRoles:'special'}));
   assert.equal(validate({roleNoticeRoles:['special']}).roleNoticeRoles[0],'special');
   assert.equal(getOptions(guild.id).roleNoticeChannel,channel.id);
+  getDb().prepare('DELETE FROM role_notice_history').run();
+  saveRewards(guild.id,'voice',[{level:20,roleId:'level'}]);
+  member.roles.cache.delete('level');
+  member.roles.add = async id => {
+    const before=snapshot(...member.roles.cache.keys());
+    member.roles.cache.set(id,{});
+    void handleRoleUpdate(before,member);
+  };
+  await syncRewards(member,25,'voice');
+  const last=sent[sent.length-1].embeds[0].toJSON();
+  assert(last.fields[0].value.includes('Voice Level 20'));
+  assert(last.fields[0].value.includes('hiện tại Level 25'));
   console.log('Đạt: role level/role khác, bộ lọc, chống trùng, không ping cả role, quyền kênh, lỗi gửi và cấu hình từng server.');
   getDb().close();
 }

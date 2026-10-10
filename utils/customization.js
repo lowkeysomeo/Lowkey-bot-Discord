@@ -98,9 +98,9 @@ async function syncRewards(member, level, type) {
     if (targets.has(roleId) === member.roles.cache.has(roleId)) continue;
     try {
       if (targets.has(roleId)) {
-        await member.roles.add(roleId);
-        // Thông báo sau khi Discord đã cấp role thành công; sự kiện trùng sẽ được bỏ qua.
-        await require('./roleNotifications').notifyRoles(member, [roleId]);
+        // Ghi nguồn cấp trước khi gọi Discord để sự kiện role luôn có đúng lý do.
+        const threshold = eligible.find(reward => reward.roleId === roleId).level;
+        await require('./roleNotifications').grantLevelRole(member, roleId, type, level, threshold);
       }
       else await member.roles.remove(roleId);
     } catch (error) { console.error(`[${type.toUpperCase()} ROLE] ${roleId}:`, error.message); }
