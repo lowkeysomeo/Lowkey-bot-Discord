@@ -1,6 +1,13 @@
 const { getGuildSetting, setGuildSetting } = require('./guildSettings');
 const definitions = [
   ['securityBotApproval','security','Cách ly bot mới và chờ chủ server xét duyệt','boolean',true],
+  ['channelGuardEnabled','security','Bảo vệ kênh: tạo lại kênh bị xóa không được phép và cảnh báo','boolean',false],
+  ['chatModEnabled','moderation','Bật lệnh kiểm duyệt trực tiếp trong chat','boolean',true],
+  ['chatModBanCmd','moderation','Từ khóa lệnh Ban trong chat (không dấu /)','text','vnban',32],
+  ['chatModKickCmd','moderation','Từ khóa lệnh Kick trong chat (không dấu /)','text','vnkick',32],
+  ['chatModTimeoutCmd','moderation','Từ khóa lệnh Hạn chế (Timeout) trong chat (không dấu /)','text','vntimeout',32],
+  ['chatModUntimeoutCmd','moderation','Từ khóa lệnh Gỡ hạn chế (Untimeout) trong chat (không dấu /)','text','vnuntimeout',32],
+  ['modLogChannel','moderation','Kênh thông báo xử phạt (Ban/Kick/Timeout)','channel','1555457471596724274'],
   ['securityRoleGuard','security','Gỡ role nhạy cảm cấp cho tài khoản mới','boolean',true],
   ['securityAccountDays','security','Tuổi tài khoản an toàn tối thiểu (ngày)','number',7,1,365],
   ['securityMemberDays','security','Thời gian ở server an toàn tối thiểu (ngày)','number',7,1,365],

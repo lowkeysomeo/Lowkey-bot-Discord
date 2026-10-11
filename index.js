@@ -131,6 +131,10 @@ client.on(
   Events.MessageCreate,
   async (message) => {
     if (!message.guild || message.author.bot) return;
+
+    // Xử lý lệnh moderation gõ trực tiếp trong chat (vnban, vnkick, vntimeout, vnuntimeout)
+    if (await require('./utils/chatModeration').handleChatModeration(message)) return;
+
     const options = getOptions(message.guild.id);
     if (!options.chatEnabled) return;
 

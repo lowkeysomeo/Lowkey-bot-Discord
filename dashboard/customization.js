@@ -22,6 +22,7 @@ function validateCustomization(input, guild, channels, roles, me) {
     if (type === 'number' && (!Number.isInteger(value) || value < a || value > b)) invalid(`${label}: nhập số nguyên từ ${a} đến ${b}.`);
     if (type === 'select' && !a.includes(value)) invalid(`${label}: lựa chọn không hợp lệ.`);
     if (type === 'text' && (typeof value !== 'string' || !value.trim() || value.length > a)) invalid(`${label}: nhập từ 1 đến ${a} ký tự.`);
+    if (key.startsWith('chatMod') && key.endsWith('Cmd') && /\s/.test(value.trim())) invalid(`${label}: từ khóa không được chứa khoảng trắng.`);
     if (type === 'color' && (typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value))) invalid(`${label}: màu không hợp lệ.`);
     if (key === 'securityTrusted' && (typeof value !== 'string' || (value !== 'none' && !/^\d{17,20}(?:[\s,]+\d{17,20})*$/.test(value.trim())))) invalid('Danh sách tin cậy: nhập ID Discord cách nhau bằng dấu phẩy hoặc none.');
     if (type === 'role') {
@@ -46,9 +47,9 @@ function validateCustomization(input, guild, channels, roles, me) {
       if (!channel || channel.guildId !== guild.id || ![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)) invalid(`${label}: kênh không hợp lệ.`);
       const mode = key.startsWith('voice') ? 'voice' : 'chat';
       const perms = [P.ViewChannel, P.SendMessages];
-      if (key === 'roleNoticeChannel' || key === 'inviteChannel') perms.push(P.EmbedLinks);
-      if (!['roleNoticeChannel','inviteChannel','securityLogChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'card') perms.push(P.AttachFiles);
-      if (!['roleNoticeChannel','inviteChannel','securityLogChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'embed') perms.push(P.EmbedLinks);
+      if (key === 'roleNoticeChannel' || key === 'inviteChannel' || key === 'modLogChannel') perms.push(P.EmbedLinks);
+      if (!['roleNoticeChannel','inviteChannel','securityLogChannel','modLogChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'card') perms.push(P.AttachFiles);
+      if (!['roleNoticeChannel','inviteChannel','securityLogChannel','modLogChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'embed') perms.push(P.EmbedLinks);
       if (!channel.permissionsFor(me)?.has(perms)) invalid(`${label}: bot thiếu quyền gửi kiểu thông báo đã chọn.`);
     }
   }

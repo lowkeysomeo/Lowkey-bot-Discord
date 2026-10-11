@@ -16,12 +16,26 @@ async function alert(guild, text) {
   try { const channel = await guild.channels.fetch(id); await channel.send({ content: `🛡️ ${text}`.slice(0,1900), allowedMentions: { parse: [] } }); }
   catch (error) { console.error('[SECURITY LOG]', error.message); }
 }
-async function punish(member, kind) {
-  if (kind === 'ban') { if (!member.bannable) throw Error('Bot không đủ quyền/vị trí role để ban.'); await member.ban({ reason }); }
-  else if (kind === 'kick') { if (!member.kickable) throw Error('Bot không đủ quyền/vị trí role để kick.'); await member.kick(reason); }
-  else { if (!member.moderatable) throw Error('Bot không thể timeout thành viên này.'); await member.timeout(10 * 60 * 1000, reason); }
+async function punish(member, kind, customReason = reason) {
+  if (kind === 'ban') { if (!member.bannable) throw Error('Bot không đủ quyền/vị trí role để ban.'); await member.ban({ reason: customReason }); }
+  else if (kind === 'kick') { if (!member.kickable) throw Error('Bot không đủ quyền/vị trí role để kick.'); await member.kick(customReason); }
+  else { if (!member.moderatable) throw Error('Bot không thể timeout thành viên này.'); await member.timeout(10 * 60 * 1000, customReason); }
+  const g = member.guild;
+  if (g) {
+    require('./modLog').sendModLog(g, {
+      action: kind === 'ban' ? 'ban' : kind === 'kick' ? 'kick' : 'timeout',
+      target: member.user || member,
+      mod: null,
+      reason: customReason,
+      duration: kind === 'timeout' ? 10 * 60 * 1000 : undefined,
+    }).catch(e => console.error('[MOD LOG]', e.message));
+  }
 }
 async function audit(entry, guild) {
+  // Channel Guard: xử lý riêng cho sự kiện xóa kênh (bất kể securityNuke có bật hay không).
+  if (entry.action === A.ChannelDelete) {
+    require('./channelGuard').onAuditLog(entry, guild).catch(error => console.error('[CHANNEL GUARD]', error.message));
+  }
   const o = getOptions(guild.id), id = entry.executorId;
   if (!o.securityEnabled || !o.securityNuke || !id || trusted(guild,id,o) || !watched.has(entry.action)) return;
   if (Date.now() - entry.createdTimestamp > 15000 || seen.has(entry.id)) return;
@@ -32,7 +46,7 @@ async function audit(entry, guild) {
   busy.add(key);
   try {
     const member = await guild.members.fetch(id);
-    await punish(member,o.securityNukeAction);
+    await punish(member,o.securityNukeAction,'Anti-nuke: thao tác quản trị vượt ngưỡng');
     await alert(guild,`Anti-nuke: ${o.securityNukeAction} ${id}; hành động Audit Log ${entry.action}.`);
   } catch (error) { await alert(guild,`KHÔNG CHẶN ĐƯỢC ${id}: ${error.message}`); }
   finally { busy.delete(key); }
@@ -47,7 +61,7 @@ async function joined(member) {
     await alert(guild,`Phát hiện raid: chặn người vào mới trong ${o.securityGateMinutes} phút. Người đã vào trước ngưỡng vẫn chịu kiểm tra spam.`);
   }
   if (until > Date.now()) {
-    try { await punish(member,'kick'); }
+    try { await punish(member,'kick','Anti-raid: chặn người vào mới trong đợt raid'); }
     catch (error) { await alert(guild,`Không kick được thành viên raid ${member.id}: ${error.message}`); }
   }
 }
@@ -63,7 +77,7 @@ async function message(msg) {
   try { if (msg.deletable) await msg.delete(); } catch (error) { console.error('[SECURITY DELETE]',error.message); }
   if (busy.has(key)) return;
   busy.add(key);
-  try { await punish(msg.member,'timeout'); await alert(msg.guild,`Đã timeout ${msg.author.id} 10 phút do spam/mass mention.`); }
+  try { await punish(msg.member,'timeout','Anti-spam: spam tin nhắn / mass mention'); await alert(msg.guild,`Đã timeout ${msg.author.id} 10 phút do spam/mass mention.`); }
   catch (error) { await alert(msg.guild,`Không timeout được ${msg.author.id}: ${error.message}`); }
   finally { busy.delete(key); }
 }
@@ -85,5 +99,5 @@ function start(client) {
     for (const [key,time] of seen) if (now-time>60000) seen.delete(key);
   },60000); timer.unref();
 }
-function requiredPermissions() { return [P.ViewAuditLog,P.BanMembers,P.KickMembers,P.ModerateMembers,P.ManageMessages,P.ManageRoles]; }
+function requiredPermissions() { return [P.ViewAuditLog,P.BanMembers,P.KickMembers,P.ModerateMembers,P.ManageMessages,P.ManageRoles,P.ManageChannels]; }
 module.exports = { start, audit, joined, message, hit, trusted, requiredPermissions };

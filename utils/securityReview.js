@@ -98,8 +98,8 @@ async function handleButton(i){
     await role.setPermissions(BigInt(permissions),'Chủ server đã cho phép bot');
    }
    for(const id of saved.roles||[]){const role=await i.guild.roles.fetch(id);if(!role?.editable)throw Error('Không khôi phục được role '+id);await member.roles.add(id,'Chủ server đã cho phép bot');}
-  }else if(action==='kick'){if(!member.kickable)throw Error('Không đủ quyền đuổi bot.');await member.kick('Chủ server từ chối bot');}
-  else{if(!member.bannable)throw Error('Không đủ quyền cấm bot.');await member.ban({reason:'Chủ server từ chối bot'});}
+  }else if(action==='kick'){if(!member.kickable)throw Error('Không đủ quyền đuổi bot.');await member.kick('Chủ server từ chối bot');require('./modLog').sendModLog(i.guild,{action:'kick',target:member.user||member,mod:i.user,reason:'Chủ server từ chối bot'}).catch(()=>{});}
+  else{if(!member.bannable)throw Error('Không đủ quyền cấm bot.');await member.ban({reason:'Chủ server từ chối bot'});require('./modLog').sendModLog(i.guild,{action:'ban',target:member.user||member,mod:i.user,reason:'Chủ server từ chối bot'}).catch(()=>{});}
   db().prepare('UPDATE security_reviews SET status=? WHERE id=?').run(['grant','allow'].includes(action)?'approved':action,id);
   await i.message.edit({components:[buttons(row,true)]}).catch(()=>{});
   return await i.editReply(({grant:'✅ Đã cấp lại role.',allow:'✅ Đã cho phép bot và khôi phục các role/quyền đã lưu.',kick:'👢 Đã đuổi bot.',ban:'🔨 Đã cấm bot.'})[action]);

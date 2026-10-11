@@ -20,11 +20,11 @@ async function resolveLeaderboardEntries(guild, rows, scoreField, limit = 10) {
         score: Number(row[scoreField]) || 0,
       });
     } catch (error) {
-      // Bỏ qua: đã rời server (10007), bị ban (40014), hoặc lỗi mạng tạm thời trên Railway.
-      // Không throw để tránh crash toàn bộ leaderboard.
+      // Bỏ qua: đã rời server (10007) hoặc bị ban (40014) — thành viên không còn trong server.
       const code = Number(error.code);
-      if (code === 10007 || code === 40014 || code === 50013) continue;
-      console.warn(`[LEADERBOARD] Bỏ qua ${row.userId}: ${error.message}`);
+      if (code === 10007 || code === 40014) continue;
+      // Mọi lỗi khác (50013 thiếu quyền, ECONNRESET, lỗi mạng…) throw lên để caller retry.
+      throw error;
     }
   }
 
