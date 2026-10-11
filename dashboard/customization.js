@@ -47,9 +47,9 @@ function validateCustomization(input, guild, channels, roles, me) {
       if (!channel || channel.guildId !== guild.id || ![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)) invalid(`${label}: kênh không hợp lệ.`);
       const mode = key.startsWith('voice') ? 'voice' : 'chat';
       const perms = [P.ViewChannel, P.SendMessages];
-      if (key === 'roleNoticeChannel' || key === 'inviteChannel' || key === 'modLogChannel') perms.push(P.EmbedLinks);
-      if (!['roleNoticeChannel','inviteChannel','securityLogChannel','modLogChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'card') perms.push(P.AttachFiles);
-      if (!['roleNoticeChannel','inviteChannel','securityLogChannel','modLogChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'embed') perms.push(P.EmbedLinks);
+      if (key === 'roleNoticeChannel' || key === 'inviteChannel' || key === 'modLogChannel' || key === 'confessionNoticeChannel') perms.push(P.EmbedLinks);
+      if (!['roleNoticeChannel','inviteChannel','securityLogChannel','modLogChannel','confessionNoticeChannel','confessionMilestoneChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'card') perms.push(P.AttachFiles);
+      if (!['roleNoticeChannel','inviteChannel','securityLogChannel','modLogChannel','confessionNoticeChannel','confessionMilestoneChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'embed') perms.push(P.EmbedLinks);
       if (!channel.permissionsFor(me)?.has(perms)) invalid(`${label}: bot thiếu quyền gửi kiểu thông báo đã chọn.`);
     }
   }

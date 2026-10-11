@@ -99,7 +99,7 @@ function optionControls(group) {
   return '<div class="form-grid">' + state.data.optionDefinitions.filter(d => d[1] === group).map(([key, , label, type, , a, b]) => {
     const value = state.data.options[key], id = 'option_' + key;
     if (type === 'boolean') return '<label class="toggle-field" for="' + id + '"><span>' + h(label) + '</span><input type="checkbox" id="' + id + '" name="' + id + '" ' + (value ? 'checked' : '') + '></label>';
-    if (type === 'role' || (type === 'channel' && ['inviteChannel','securityLogChannel','modLogChannel'].includes(key))) return field(id,label,type,value);
+    if (type === 'role' || (type === 'channel' && ['inviteChannel','securityLogChannel','modLogChannel','confessionNoticeChannel','confessionMilestoneChannel'].includes(key))) return field(id,label,type,value);
     if (type === 'roles') return '<div class="field"><label>' + h(label) + '</label><input type="hidden" name="' + id + '"><div class="exclusion-list">' + state.data.roles.filter(role => !role.managed).map(role => '<label class="check-row"><input type="checkbox" data-role-option="' + key + '" value="' + h(role.id) + '" ' + (value.includes(role.id) ? 'checked' : '') + '><span>' + h(role.name) + '</span></label>').join('') + '</div></div>';
     if (type === 'channel' && key === 'roleNoticeChannel') return field(id, label, 'channel', value);
     if (type === 'channel') return field(id, label, 'channel', value).replace('Không sử dụng', 'Dùng kênh thông báo chung');
@@ -148,6 +148,7 @@ function confessionPage() {
   return heading('MỘT GÓC ĐỂ SẺ CHIA', 'Confession', 'Tùy chỉnh bài đăng, tương tác và thời gian chờ gửi bài.') +
     '<div class="card card-body"><h2>Bảng chọn cách chia sẻ</h2><p>Hai nút Công khai và Ẩn danh mở ô viết riêng. Công khai hiện tên/avatar; ẩn danh không hiện người gửi. Bảng được đăng vào kênh confession đã lưu.</p><button class="secondary" id="confession-panel-send">Đăng / cập nhật bảng confession</button><div id="confession-panel-result"></div></div><form id="settings-form">' + panel('Bài đăng confession', 'Tiêu đề hỗ trợ {number} và {server}. Số thứ tự hiện tại luôn được giữ.',
       field('confessionChannel', 'Đăng confession tại', 'channel', state.data.confessionChannel, true) + optionControls('confession')) +
+      panel('Thưởng role mốc confession', 'Tự động trao role khi thành viên gửi đủ mốc confession và thông báo chúc mừng lên kênh riêng.', optionControls('confessionRewards')) +
     '<div class="note">Thay đổi giao diện và bật/tắt luồng áp dụng cho bài mới. Bình luận trong luồng hiển thị tài khoản người viết. Bot cần Create Public Threads khi bật bình luận.</div>' + savebar + '</form>';
 }
 function updateNoticePreview() {

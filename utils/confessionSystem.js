@@ -87,6 +87,15 @@ async function confess(interaction, submission = null) {
       await message.edit({ components: [] }).catch(() => {});
       return interaction.editReply(`✅ Đã đăng confession #${label}. Nút thích tạm thời không khả dụng.`);
     }
+    try {
+      await require('./confessionRewards').recordAndCheckMilestone(
+        interaction.guild,
+        interaction.user.id,
+        channel.id
+      );
+    } catch (rewardError) {
+      console.error('[CONFESSION REWARD]', rewardError.message);
+    }
     if (!options.confessionThreads) return interaction.editReply(`✅ Confession #${label} đã được đăng ${visibility} vào <#${channel.id}>.`);
     try {
       await message.startThread({

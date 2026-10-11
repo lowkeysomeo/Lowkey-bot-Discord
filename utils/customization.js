@@ -80,6 +80,10 @@ const definitions = [
   ['confessionPanelTitle', 'confession', 'Tiêu đề bảng gửi confession', 'text', '💌 Trạm sẻ chia · {server}', 150],
   ['confessionPanelText', 'confession', 'Lời giới thiệu bảng gửi confession', 'text', 'Có một câu chuyện bạn muốn kể, một lời cảm ơn chưa kịp nói hay đôi điều cần được lắng nghe? Hãy để lại những dòng của bạn tại đây.\n\nChọn cách chia sẻ bên dưới. Cùng giữ góc nhỏ này tử tế, tôn trọng và không tiết lộ thông tin riêng tư của người khác.', 2000],
   ['confessionColor', 'confession', 'Màu confession', 'color', '#e891b2'],
+  ['confessionMilestone', 'confessionRewards', 'Mốc confession nhận thưởng', 'number', 100, 1, 1000],
+  ['confessionRole', 'confessionRewards', 'Role thưởng mốc confession', 'role', '1558809856973082737'],
+  ['confessionMilestoneChannel', 'confessionRewards', 'Kênh confession tính mốc thưởng', 'channel', '1556975173767270450'],
+  ['confessionNoticeChannel', 'confessionRewards', 'Kênh thông báo chúc mừng nhận role', 'channel', '1558774418379903086'],
 ];
 const defaults = Object.fromEntries(definitions.map(([key, , , , value]) => [key, value]));
 function getOptions(guildId) {
