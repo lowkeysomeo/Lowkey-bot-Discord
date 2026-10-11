@@ -147,6 +147,17 @@ function remapChannelId(guildId, oldId, newId) {
   } catch (error) {
     console.error('[CHANNEL GUARD] Lỗi cập nhật DASHBOARD_OPTIONS:', error.message);
   }
+
+  // 3. Cập nhật bảng cấu hình kênh confession_config
+  try {
+    db.prepare(`
+      UPDATE confession_config
+      SET channel_id = ?
+      WHERE guild_id = ? AND channel_id = ?
+    `).run(newId, guildId, oldId);
+  } catch (error) {
+    console.error('[CHANNEL GUARD] Lỗi cập nhật confession_config:', error.message);
+  }
 }
 
 
