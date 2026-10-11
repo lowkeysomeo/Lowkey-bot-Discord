@@ -237,6 +237,7 @@ function createDashboard(client, options = {}) {
         if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
         const input = await body(req);
         if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'Dữ liệu không hợp lệ.');
+        if (input.options && Object.keys(input.options).some(key => key.startsWith('security')) && value.user.id !== guild.ownerId) fail(403, 'Chỉ chủ server được thay đổi bảo vệ.');
         const optionsPatch = validateCustomization(input, guild, channels, roles, me);
         const changes = input.settings || {};
         if (typeof changes !== 'object' || Array.isArray(changes)) fail(400, 'Cấu hình không hợp lệ.');

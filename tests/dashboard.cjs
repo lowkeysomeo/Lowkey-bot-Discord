@@ -74,6 +74,15 @@ async function main() {
     assert.equal(getGuildSetting('222', 'LEVEL_CHANNEL_ID'), null);
     assert.equal(confession.getConfig('111').channel_id, '333');
     const customPost = async body => request('/api/guilds/111/settings', { method: 'POST', headers: postHeaders, body: JSON.stringify(body) });
+    guild.ownerId = 'someone-else';
+    assert.equal((await customPost({ options: { securityEnabled: false } })).status, 403, 'Admin cannot change security');
+    guild.ownerId = '444';
+    assert.equal((await customPost({ options: { securityEnabled: true, securityLogChannel: '333', securityTrusted: 'none' } })).status, 200, 'Owner can enable security');
+    assert.equal(require('../utils/customization').getOptions('111').securityEnabled, true);
+    assert.equal(require('../utils/customization').getOptions('222').securityEnabled, false);
+    assert.equal((await customPost({ options: { securityNukeLimit: 0 } })).status, 400);
+    assert.equal((await customPost({ options: { securityTrusted: 'bad' } })).status, 400);
+    assert.equal((await customPost({ options: { securityEnabled: false } })).status, 200);
     for (const bad of [
       { options: { chatMin: 30, chatMax: 10 } }, { options: { chatEnabled: 'yes' } },
       { options: { chatCooldown: 0 } }, { options: { noticeColor: 'red' } },

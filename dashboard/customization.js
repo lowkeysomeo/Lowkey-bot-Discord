@@ -23,6 +23,7 @@ function validateCustomization(input, guild, channels, roles, me) {
     if (type === 'select' && !a.includes(value)) invalid(`${label}: lựa chọn không hợp lệ.`);
     if (type === 'text' && (typeof value !== 'string' || !value.trim() || value.length > a)) invalid(`${label}: nhập từ 1 đến ${a} ký tự.`);
     if (type === 'color' && (typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value))) invalid(`${label}: màu không hợp lệ.`);
+    if (key === 'securityTrusted' && (typeof value !== 'string' || (value !== 'none' && !/^\d{17,20}(?:[\s,]+\d{17,20})*$/.test(value.trim())))) invalid('Danh sách tin cậy: nhập ID Discord cách nhau bằng dấu phẩy hoặc none.');
     if (type === 'role') {
       if(typeof value !== 'string')invalid(label + ': chọn role hợp lệ.');
       if(value) {
@@ -46,10 +47,14 @@ function validateCustomization(input, guild, channels, roles, me) {
       const mode = key.startsWith('voice') ? 'voice' : 'chat';
       const perms = [P.ViewChannel, P.SendMessages];
       if (key === 'roleNoticeChannel' || key === 'inviteChannel') perms.push(P.EmbedLinks);
-      if (!['roleNoticeChannel','inviteChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'card') perms.push(P.AttachFiles);
-      if (!['roleNoticeChannel','inviteChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'embed') perms.push(P.EmbedLinks);
+      if (!['roleNoticeChannel','inviteChannel','securityLogChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'card') perms.push(P.AttachFiles);
+      if (!['roleNoticeChannel','inviteChannel','securityLogChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'embed') perms.push(P.EmbedLinks);
       if (!channel.permissionsFor(me)?.has(perms)) invalid(`${label}: bot thiếu quyền gửi kiểu thông báo đã chọn.`);
     }
+  }
+  if (Object.keys(patch).some(key=>key.startsWith('security')) && merged.securityEnabled) {
+    if (!merged.securityLogChannel) invalid('Chọn kênh cảnh báo trước khi bật bảo vệ.');
+    if (!me.permissions.has(require('../utils/securitySystem').requiredPermissions())) invalid('Bot cần View Audit Log, Ban Members, Kick Members, Moderate Members, Manage Messages và Manage Roles.');
   }
   if(merged.inviteEnabled && !merged.inviteChannel)invalid('Chọn kênh thông báo invite trước khi bật.');
   if(merged.inviteRole50 && merged.inviteRole50===merged.inviteRole100)invalid('Hai mốc invite cần chọn hai role khác nhau.');

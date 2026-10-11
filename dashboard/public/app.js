@@ -15,8 +15,8 @@ async function api(route, data) {
   return result;
 }
 const brand = `<div class="brand"><span class="brand-icon">V</span><span>VietNam Legacy<small>SERVER DASHBOARD</small></span></div>`;
-const labels = { invites: 'Lời mời & Role', overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp & role', monthly: 'Top tháng', confession: 'Confession', giveaway: 'Giveaway', reactionroles: 'Reaction role', leaderboard: 'Bảng xếp hạng', test: 'Gửi thử' };
-const icons = { invites: '💌', overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', giveaway: '🎉', reactionroles: '✧', leaderboard: '≋', test: '▷' };
+const labels = { security: 'Bảo vệ server', invites: 'Lời mời & Role', overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp & role', monthly: 'Top tháng', confession: 'Confession', giveaway: 'Giveaway', reactionroles: 'Reaction role', leaderboard: 'Bảng xếp hạng', test: 'Gửi thử' };
+const icons = { security: '🛡️', invites: '💌', overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', giveaway: '🎉', reactionroles: '✧', leaderboard: '≋', test: '▷' };
 function render() {
   if (!state.session?.user) {
     app.innerHTML = `<div class="login"><section class="login-art">${brand}<div class="login-copy"><span class="eyebrow">MỘT NƠI. CẢ CỘNG ĐỒNG.</span><h1>Server của bạn.<br><span>Theo cách của bạn.</span></h1><p>Chăm chút cộng đồng cùng VietNam Legacy. Quản lý level, role thưởng và những câu chuyện ẩn danh trong một nơi.</p><div class="login-pills"><span>↗ Level & Role</span><span>♡ Confession</span><span>≋ Bảng xếp hạng</span></div></div><p class="login-foot">VIETNAM LEGACY · DÀNH CHO CỘNG ĐỒNG CỦA BẠN</p></section><section class="login-panel"><div class="login-box"><span class="badge purple">BẢNG ĐIỀU KHIỂN</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng Discord để chọn server và bắt đầu quản lý.</p>${state.session?.configured ? '<a class="primary" href="/auth/discord">Đăng nhập bằng Discord <span>↗</span></a>' : '<button class="primary" disabled>Đăng nhập Discord</button><div class="error">Dashboard đang chờ hoàn tất kết nối đăng nhập Discord. Chủ bot cần cấu hình OAuth2 để mở đăng nhập.</div>'}<p class="subtle">Chỉ chủ server và thành viên có quyền Administrator được quản lý cấu hình.</p></div></section></div>`;
@@ -72,7 +72,7 @@ function content() {
   if (state.page === 'giveaway') return giveawayPage();
   if (state.page === 'test') return testPage();
   if (state.page === 'level') return levelPage();
-  if (['xp', 'notifications', 'monthly', 'invites'].includes(state.page)) return customPage(state.page);
+  if (['xp', 'notifications', 'monthly', 'invites', 'security'].includes(state.page)) return customPage(state.page);
   if (state.page === 'confession') return confessionPage();
   if (state.page === 'leaderboard') return leaderboardPage();
   const stats = state.data.stats;
@@ -99,7 +99,7 @@ function optionControls(group) {
   return '<div class="form-grid">' + state.data.optionDefinitions.filter(d => d[1] === group).map(([key, , label, type, , a, b]) => {
     const value = state.data.options[key], id = 'option_' + key;
     if (type === 'boolean') return '<label class="toggle-field" for="' + id + '"><span>' + h(label) + '</span><input type="checkbox" id="' + id + '" name="' + id + '" ' + (value ? 'checked' : '') + '></label>';
-    if (type === 'role' || (type === 'channel' && key === 'inviteChannel')) return field(id,label,type,value);
+    if (type === 'role' || (type === 'channel' && ['inviteChannel','securityLogChannel'].includes(key))) return field(id,label,type,value);
     if (type === 'roles') return '<div class="field"><label>' + h(label) + '</label><input type="hidden" name="' + id + '"><div class="exclusion-list">' + state.data.roles.filter(role => !role.managed).map(role => '<label class="check-row"><input type="checkbox" data-role-option="' + key + '" value="' + h(role.id) + '" ' + (value.includes(role.id) ? 'checked' : '') + '><span>' + h(role.name) + '</span></label>').join('') + '</div></div>';
     if (type === 'channel' && key === 'roleNoticeChannel') return field(id, label, 'channel', value);
     if (type === 'channel') return field(id, label, 'channel', value).replace('Không sử dụng', 'Dùng kênh thông báo chung');
@@ -122,7 +122,10 @@ function levelPage() {
 }
 function customPage(page) {
   let body;
-  if (page === 'invites') {
+  if (page === 'security') {
+    body = panel('Bảo vệ server', 'Chỉ chủ server được lưu cấu hình này. Lưu xong áp dụng ngay, không cần khởi động lại.', optionControls('security')) +
+      '<div class="note">Bot mới: gỡ các role có thể gỡ và tắt quyền role riêng của bot trong lúc chờ chủ server xét duyệt bằng nút trong kênh cảnh báo. Bot vẫn có thể có quyền cơ bản của @everyone hoặc quyền riêng của kênh. Không cách ly được quyền nhạy cảm thì thử đuổi bot và báo lỗi. Role nhạy cảm cấp cho người có tuổi tài khoản HOẶC thời gian ở server dưới ngưỡng sẽ bị gỡ, có nút Vẫn cấp role để chủ server duyệt. Không tự xét duyệt người cấp role. Các tùy chọn này chỉ áp dụng khi bật bảo vệ; cách ly đang chờ vẫn được duy trì khi tắt tùy chọn cách ly bot mới. Cần thêm Manage Roles. Chủ server và chính bot luôn được tin cậy. Danh sách tin cậy bỏ qua mọi kiểm tra: chỉ thêm ID thực sự cần thiết. Chống nuke cộng chung các thao tác tạo/sửa/xóa kênh, role, quyền kênh, webhook, sửa server, cấp/gỡ role, kick, ban, prune, thêm bot và xóa AutoMod. Mặc định 3 thao tác/10 giây sẽ BAN người thực hiện, kể cả admin và bot khác; đặt ngưỡng 1 nếu muốn xử lý ngay thao tác đầu tiên. Thêm bot quản lý hợp lệ vào danh sách tin cậy trước khi bật. Raid: kick người vào từ lúc đạt ngưỡng cho đến hết thời gian chặn; người vào trước ngưỡng không bị kick tự động. Spam: xóa tin vi phạm và timeout 10 phút; @everyone/@here bị xử lý ngay. Role bảo vệ phải cao hơn người/bot cần xử lý. Bot cần View Audit Log, Ban Members, Kick Members, Moderate Members, Manage Messages; Server Members Intent phải bật. Đây là xử lý sau sự kiện: các thao tác đầu tiên có thể đã gây thiệt hại, kênh/role đã xóa không được phục hồi. Cổng raid còn hiệu lực sau khởi động lại; bộ đếm ngưỡng bắt đầu lại. Không thể xử lý chủ server, tài khoản ngang/cao hơn bot hoặc khi bot offline/bị gỡ.</div>';
+  } else if (page === 'invites') {
     body = panel('Mời thêm bạn, cùng xây cộng đồng', 'Chọn kênh thông báo và role ở hai mốc 50/100. Có thể để trống role để thêm sau; lượt mời vẫn được lưu.', optionControls('invites')) +
       '<div class="note">Mỗi thành viên mới chỉ được tính một lần; tài khoản bot, tự mời và rời rồi vào lại không tăng số lượt. Tổng tích lũy không giảm khi thành viên rời server. Đạt 100 lượt: cấp role 100 rồi gỡ role 50. Khi đổi role thưởng, bot cập nhật trong khoảng một phút. Chỉ theo dõi từ lúc bật; không truy ngược lượt mời cũ. Link một lần đã biến mất, vanity, mất kết nối hoặc nhiều người mời cùng lúc có thể không xác định được người mời, khi đó không cộng nhầm. Bot cần Quản lý server để đọc lượt dùng lời mời, Quản lý role để trao thưởng và Server Members Intent. Dùng /invites để xem số lượt đã ghi nhận.</div>';
   } else if (page === 'xp') {

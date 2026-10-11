@@ -31,6 +31,7 @@ initializeDatabase();
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildModeration,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildInvites,
     GatewayIntentBits.GuildMessages,
@@ -39,6 +40,7 @@ const client = new Client({
 });
 
 client.commands = loadCommands();
+require('./utils/securitySystem').start(client);
 client.on(Events.GuildMemberAdd, member => require('./utils/inviteSystem').joined(member));
 client.on(Events.InviteCreate, invite => require('./utils/inviteSystem').created(invite));
 client.on(Events.GuildCreate, guild => {
@@ -246,6 +248,15 @@ if (
 client.on(
   Events.InteractionCreate,
   async (interaction) => {
+    if (interaction.isButton() && interaction.customId.startsWith('security:')) {
+      try { await require('./utils/securityReview').handleButton(interaction); }
+      catch(error) {
+        console.error('[SECURITY REVIEW]',error.message);
+        const payload={content:'Chưa xử lý được xét duyệt. Vui lòng thử lại.',flags:64};
+        if(interaction.deferred)await interaction.editReply(payload).catch(()=>{});else await interaction.reply(payload).catch(()=>{});
+      }
+      return;
+    }
     if (interaction.isButton() && interaction.customId.startsWith('rr:')) {
       try { await require('./utils/reactionRoles').handleButton(interaction); }
       catch { const p={content:'Chưa xử lý được role. Vui lòng thử lại.',flags:64}; if(interaction.deferred)await interaction.editReply(p).catch(()=>{});else await interaction.reply(p).catch(()=>{}); }
