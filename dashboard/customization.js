@@ -23,6 +23,14 @@ function validateCustomization(input, guild, channels, roles, me) {
     if (type === 'select' && !a.includes(value)) invalid(`${label}: lựa chọn không hợp lệ.`);
     if (type === 'text' && (typeof value !== 'string' || !value.trim() || value.length > a)) invalid(`${label}: nhập từ 1 đến ${a} ký tự.`);
     if (type === 'color' && (typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value))) invalid(`${label}: màu không hợp lệ.`);
+    if (type === 'role') {
+      if(typeof value !== 'string')invalid(label + ': chọn role hợp lệ.');
+      if(value) {
+        const role=roles.get(value);
+        const unsafe=[P.Administrator,P.ManageGuild,P.ManageRoles,P.ManageChannels,P.KickMembers,P.BanMembers,P.ModerateMembers];
+        if(!role || role.id===guild.id || role.managed || !me.permissions.has(P.ManageRoles) || me.roles.highest.comparePositionTo(role)<=0 || role.permissions?.any(unsafe))invalid(label + ': chọn role thưởng không có quyền quản trị và nằm dưới role bot.');
+      }
+    }
     if (type === 'roles') {
       if (!Array.isArray(value) || value.length > 100 || new Set(value).size !== value.length) invalid(label + ': chọn tối đa 100 role, không trùng nhau.');
       for (const id of value) {
@@ -37,12 +45,14 @@ function validateCustomization(input, guild, channels, roles, me) {
       if (!channel || channel.guildId !== guild.id || ![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)) invalid(`${label}: kênh không hợp lệ.`);
       const mode = key.startsWith('voice') ? 'voice' : 'chat';
       const perms = [P.ViewChannel, P.SendMessages];
-      if (key === 'roleNoticeChannel') perms.push(P.EmbedLinks);
-      if (key !== 'roleNoticeChannel' && merged[`${mode}NoticeStyle`] === 'card') perms.push(P.AttachFiles);
-      if (key !== 'roleNoticeChannel' && merged[`${mode}NoticeStyle`] === 'embed') perms.push(P.EmbedLinks);
+      if (key === 'roleNoticeChannel' || key === 'inviteChannel') perms.push(P.EmbedLinks);
+      if (!['roleNoticeChannel','inviteChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'card') perms.push(P.AttachFiles);
+      if (!['roleNoticeChannel','inviteChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'embed') perms.push(P.EmbedLinks);
       if (!channel.permissionsFor(me)?.has(perms)) invalid(`${label}: bot thiếu quyền gửi kiểu thông báo đã chọn.`);
     }
   }
+  if(merged.inviteEnabled && !merged.inviteChannel)invalid('Chọn kênh thông báo invite trước khi bật.');
+  if(merged.inviteRole50 && merged.inviteRole50===merged.inviteRole100)invalid('Hai mốc invite cần chọn hai role khác nhau.');
   if (merged.roleNoticeEnabled && !merged.roleNoticeChannel) invalid('Hãy chọn kênh chúc mừng trước khi bật thông báo nhận role.');
   if (merged.chatMin > merged.chatMax) invalid('XP Chat tối thiểu không được lớn hơn XP tối đa.');
   if (input.rewards !== undefined) {

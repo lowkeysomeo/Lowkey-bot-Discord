@@ -32,12 +32,18 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildInvites,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildVoiceStates,
   ],
 });
 
 client.commands = loadCommands();
+client.on(Events.GuildMemberAdd, member => require('./utils/inviteSystem').joined(member));
+client.on(Events.InviteCreate, invite => require('./utils/inviteSystem').created(invite));
+client.on(Events.GuildCreate, guild => {
+  if(getOptions(guild.id).inviteEnabled)require('./utils/inviteSystem').prime(guild).catch(error=>console.warn('[INVITES]',error.message));
+});
 client.on(Events.GuildMemberUpdate, (before, after) => {
   require('./utils/roleNotifications').handleRoleUpdate(before, after)
     .catch(error => console.error('[ROLE NOTICE]', error.message));
@@ -66,6 +72,7 @@ client.once(
       `[DB] ${getDatabasePath()}`
     );
     giveaway.start(client);
+    require('./utils/inviteSystem').start(client);
     // Nạp thành viên để phân biệt role có sẵn với role vừa được cấp.
     for (const guild of client.guilds.cache.values()) {
       if (getOptions(guild.id).roleNoticeEnabled) {

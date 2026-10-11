@@ -1,5 +1,10 @@
 const { getGuildSetting, setGuildSetting } = require('./guildSettings');
 const definitions = [
+  ['inviteEnabled', 'invites', 'Bật theo dõi lời mời', 'boolean', false],
+  ['inviteChannel', 'invites', 'Kênh thông báo người mời', 'channel', ''],
+  ['inviteRole50', 'invites', 'Role thưởng 50 lượt mời', 'role', ''],
+  ['inviteRole100', 'invites', 'Role thưởng 100 lượt mời', 'role', ''],
+  ['inviteColor', 'invites', 'Màu thông báo lời mời', 'color', '#a78bfa'],
   ['roleNoticeEnabled', 'roleNotifications', 'Bật chúc mừng nhận role', 'boolean', false],
   ['roleNoticeChannel', 'roleNotifications', 'Kênh chúc mừng nhận role', 'channel', ''],
   ['roleNoticeLevelRewards', 'roleNotifications', 'Tự thông báo các role thưởng level Chat và Voice', 'boolean', true],

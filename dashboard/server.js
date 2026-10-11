@@ -265,6 +265,10 @@ function createDashboard(client, options = {}) {
           try { await guild.members.fetch(); }
           catch { fail(503, 'Chưa tải được thành viên. Hãy bật Server Members Intent cho bot và thử lại.'); }
         }
+        if(optionsPatch.inviteEnabled === true && !getOptions(guild.id).inviteEnabled) {
+          try { await require('../utils/inviteSystem').prime(guild); }
+          catch { fail(503,'Bot cần quyền Quản lý server và Server Members Intent để theo dõi lời mời.'); }
+        }
         // Tạo bảng trước, rồi lưu các thay đổi hợp lệ trong cùng một giao dịch.
         getGuildSetting(guild.id, 'LEVEL_CHANNEL_ID'); confession.getConfig(guild.id);
         getDb().transaction(() => {

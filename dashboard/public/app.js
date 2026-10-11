@@ -15,8 +15,8 @@ async function api(route, data) {
   return result;
 }
 const brand = `<div class="brand"><span class="brand-icon">V</span><span>VietNam Legacy<small>SERVER DASHBOARD</small></span></div>`;
-const labels = { overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp & role', monthly: 'Top tháng', confession: 'Confession', giveaway: 'Giveaway', reactionroles: 'Reaction role', leaderboard: 'Bảng xếp hạng', test: 'Gửi thử' };
-const icons = { overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', giveaway: '🎉', reactionroles: '✧', leaderboard: '≋', test: '▷' };
+const labels = { invites: 'Lời mời & Role', overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp & role', monthly: 'Top tháng', confession: 'Confession', giveaway: 'Giveaway', reactionroles: 'Reaction role', leaderboard: 'Bảng xếp hạng', test: 'Gửi thử' };
+const icons = { invites: '💌', overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', giveaway: '🎉', reactionroles: '✧', leaderboard: '≋', test: '▷' };
 function render() {
   if (!state.session?.user) {
     app.innerHTML = `<div class="login"><section class="login-art">${brand}<div class="login-copy"><span class="eyebrow">MỘT NƠI. CẢ CỘNG ĐỒNG.</span><h1>Server của bạn.<br><span>Theo cách của bạn.</span></h1><p>Chăm chút cộng đồng cùng VietNam Legacy. Quản lý level, role thưởng và những câu chuyện ẩn danh trong một nơi.</p><div class="login-pills"><span>↗ Level & Role</span><span>♡ Confession</span><span>≋ Bảng xếp hạng</span></div></div><p class="login-foot">VIETNAM LEGACY · DÀNH CHO CỘNG ĐỒNG CỦA BẠN</p></section><section class="login-panel"><div class="login-box"><span class="badge purple">BẢNG ĐIỀU KHIỂN</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng Discord để chọn server và bắt đầu quản lý.</p>${state.session?.configured ? '<a class="primary" href="/auth/discord">Đăng nhập bằng Discord <span>↗</span></a>' : '<button class="primary" disabled>Đăng nhập Discord</button><div class="error">Dashboard đang chờ hoàn tất kết nối đăng nhập Discord. Chủ bot cần cấu hình OAuth2 để mở đăng nhập.</div>'}<p class="subtle">Chỉ chủ server và thành viên có quyền Administrator được quản lý cấu hình.</p></div></section></div>`;
@@ -72,7 +72,7 @@ function content() {
   if (state.page === 'giveaway') return giveawayPage();
   if (state.page === 'test') return testPage();
   if (state.page === 'level') return levelPage();
-  if (['xp', 'notifications', 'monthly'].includes(state.page)) return customPage(state.page);
+  if (['xp', 'notifications', 'monthly', 'invites'].includes(state.page)) return customPage(state.page);
   if (state.page === 'confession') return confessionPage();
   if (state.page === 'leaderboard') return leaderboardPage();
   const stats = state.data.stats;
@@ -99,6 +99,7 @@ function optionControls(group) {
   return '<div class="form-grid">' + state.data.optionDefinitions.filter(d => d[1] === group).map(([key, , label, type, , a, b]) => {
     const value = state.data.options[key], id = 'option_' + key;
     if (type === 'boolean') return '<label class="toggle-field" for="' + id + '"><span>' + h(label) + '</span><input type="checkbox" id="' + id + '" name="' + id + '" ' + (value ? 'checked' : '') + '></label>';
+    if (type === 'role' || (type === 'channel' && key === 'inviteChannel')) return field(id,label,type,value);
     if (type === 'roles') return '<div class="field"><label>' + h(label) + '</label><input type="hidden" name="' + id + '"><div class="exclusion-list">' + state.data.roles.filter(role => !role.managed).map(role => '<label class="check-row"><input type="checkbox" data-role-option="' + key + '" value="' + h(role.id) + '" ' + (value.includes(role.id) ? 'checked' : '') + '><span>' + h(role.name) + '</span></label>').join('') + '</div></div>';
     if (type === 'channel' && key === 'roleNoticeChannel') return field(id, label, 'channel', value);
     if (type === 'channel') return field(id, label, 'channel', value).replace('Không sử dụng', 'Dùng kênh thông báo chung');
@@ -121,7 +122,10 @@ function levelPage() {
 }
 function customPage(page) {
   let body;
-  if (page === 'xp') {
+  if (page === 'invites') {
+    body = panel('Mời thêm bạn, cùng xây cộng đồng', 'Chọn kênh thông báo và role ở hai mốc 50/100. Có thể để trống role để thêm sau; lượt mời vẫn được lưu.', optionControls('invites')) +
+      '<div class="note">Mỗi thành viên mới chỉ được tính một lần; tài khoản bot, tự mời và rời rồi vào lại không tăng số lượt. Tổng tích lũy không giảm khi thành viên rời server. Đạt 100 lượt: cấp role 100 rồi gỡ role 50. Khi đổi role thưởng, bot cập nhật trong khoảng một phút. Chỉ theo dõi từ lúc bật; không truy ngược lượt mời cũ. Link một lần đã biến mất, vanity, mất kết nối hoặc nhiều người mời cùng lúc có thể không xác định được người mời, khi đó không cộng nhầm. Bot cần Quản lý server để đọc lượt dùng lời mời, Quản lý role để trao thưởng và Server Members Intent. Dùng /invites để xem số lượt đã ghi nhận.</div>';
+  } else if (page === 'xp') {
     body = panel('Tốc độ tích lũy XP', 'Điều chỉnh riêng Chat, Voice và phần trăm Booster.', optionControls('xp') + legacyFields(['VNL_BOOSTER_ROLE_ID'])) +
       panel('Kênh và danh mục bỏ qua XP', 'Chọn danh mục sẽ bỏ qua cả các kênh bên trong. Áp dụng cho Chat và Voice.',
         '<div class="exclusion-list">' + state.data.exclusionChannels.map(channel => '<label class="check-row"><input type="checkbox" name="exclusion" value="' + h(channel.id) + '" ' + (state.data.exclusions.includes(channel.id) ? 'checked' : '') + '><span>' + (channel.type === 'category' ? '▤ ' : '# ') + h(channel.name) + '</span></label>').join('') + '</div>');
