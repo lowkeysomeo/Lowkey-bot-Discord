@@ -58,6 +58,14 @@ async function main(){
   saveOptions('g',{inviteEnabled:false});uses=7;await system.processBatch(guild,[{id:'disabled',user:{bot:false}}]);
   assert.equal(system.count('g','owner'),101);
   console.log('Đạt: invite thường, không đoán lượt mơ hồ, chống vào lại/bot/tự mời, dữ liệu SQLite, 50→100 chỉ giữ role cao nhất, thử lại và kiểm tra cấu hình.');
+  let failPrime=true, primeCalls=0;
+  const recovery={...guild,id:'recovery',members:{...guild.members,fetch:async()=>{primeCalls++;if(failPrime)throw Error('Rate limited');return new Collection();}}};
+  saveOptions('recovery',{inviteEnabled:true,inviteChannel:'channel'});
+  await assert.rejects(system.prime(recovery));
+  await system.processBatch(recovery,[{id:'during-startup',user:{bot:false}}]);
+  assert.equal(system.count('recovery','owner'),0);
+  failPrime=false;await system.tick({guilds:{cache:new Collection([['recovery',recovery]])}});
+  assert.equal(primeCalls,2,'Tự thử lại dữ liệu ban đầu sau khi Discord giới hạn');
   getDb().close();
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

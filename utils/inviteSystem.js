@@ -2,6 +2,7 @@ const { EmbedBuilder, PermissionFlagsBits: P } = require('discord.js');
 const { getDb } = require('./database');
 const { getOptions } = require('./customization');
 const snapshots = new Map();
+const initialized = new Set();
 const queues = new Map();
 const batches = new Map();
 let timer;
@@ -38,9 +39,10 @@ async function prime(guild) {
         for(const member of existing.values())db().prepare('INSERT OR IGNORE INTO invite_members VALUES (?,?,NULL,?,1)').run(guild.id,member.id,Date.now());
       })();
       snapshots.set(guild.id,snapshot(await guild.invites.fetch()));
+      initialized.add(guild.id);
       console.log('[INVITES] Theo dõi server '+guild.id+'; đã ghi nhận '+existing.size+' thành viên có sẵn.');
     }
-    catch(error) { snapshots.delete(guild.id); throw error; }
+    catch(error) { snapshots.delete(guild.id); initialized.delete(guild.id); throw error; }
   });
 }
 function record(guildId, memberId, inviterId, bot=false) {
@@ -99,6 +101,7 @@ async function announce(guild,row) {
 async function processBatch(guild,members) {
   return serial(guild.id,async()=>{
     if(!getOptions(guild.id).inviteEnabled){snapshots.delete(guild.id);return;}
+    if(!initialized.has(guild.id))return; // Chờ dữ liệu ban đầu để không cộng nhầm người đã có trong server.
     const unique=[...new Map(members.map(m=>[m.id,m])).values()];
     let inviter=null;
     try {
@@ -139,6 +142,9 @@ async function tick(client) {
   try {
     for(const guild of client.guilds.cache.values()) {
       if(!getOptions(guild.id).inviteEnabled)continue;
+      if(!initialized.has(guild.id)) {
+        try { await prime(guild); } catch(e) { console.warn('[INVITES] Sẽ thử khởi tạo lại:',e.message); continue; }
+      }
       await serial(guild.id,async()=>{
         for(const row of db().prepare('SELECT * FROM invite_members WHERE guild_id=? AND notified=0 ORDER BY joined_at LIMIT 20').all(guild.id))
           try{await announce(guild,row);}catch(e){console.warn('[INVITES]',e.message);break;}
