@@ -90,6 +90,7 @@ function initializeDatabase() {
   `);
 
   migrateLegacyJsonIfNeeded();
+  repairLegacyUserIds(db);
   return db;
 }
 
@@ -121,15 +122,19 @@ function extractLegacyRows(data, fallbackGuildId) {
   const topEntries = Object.entries(data);
   if (topEntries.length === 0) return rows;
 
-  // Dữ liệu cũ theo người dùng: { "userId": { level, xp, totalXp } }
+  // Dữ liệu cũ theo người dùng: { "userId": { level, xp, totalXp } } hoặc { "guildId:userId": { ... } }
   if (topEntries.every(([, value]) => looksLikeProfile(value))) {
-    if (!fallbackGuildId) {
-      console.warn('[DB MIGRATION] Không có GUILD_ID nên bỏ qua JSON dạng userId -> profile.');
-      return rows;
-    }
+    for (const [key, profile] of topEntries) {
+      const parts = key.split(':');
+      const targetGuildId = parts.length > 1 ? parts[0] : fallbackGuildId;
+      const targetUserId = parts.length > 1 ? parts[1] : parts[0];
 
-    for (const [userId, profile] of topEntries) {
-      rows.push({ guildId: fallbackGuildId, userId, profile });
+      if (!targetGuildId) {
+        console.warn('[DB MIGRATION] Không có GUILD_ID nên bỏ qua JSON dạng userId -> profile.');
+        return rows;
+      }
+
+      rows.push({ guildId: targetGuildId, userId: targetUserId, profile });
     }
     return rows;
   }
@@ -232,8 +237,109 @@ function migrateLegacyJsonIfNeeded() {
   }
 }
 
+function repairLegacyUserIds(database) {
+  const { profileFromTotalXp } = require('./levelMath');
+
+  // 1. Sửa chat_levels nếu user_id chứa dấu hai chấm ':'
+  const badChatRows = database.prepare("SELECT * FROM chat_levels WHERE user_id LIKE '%:%'").all();
+  if (badChatRows.length > 0) {
+    const tx = database.transaction((rows) => {
+      for (const r of rows) {
+        const parts = r.user_id.split(':');
+        const targetGuildId = parts.length > 1 ? parts[0] : r.guild_id;
+        const targetUserId = parts.length > 1 ? parts[1] : parts[0];
+
+        const existing = database.prepare(
+          'SELECT * FROM chat_levels WHERE guild_id = ? AND user_id = ?'
+        ).get(targetGuildId, targetUserId);
+
+        if (existing) {
+          const mergedTotal = Math.max(0, (Number(existing.total_xp) || 0) + (Number(r.total_xp) || 0));
+          const mergedMonthly = Math.max(0, (Number(existing.monthly_xp) || 0) + (Number(r.monthly_xp) || 0));
+          const derived = profileFromTotalXp(mergedTotal);
+
+          database.prepare(`
+            UPDATE chat_levels
+            SET level = ?, xp = ?, total_xp = ?, monthly_xp = ?, updated_at = ?
+            WHERE guild_id = ? AND user_id = ?
+          `).run(
+            derived.level,
+            derived.xp,
+            mergedTotal,
+            mergedMonthly,
+            Math.max(existing.updated_at, r.updated_at),
+            targetGuildId,
+            targetUserId
+          );
+
+          database.prepare(
+            'DELETE FROM chat_levels WHERE guild_id = ? AND user_id = ?'
+          ).run(r.guild_id, r.user_id);
+        } else {
+          database.prepare(
+            'UPDATE chat_levels SET guild_id = ?, user_id = ? WHERE guild_id = ? AND user_id = ?'
+          ).run(targetGuildId, targetUserId, r.guild_id, r.user_id);
+        }
+      }
+    });
+
+    tx(badChatRows);
+    console.log(`[DB MIGRATION] Đã sửa và gộp ${badChatRows.length} bản ghi chat_levels có user_id lỗi.`);
+  }
+
+  // 2. Sửa voice_levels nếu user_id chứa dấu hai chấm ':'
+  const badVoiceRows = database.prepare("SELECT * FROM voice_levels WHERE user_id LIKE '%:%'").all();
+  if (badVoiceRows.length > 0) {
+    const tx = database.transaction((rows) => {
+      for (const r of rows) {
+        const parts = r.user_id.split(':');
+        const targetGuildId = parts.length > 1 ? parts[0] : r.guild_id;
+        const targetUserId = parts.length > 1 ? parts[1] : parts[0];
+
+        const existing = database.prepare(
+          'SELECT * FROM voice_levels WHERE guild_id = ? AND user_id = ?'
+        ).get(targetGuildId, targetUserId);
+
+        if (existing) {
+          const mergedTotal = Math.max(0, (Number(existing.total_xp) || 0) + (Number(r.total_xp) || 0));
+          const mergedMonthly = Math.max(0, (Number(existing.monthly_xp) || 0) + (Number(r.monthly_xp) || 0));
+          const mergedMinutes = Math.max(0, (Number(existing.minutes) || 0) + (Number(r.minutes) || 0));
+          const derived = profileFromTotalXp(mergedTotal);
+
+          database.prepare(`
+            UPDATE voice_levels
+            SET level = ?, xp = ?, total_xp = ?, monthly_xp = ?, minutes = ?, updated_at = ?
+            WHERE guild_id = ? AND user_id = ?
+          `).run(
+            derived.level,
+            derived.xp,
+            mergedTotal,
+            mergedMonthly,
+            mergedMinutes,
+            Math.max(existing.updated_at, r.updated_at),
+            targetGuildId,
+            targetUserId
+          );
+
+          database.prepare(
+            'DELETE FROM voice_levels WHERE guild_id = ? AND user_id = ?'
+          ).run(r.guild_id, r.user_id);
+        } else {
+          database.prepare(
+            'UPDATE voice_levels SET guild_id = ?, user_id = ? WHERE guild_id = ? AND user_id = ?'
+          ).run(targetGuildId, targetUserId, r.guild_id, r.user_id);
+        }
+      }
+    });
+
+    tx(badVoiceRows);
+    console.log(`[DB MIGRATION] Đã sửa và gộp ${badVoiceRows.length} bản ghi voice_levels có user_id lỗi.`);
+  }
+}
+
 module.exports = {
   initializeDatabase,
   getDb,
   getDatabasePath,
+  repairLegacyUserIds,
 };
