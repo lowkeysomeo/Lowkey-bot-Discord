@@ -94,12 +94,40 @@ function getConfig(guildId) {
   };
 }
 
+function sanitizeEmoji(raw) {
+  if (!raw || typeof raw !== 'string') return undefined;
+  const str = raw.trim();
+  if (!str) return undefined;
+  const customMatch = /^<a?:([a-zA-Z0-9_]+):(\d+)>$/.exec(str);
+  if (customMatch) {
+    return { name: customMatch[1], id: customMatch[2] };
+  }
+  if (/^\d{17,20}$/.test(str)) {
+    return { id: str };
+  }
+  return str;
+}
+
 /**
  * Lưu cấu hình ticket
  */
 function saveConfig(guildId, patch) {
   const current = getConfig(guildId);
   const updated = { ...current, ...patch };
+
+  if (Array.isArray(patch.options)) {
+    const cleanOptions = patch.options
+      .filter(o => o && typeof o === 'object' && o.label)
+      .slice(0, 25)
+      .map((o, idx) => ({
+        value: String(o.value || `opt_${idx + 1}`).trim().slice(0, 100),
+        label: String(o.label).trim().slice(0, 100),
+        description: o.description ? String(o.description).trim().slice(0, 100) : undefined,
+        emoji: o.emoji ? String(o.emoji).trim().slice(0, 30) : undefined,
+      }));
+    updated.options = cleanOptions.length > 0 ? cleanOptions : DEFAULT_OPTIONS;
+  }
+
   db().prepare(`
     INSERT INTO ticket_config (
       guild_id, channel_id, category_id, admin_role_id, support_role_id,
@@ -159,12 +187,16 @@ function buildPanelPayload(guild, config) {
     .setCustomId('ticket:select_category')
     .setPlaceholder(config.placeholder.slice(0, 150))
     .addOptions(
-      (config.options || DEFAULT_OPTIONS).map(opt => ({
-        value: opt.value,
-        label: opt.label.slice(0, 100),
-        description: opt.description ? opt.description.slice(0, 100) : undefined,
-        emoji: opt.emoji || undefined,
-      }))
+      (config.options || DEFAULT_OPTIONS).map(opt => {
+        const optionData = {
+          value: opt.value,
+          label: opt.label.slice(0, 100),
+        };
+        if (opt.description) optionData.description = opt.description.slice(0, 100);
+        const em = sanitizeEmoji(opt.emoji);
+        if (em) optionData.emoji = em;
+        return optionData;
+      })
     );
 
   const row = new ActionRowBuilder().addComponents(selectMenu);

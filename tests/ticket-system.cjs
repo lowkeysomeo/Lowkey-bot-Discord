@@ -134,6 +134,24 @@ async function run() {
   assert.equal(menu.custom_id, 'ticket:select_category');
   assert.ok(menu.options.length >= 5, 'Phải có danh sách các dịch vụ trong dropdown');
 
+  // 2b. Kiểm tra lưu và render danh mục tùy chỉnh từ Dashboard
+  const customOptions = [
+    { value: 'custom_1', label: 'Tùy chỉnh 1', description: 'Mô tả 1', emoji: '✨' },
+    { value: 'custom_2', label: 'Tùy chỉnh 2', description: 'Mô tả 2', emoji: '<:vnl:1234567890>' },
+  ];
+  ticketSystem.saveConfig(guild.id, { options: customOptions });
+  const cfgWithOpts = ticketSystem.getConfig(guild.id);
+  assert.equal(cfgWithOpts.options.length, 2);
+  assert.equal(cfgWithOpts.options[0].label, 'Tùy chỉnh 1');
+  const customPanel = ticketSystem.buildPanelPayload(guild, cfgWithOpts);
+  const customMenu = customPanel.components[0].components[0].toJSON();
+  assert.equal(customMenu.options.length, 2);
+  assert.equal(customMenu.options[0].label, 'Tùy chỉnh 1');
+  assert.equal(customMenu.options[1].emoji.id, '1234567890');
+
+  // Khôi phục options mặc định để tiếp tục test chọn danh mục
+  ticketSystem.saveConfig(guild.id, { options: ticketSystem.DEFAULT_OPTIONS });
+
   // ─────────────────────────────────────────────────────────────
   // 3. Tạo ticket khi chọn mục & Kiểm tra phân quyền độc quyền
   // ─────────────────────────────────────────────────────────────

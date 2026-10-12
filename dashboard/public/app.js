@@ -50,6 +50,68 @@ function render() {
     ticketForm.onsubmit = ticketSubmit;
     ticketForm.oninput = () => { state.dirty = true; };
     ticketForm.onchange = () => { state.dirty = true; };
+    ticketForm.onclick = (e) => {
+      const addBtn = e.target.closest('#ticket-add-option');
+      if (addBtn) {
+        const container = ticketForm.querySelector('#ticket-options-container');
+        const count = container.querySelectorAll('[data-ticket-option]').length;
+        if (count >= 25) return notify('Discord chỉ cho phép tối đa 25 danh mục trong một Dropdown Menu.');
+        container.insertAdjacentHTML('beforeend', ticketOptionRow({ label: '', value: '', description: '', emoji: '' }, count));
+        state.dirty = true;
+        updateTicketOptionIndexes(container);
+        const newEl = container.lastElementChild;
+        newEl?.querySelector('[data-ticket-opt-label]')?.focus();
+        return;
+      }
+
+      const resetBtn = e.target.closest('#ticket-reset-options');
+      if (resetBtn) {
+        if (!confirm('Khôi phục danh sách danh mục mẫu của VietNam Legacy?')) return;
+        const container = ticketForm.querySelector('#ticket-options-container');
+        container.innerHTML = DEFAULT_TICKET_OPTIONS.map((opt, i) => ticketOptionRow(opt, i)).join('');
+        state.dirty = true;
+        notify('Đã khôi phục các danh mục mẫu!');
+        return;
+      }
+
+      const removeBtn = e.target.closest('[data-ticket-remove-option]');
+      if (removeBtn) {
+        const container = ticketForm.querySelector('#ticket-options-container');
+        const items = container.querySelectorAll('[data-ticket-option]');
+        if (items.length <= 1) return notify('Phải giữ lại ít nhất 1 danh mục cho bảng Ticket!');
+        const item = removeBtn.closest('[data-ticket-option]');
+        if (item) {
+          item.remove();
+          state.dirty = true;
+          updateTicketOptionIndexes(container);
+        }
+        return;
+      }
+
+      const moveUpBtn = e.target.closest('[data-ticket-move-up]');
+      if (moveUpBtn) {
+        const item = moveUpBtn.closest('[data-ticket-option]');
+        const prev = item?.previousElementSibling;
+        if (item && prev && prev.matches('[data-ticket-option]')) {
+          item.parentNode.insertBefore(item, prev);
+          state.dirty = true;
+          updateTicketOptionIndexes(item.parentNode);
+        }
+        return;
+      }
+
+      const moveDownBtn = e.target.closest('[data-ticket-move-down]');
+      if (moveDownBtn) {
+        const item = moveDownBtn.closest('[data-ticket-option]');
+        const next = item?.nextElementSibling;
+        if (item && next && next.matches('[data-ticket-option]')) {
+          item.parentNode.insertBefore(next, item);
+          state.dirty = true;
+          updateTicketOptionIndexes(item.parentNode);
+        }
+        return;
+      }
+    };
   }
   const ticketPanelBtn = document.querySelector('#ticket-panel-send');
   if (ticketPanelBtn) ticketPanelBtn.onclick = sendTicketPanelDashboard;
@@ -421,12 +483,66 @@ async function rrDisable(id){
  try{const result=await api(`/api/guilds/${guildId}/reaction-roles`,{action:'disable',id});notify(result.warning||'Đã đóng bảng.');const rows=await api(`/api/guilds/${guildId}/reaction-roles`);if(state.requestId===requestId){state.data.reactionroles=rows;render();}}
  catch(e){notify(e.message);}finally{state.saving=false;}
 }
+const DEFAULT_TICKET_OPTIONS = [
+  { value: 'support', label: '📩 Hỗ Trợ Chung (Support)', description: 'Giải đáp thắc mắc, hỗ trợ các vấn đề trong server', emoji: '📩' },
+  { value: 'staff_app', label: '🛡️ Ứng Tuyển Staff', description: 'Đăng ký ứng tuyển vào đội ngũ Staff của VietNam Legacy', emoji: '🛡️' },
+  { value: 'nitro_boost', label: '⚡ N1tr0 B00st', description: 'N1tr0 D1sc0rd Giá Siêu Rẻ', emoji: '⚡' },
+  { value: 'nitro_first', label: '🎁 N1tr0 Lần Đầu', description: 'Dành Cho Tài Khoản Chưa Từng Dùng N1tr0', emoji: '🎁' },
+  { value: 'server_boost', label: '💎 B00st Server', description: 'Nâng Cấp Server Của Bạn', emoji: '💎' },
+  { value: 'decor', label: '🔮 Khung Dec0r & Hiệu Ứng', description: 'Hiệu ứng & khung Discord giá rẻ', emoji: '🔮' },
+  { value: 'youtube', label: '📺 Y0uTube Premium', description: 'Xem Y0uTube Không Quảng Cáo', emoji: '📺' },
+];
+
+function ticketOptionRow(opt, index) {
+  const o = opt || { value: '', label: '', description: '', emoji: '' };
+  return '<div class="ticket-option-item" data-ticket-option style="background:#171920; border:1px solid #30333f; border-radius:10px; padding:16px; margin-bottom:14px;">' +
+    '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:8px;">' +
+      '<strong style="color:#ffd869; font-size:13px;" data-ticket-option-index>Mục #' + (index + 1) + '</strong>' +
+      '<div style="display:flex; gap:6px;">' +
+        '<button type="button" class="secondary" data-ticket-move-up title="Di chuyển lên" style="min-height:30px; padding:3px 9px; font-size:12px;">⬆</button>' +
+        '<button type="button" class="secondary" data-ticket-move-down title="Di chuyển xuống" style="min-height:30px; padding:3px 9px; font-size:12px;">⬇</button>' +
+        '<button type="button" class="text-button danger" data-ticket-remove-option title="Xóa mục này" style="min-height:30px; padding:3px 8px;">✕ Xóa</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="form-grid" style="grid-template-columns: 90px 1fr; gap:14px;">' +
+      '<div class="field">' +
+        '<label>Emoji</label>' +
+        '<input type="text" data-ticket-opt-emoji maxlength="30" placeholder="⚡" value="' + h(o.emoji || '') + '">' +
+      '</div>' +
+      '<div class="field">' +
+        '<label>Tên mục (Label) *</label>' +
+        '<input type="text" data-ticket-opt-label maxlength="100" placeholder="Ví dụ: N1tr0 B00st" value="' + h(o.label || '') + '" required>' +
+      '</div>' +
+    '</div>' +
+    '<div class="form-grid" style="grid-template-columns: 1fr 1fr; gap:14px; margin-top:12px;">' +
+      '<div class="field">' +
+        '<label>Mô tả ngắn (Description)</label>' +
+        '<input type="text" data-ticket-opt-desc maxlength="100" placeholder="Ví dụ: N1tr0 D1sc0rd Giá Siêu Rẻ" value="' + h(o.description || '') + '">' +
+      '</div>' +
+      '<div class="field">' +
+        '<label>Mã định danh (Value/ID) *</label>' +
+        '<input type="text" data-ticket-opt-value maxlength="100" placeholder="Ví dụ: nitro_boost" value="' + h(o.value || '') + '" required>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+
+function updateTicketOptionIndexes(container) {
+  if (!container) return;
+  const items = container.querySelectorAll('[data-ticket-option]');
+  items.forEach((item, idx) => {
+    const title = item.querySelector('[data-ticket-option-index]');
+    if (title) title.textContent = 'Mục #' + (idx + 1);
+  });
+}
+
 function ticketPage() {
   const t = state.data.ticket || {};
   const cfg = t.config || {};
   const categories = t.categories || [];
   const channels = state.data.channels || [];
   const roles = state.data.roles || [];
+  const currentOptions = (cfg.options && cfg.options.length) ? cfg.options : DEFAULT_TICKET_OPTIONS;
 
   return heading('HỆ THỐNG TICKET ĐỘC QUYỀN', 'Quản lý Ticket', 'Cấu hình bảng Ticket Dropdown Menu, banner VNL Ticket và phân quyền riêng cho AdminTicket & Hỗ Trợ Ticket.') +
     '<div class="card card-body"><h2>Đăng bảng Ticket vào Discord</h2>' +
@@ -450,6 +566,18 @@ function ticketPage() {
       '<div class="field"><label for="ticket-category">📁 Danh mục (Category) tạo phòng Ticket</label><select id="ticket-category" name="categoryId"><option value="">Mặc định (ngoài danh mục)</option>' +
       categories.map(c => `<option value="${h(c.id)}" ${cfg.categoryId === c.id ? 'selected' : ''}>📁 ${h(c.name)}</option>`).join('') +
       '</select></div>' +
+      '<div class="field" style="grid-column: 1 / -1;"><label for="ticket-log-channel">📑 Kênh lưu Log & Transcript (Tự động gửi khi đóng Ticket)</label><select id="ticket-log-channel" name="logChannelId"><option value="">Không gửi kênh log (chỉ gửi DM cho khách)</option>' +
+      channels.map(c => `<option value="${h(c.id)}" ${cfg.logChannelId === c.id ? 'selected' : ''}># ${h(c.name)}</option>`).join('') +
+      '</select></div>' +
+      '</div>') +
+    panel('📋 Danh mục Dịch Vụ & Hỗ Trợ (Dropdown Menu)', 'Tùy chỉnh các mục hiển thị trong menu chọn trên Discord (tối đa 25 mục). Thành viên sẽ chọn một trong các mục này để mở ticket tương ứng.',
+      '<div id="ticket-options-container">' +
+      currentOptions.map((opt, i) => ticketOptionRow(opt, i)).join('') +
+      '</div>' +
+      '<div style="display:flex; gap:10px; align-items:center; margin-top:14px; flex-wrap:wrap;">' +
+        '<button type="button" class="secondary" id="ticket-add-option">➕ Thêm danh mục mới</button>' +
+        '<button type="button" class="secondary" id="ticket-reset-options" style="color:#ff9caa;">↺ Khôi phục danh mục mẫu</button>' +
+        '<small style="color:var(--muted); margin-left:auto;">Tối đa 25 danh mục theo quy định của Discord.</small>' +
       '</div>') +
     panel('Giao diện Embed & Banner VNL Ticket', 'Tùy chỉnh hình ảnh banner ở dưới Embed và văn bản hiển thị.',
       '<div class="form-grid">' +
@@ -459,16 +587,38 @@ function ticketPage() {
       '<div class="field" style="grid-column: 1 / -1;"><label for="ticket-desc">Nội dung giới thiệu Embed</label><textarea id="ticket-desc" name="description" rows="6" maxlength="4000" required>' + h(cfg.description || '') + '</textarea></div>' +
       '<div class="field" style="grid-column: 1 / -1;"><label for="ticket-placeholder">Dòng chữ gợi ý trong Dropdown Menu (Placeholder)</label><input id="ticket-placeholder" name="placeholder" type="text" maxlength="150" value="' + h(cfg.placeholder || 'Nhấn Vào Đây Để Chọn Dịch Vụ / Hỗ Trợ...') + '" required></div>' +
       '</div>') +
-    '<div class="note">Khi thành viên chọn một mục trong menu, bot sẽ tự tạo kênh text ẩn với toàn bộ thành viên khác, chỉ cấp quyền ViewChannel cho Người tạo + Role AdminTicket + Role Hỗ Trợ Ticket. Kèm nút Đóng, Mở lại, Xóa và Lưu Transcript.</div>' +
+    '<div class="note">Khi thành viên chọn một mục trong menu, bot sẽ tự tạo kênh text ẩn với toàn bộ thành viên khác, chỉ cấp quyền ViewChannel cho Người tạo + Role AdminTicket + Role Hỗ Trợ Ticket. Mỗi thành viên được mở tối đa 3 Ticket cùng lúc. Đóng ticket sẽ tự động lưu transcript và xóa kênh sau 5 giây.</div>' +
     '<div class="savebar"><span id="ticket-save-status">Nhớ lưu cấu hình trước khi đăng bảng vào Discord.</span><button type="submit" class="primary">Lưu cấu hình Ticket</button></div></form>';
 }
 function getTicketFormValues() {
   const form = document.querySelector('#ticket-form');
   if (!form) return {};
   const fd = new FormData(form);
+
+  const optionEls = form.querySelectorAll('[data-ticket-option]');
+  const options = [];
+  optionEls.forEach((el, idx) => {
+    const label = el.querySelector('[data-ticket-opt-label]')?.value?.trim() || '';
+    if (!label) return;
+    let value = el.querySelector('[data-ticket-opt-value]')?.value?.trim() || '';
+    if (!value) {
+      value = label.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 30) || ('opt_' + (idx + 1));
+    }
+    const emoji = el.querySelector('[data-ticket-opt-emoji]')?.value?.trim() || '';
+    const description = el.querySelector('[data-ticket-opt-desc]')?.value?.trim() || '';
+
+    options.push({
+      value: value.slice(0, 100),
+      label: label.slice(0, 100),
+      description: description ? description.slice(0, 100) : undefined,
+      emoji: emoji ? emoji.slice(0, 30) : undefined,
+    });
+  });
+
   return {
     channelId: fd.get('channelId') || '',
     categoryId: fd.get('categoryId') || '',
+    logChannelId: fd.get('logChannelId') || '',
     adminRoleId: fd.get('adminRoleId') || '',
     supportRoleId: fd.get('supportRoleId') || '',
     title: fd.get('title') || '',
@@ -476,12 +626,16 @@ function getTicketFormValues() {
     bannerUrl: fd.get('bannerUrl') || '',
     color: fd.get('color') || '#00a8ff',
     placeholder: fd.get('placeholder') || '',
+    options: options.length > 0 ? options : undefined,
   };
 }
 async function ticketSubmit(e) {
   e.preventDefault();
   if (state.saving) return;
   const cfg = getTicketFormValues();
+  if (!cfg.options || !cfg.options.length) {
+    return notify('Vui lòng tạo ít nhất 1 danh mục cho bảng Ticket!');
+  }
   state.saving = true;
   const button = document.querySelector('#ticket-form button[type="submit"]');
   if (button) button.textContent = 'Đang lưu…';
