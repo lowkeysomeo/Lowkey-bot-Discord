@@ -168,9 +168,40 @@ function createDashboard(client, options = {}) {
             icon: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128` : null,
             installed: client.guilds.cache.has(guild.id), invite: invite(guild.id) })));
         }
-        const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test|giveaways|confession-panel|reaction-roles)$/.exec(route);
+        const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test|giveaways|confession-panel|reaction-roles|ticket)$/.exec(route);
         if (!match) fail(404, 'Không tìm thấy trang.');
         const guild = await managedGuild(match[1], value);
+        if (match[2] === 'ticket') {
+          const ticketSystem = require('../utils/ticketSystem');
+          if (req.method === 'GET') {
+            const allChannels = await guild.channels.fetch();
+            const categories = [...allChannels.values()]
+              .filter(c => c && c.type === ChannelType.GuildCategory)
+              .map(c => ({ id: c.id, name: c.name }));
+            return json(res, 200, {
+              config: ticketSystem.getConfig(guild.id),
+              categories,
+            });
+          }
+          if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
+          rateLimit(`ticket:${guild.id}:${value.user.id}`, 6);
+          const input = await body(req);
+          if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'Dữ liệu không hợp lệ.');
+          if (input.action === 'save') {
+            const saved = ticketSystem.saveConfig(guild.id, input.config || {});
+            return json(res, 200, { ok: true, config: saved });
+          }
+          if (input.action === 'publish') {
+            if (!input.channelId) fail(400, 'Hãy chọn kênh trước khi đăng bảng Ticket.');
+            const saved = ticketSystem.saveConfig(guild.id, input.config || {});
+            const resPublish = await ticketSystem.sendTicketPanel(guild, input.channelId, saved);
+            return json(res, 200, {
+              ok: true,
+              messageUrl: `https://discord.com/channels/${guild.id}/${input.channelId}/${resPublish.messageId}`,
+            });
+          }
+          fail(400, 'Thao tác không hợp lệ.');
+        }
         if (match[2] === 'reaction-roles') {
           const rr=require('../utils/reactionRoles');
           if(req.method==='GET')return json(res,200,rr.list(guild.id));

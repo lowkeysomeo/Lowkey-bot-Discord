@@ -15,8 +15,8 @@ async function api(route, data) {
   return result;
 }
 const brand = `<div class="brand"><span class="brand-icon">V</span><span>VietNam Legacy<small>SERVER DASHBOARD</small></span></div>`;
-const labels = { security: 'Bảo vệ server', invites: 'Lời mời & Role', overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp & role', monthly: 'Top tháng', confession: 'Confession', giveaway: 'Giveaway', reactionroles: 'Reaction role', leaderboard: 'Bảng xếp hạng', receptionist: 'Lễ tân thành viên mới', test: 'Gửi thử' };
-const icons = { security: '🛡️', invites: '💌', overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', giveaway: '🎉', reactionroles: '✧', leaderboard: '≋', receptionist: '👋', test: '▷' };
+const labels = { security: 'Bảo vệ server', invites: 'Lời mời & Role', overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp & role', monthly: 'Top tháng', confession: 'Confession', ticket: 'Quản lý Ticket', giveaway: 'Giveaway', reactionroles: 'Reaction role', leaderboard: 'Bảng xếp hạng', receptionist: 'Lễ tân thành viên mới', test: 'Gửi thử' };
+const icons = { security: '🛡️', invites: '💌', overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', ticket: '🎫', giveaway: '🎉', reactionroles: '✧', leaderboard: '≋', receptionist: '👋', test: '▷' };
 function render() {
   if (!state.session?.user) {
     app.innerHTML = `<div class="login"><section class="login-art">${brand}<div class="login-copy"><span class="eyebrow">MỘT NƠI. CẢ CỘNG ĐỒNG.</span><h1>Server của bạn.<br><span>Theo cách của bạn.</span></h1><p>Chăm chút cộng đồng cùng VietNam Legacy. Quản lý level, role thưởng và những câu chuyện ẩn danh trong một nơi.</p><div class="login-pills"><span>↗ Level & Role</span><span>♡ Confession</span><span>≋ Bảng xếp hạng</span></div></div><p class="login-foot">VIETNAM LEGACY · DÀNH CHO CỘNG ĐỒNG CỦA BẠN</p></section><section class="login-panel"><div class="login-box"><span class="badge purple">BẢNG ĐIỀU KHIỂN</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng Discord để chọn server và bắt đầu quản lý.</p>${state.session?.configured ? '<a class="primary" href="/auth/discord">Đăng nhập bằng Discord <span>↗</span></a>' : '<button class="primary" disabled>Đăng nhập Discord</button><div class="error">Dashboard đang chờ hoàn tất kết nối đăng nhập Discord. Chủ bot cần cấu hình OAuth2 để mở đăng nhập.</div>'}<p class="subtle">Chỉ chủ server và thành viên có quyền Administrator được quản lý cấu hình.</p></div></section></div>`;
@@ -45,6 +45,14 @@ function render() {
   const form = document.querySelector('#settings-form');
   const panelButton = document.querySelector('#confession-panel-send');
   if (panelButton) panelButton.onclick = sendConfessionPanel;
+  const ticketForm = document.querySelector('#ticket-form');
+  if (ticketForm) {
+    ticketForm.onsubmit = ticketSubmit;
+    ticketForm.oninput = () => { state.dirty = true; };
+    ticketForm.onchange = () => { state.dirty = true; };
+  }
+  const ticketPanelBtn = document.querySelector('#ticket-panel-send');
+  if (ticketPanelBtn) ticketPanelBtn.onclick = sendTicketPanelDashboard;
   const testForm = document.querySelector('#test-form');
   if (testForm) {
     testForm.onsubmit = sendTest;
@@ -84,6 +92,7 @@ function content() {
   if (!state.data) return '<div class="card empty"><h2>Chưa tải được dữ liệu</h2><p>Chọn lại server để thử lại.</p></div>';
   if (state.page === 'reactionroles') return rrPage();
   if (state.page === 'giveaway') return giveawayPage();
+  if (state.page === 'ticket') return ticketPage();
   if (state.page === 'test') return testPage();
   if (state.page === 'level') return levelPage();
   if (['xp', 'notifications', 'monthly', 'invites', 'security', 'receptionist'].includes(state.page)) return customPage(state.page);
@@ -243,7 +252,20 @@ async function selectGuild(id) {
 }
 async function changePage(page) {
   if (!canLeave()) return;
-  state.dirty = false; state.page = page; state.loading = ['giveaway','reactionroles'].includes(page); render();
+  state.dirty = false; state.page = page; state.loading = ['giveaway','reactionroles','ticket'].includes(page); render();
+  if (page === 'ticket' && state.data) {
+    const id = state.guild.id, requestId = state.requestId;
+    try {
+      const tData = await api(`/api/guilds/${id}/ticket`);
+      if (state.requestId === requestId && state.data) {
+        state.data.ticket = tData;
+        if (state.page === page) { state.loading = false; render(); }
+      }
+    } catch (error) {
+      if (state.requestId === requestId && state.page === page) { state.loading = false; render(); }
+      notify(error.message);
+    }
+  }
   if (page === 'giveaway' && state.data) {
     const id=state.guild.id, requestId=state.requestId;
     try { const rows=await api(`/api/guilds/${id}/giveaways`); if (state.requestId===requestId && state.data) { state.data.giveaways=rows; if (state.page===page) { state.loading=false; render(); } } }
@@ -398,4 +420,104 @@ async function rrDisable(id){
  state.saving=true;const guildId=state.guild.id,requestId=state.requestId;
  try{const result=await api(`/api/guilds/${guildId}/reaction-roles`,{action:'disable',id});notify(result.warning||'Đã đóng bảng.');const rows=await api(`/api/guilds/${guildId}/reaction-roles`);if(state.requestId===requestId){state.data.reactionroles=rows;render();}}
  catch(e){notify(e.message);}finally{state.saving=false;}
+}
+function ticketPage() {
+  const t = state.data.ticket || {};
+  const cfg = t.config || {};
+  const categories = t.categories || [];
+  const channels = state.data.channels || [];
+  const roles = state.data.roles || [];
+
+  return heading('HỆ THỐNG TICKET ĐỘC QUYỀN', 'Quản lý Ticket', 'Cấu hình bảng Ticket Dropdown Menu, banner VNL Ticket và phân quyền riêng cho AdminTicket & Hỗ Trợ Ticket.') +
+    '<div class="card card-body"><h2>Đăng bảng Ticket vào Discord</h2>' +
+    '<p>Đăng bảng chọn dịch vụ/sản phẩm có Dropdown Menu và banner VNL Ticket vào kênh bạn đã cấu hình bên dưới.</p>' +
+    '<button class="primary" type="button" id="ticket-panel-send">Đăng / Cập nhật bảng Ticket vào Discord</button><div id="ticket-panel-result" style="margin-top:12px;"></div></div>' +
+    '<form id="ticket-form">' +
+    panel('Phân quyền truy cập phòng Ticket (Độc Quyền)', 'Chỉ Người tạo ticket, Role AdminTicket và Role Hỗ Trợ Ticket mới được xem phòng chat.',
+      '<div class="form-grid">' +
+      '<div class="field"><label for="ticket-admin-role">👑 Role AdminTicket (Quản trị viên Ticket)</label><select id="ticket-admin-role" name="adminRoleId"><option value="">Chọn role AdminTicket…</option>' +
+      roles.map(r => `<option value="${h(r.id)}" ${cfg.adminRoleId === r.id ? 'selected' : ''}>@ ${h(r.name)}</option>`).join('') +
+      '</select></div>' +
+      '<div class="field"><label for="ticket-support-role">🛠️ Role Hỗ Trợ Ticket (Nhân viên hỗ trợ)</label><select id="ticket-support-role" name="supportRoleId"><option value="">Chọn role Hỗ Trợ Ticket…</option>' +
+      roles.map(r => `<option value="${h(r.id)}" ${cfg.supportRoleId === r.id ? 'selected' : ''}>@ ${h(r.name)}</option>`).join('') +
+      '</select></div>' +
+      '</div>') +
+    panel('Kênh & Danh mục phòng Ticket', 'Chọn nơi đặt bảng và danh mục lưu các phòng chat được tạo ra.',
+      '<div class="form-grid">' +
+      '<div class="field"><label for="ticket-channel">📌 Kênh đặt bảng Ticket Panel</label><select id="ticket-channel" name="channelId"><option value="">Chọn kênh…</option>' +
+      channels.map(c => `<option value="${h(c.id)}" ${cfg.channelId === c.id ? 'selected' : ''}># ${h(c.name)}</option>`).join('') +
+      '</select></div>' +
+      '<div class="field"><label for="ticket-category">📁 Danh mục (Category) tạo phòng Ticket</label><select id="ticket-category" name="categoryId"><option value="">Mặc định (ngoài danh mục)</option>' +
+      categories.map(c => `<option value="${h(c.id)}" ${cfg.categoryId === c.id ? 'selected' : ''}>📁 ${h(c.name)}</option>`).join('') +
+      '</select></div>' +
+      '</div>') +
+    panel('Giao diện Embed & Banner VNL Ticket', 'Tùy chỉnh hình ảnh banner ở dưới Embed và văn bản hiển thị.',
+      '<div class="form-grid">' +
+      '<div class="field"><label for="ticket-title">Tiêu đề bảng Ticket</label><input id="ticket-title" name="title" type="text" maxlength="256" value="' + h(cfg.title || '🏷️ HỆ THỐNG TICKET') + '" required></div>' +
+      '<div class="field"><label for="ticket-color">Màu viền Embed</label><input id="ticket-color" name="color" type="color" value="' + h(cfg.color || '#00a8ff') + '" required></div>' +
+      '<div class="field" style="grid-column: 1 / -1;"><label for="ticket-banner">🖼️ Link ảnh Banner VNL Ticket (hiển thị ở dưới Embed)</label><input id="ticket-banner" name="bannerUrl" type="url" placeholder="https://..." value="' + h(cfg.bannerUrl || '') + '"></div>' +
+      '<div class="field" style="grid-column: 1 / -1;"><label for="ticket-desc">Nội dung giới thiệu Embed</label><textarea id="ticket-desc" name="description" rows="6" maxlength="4000" required>' + h(cfg.description || '') + '</textarea></div>' +
+      '<div class="field" style="grid-column: 1 / -1;"><label for="ticket-placeholder">Dòng chữ gợi ý trong Dropdown Menu (Placeholder)</label><input id="ticket-placeholder" name="placeholder" type="text" maxlength="150" value="' + h(cfg.placeholder || 'Nhấn Vào Đây Để Chọn Dịch Vụ / Hỗ Trợ...') + '" required></div>' +
+      '</div>') +
+    '<div class="note">Khi thành viên chọn một mục trong menu, bot sẽ tự tạo kênh text ẩn với toàn bộ thành viên khác, chỉ cấp quyền ViewChannel cho Người tạo + Role AdminTicket + Role Hỗ Trợ Ticket. Kèm nút Đóng, Mở lại, Xóa và Lưu Transcript.</div>' +
+    '<div class="savebar"><span id="ticket-save-status">Nhớ lưu cấu hình trước khi đăng bảng vào Discord.</span><button type="submit" class="primary">Lưu cấu hình Ticket</button></div></form>';
+}
+function getTicketFormValues() {
+  const form = document.querySelector('#ticket-form');
+  if (!form) return {};
+  const fd = new FormData(form);
+  return {
+    channelId: fd.get('channelId') || '',
+    categoryId: fd.get('categoryId') || '',
+    adminRoleId: fd.get('adminRoleId') || '',
+    supportRoleId: fd.get('supportRoleId') || '',
+    title: fd.get('title') || '',
+    description: fd.get('description') || '',
+    bannerUrl: fd.get('bannerUrl') || '',
+    color: fd.get('color') || '#00a8ff',
+    placeholder: fd.get('placeholder') || '',
+  };
+}
+async function ticketSubmit(e) {
+  e.preventDefault();
+  if (state.saving) return;
+  const cfg = getTicketFormValues();
+  state.saving = true;
+  const button = document.querySelector('#ticket-form button[type="submit"]');
+  if (button) button.textContent = 'Đang lưu…';
+  try {
+    const res = await api(`/api/guilds/${state.guild.id}/ticket`, { action: 'save', config: cfg });
+    if (state.data?.ticket) state.data.ticket.config = res.config;
+    state.dirty = false;
+    notify('Đã lưu cấu hình Ticket thành công!');
+  } catch (err) {
+    notify(err.message);
+  } finally {
+    state.saving = false;
+    if (button) button.textContent = 'Lưu cấu hình Ticket';
+  }
+}
+async function sendTicketPanelDashboard() {
+  const resultDiv = document.querySelector('#ticket-panel-result');
+  const button = document.querySelector('#ticket-panel-send');
+  const channelSelect = document.querySelector('#ticket-channel');
+  const channelId = channelSelect?.value;
+  if (!channelId) return notify('Vui lòng chọn Kênh đặt bảng Ticket Panel trước!');
+
+  button.disabled = true; button.textContent = 'Đang đăng bảng…';
+  if (resultDiv) resultDiv.innerHTML = '<span class="subtle">Đang gửi bảng Ticket sang Discord…</span>';
+  try {
+    const res = await api(`/api/guilds/${state.guild.id}/ticket`, {
+      action: 'publish',
+      channelId,
+      config: getTicketFormValues(),
+    });
+    if (resultDiv) resultDiv.innerHTML = '<a class="secondary" href="' + h(res.messageUrl) + '" target="_blank" rel="noopener noreferrer">Mở bảng Ticket trên Discord ↗</a>';
+    notify('Đã đăng bảng Ticket vào kênh thành công!');
+  } catch (err) {
+    if (resultDiv) resultDiv.innerHTML = `<span class="danger">${h(err.message)}</span>`;
+    notify(err.message);
+  } finally {
+    button.disabled = false; button.textContent = 'Đăng / Cập nhật bảng Ticket vào Discord';
+  }
 }

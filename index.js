@@ -252,7 +252,17 @@ if (
 client.on(
   Events.InteractionCreate,
   async (interaction) => {
-    if (interaction.isButton() && interaction.customId.startsWith('security:')) {
+    if ((interaction.isStringSelectMenu?.() || interaction.isButton?.()) && interaction.customId?.startsWith('ticket:')) {
+      try { await require('./utils/ticketSystem').handleInteraction(interaction); }
+      catch (error) {
+        console.error('[TICKET INTERACTION ERROR]', error);
+        const payload = { content: 'Có lỗi xảy ra khi xử lý ticket. Vui lòng thử lại sau.', flags: 64 };
+        if (interaction.deferred) await interaction.editReply(payload).catch(() => {});
+        else if (!interaction.replied) await interaction.reply(payload).catch(() => {});
+      }
+      return;
+    }
+    if (interaction.isButton?.() && interaction.customId?.startsWith('security:')) {
       try { await require('./utils/securityReview').handleButton(interaction); }
       catch(error) {
         console.error('[SECURITY REVIEW]',error.message);
