@@ -87,7 +87,10 @@ const definitions = [
   ['receptionistEnabled', 'receptionist', 'Bật thông báo lễ tân khi có thành viên mới', 'boolean', false],
   ['receptionistChannel', 'receptionist', 'Kênh chat chung nhận thông báo lễ tân', 'channel', ''],
   ['receptionistRole', 'receptionist', 'Role lễ tân được tag khi có người mới', 'role', ''],
-  ['receptionistText', 'receptionist', 'Nội dung thông báo lễ tân', 'text', '👋 {member} vừa vào server! {role} chào thành viên mới nhé~', 500],
+  ['receptionistPingText', 'receptionist', 'Dòng ping bên ngoài khung', 'text', '👋 Welcome {member} đến với **{server}**! {role}', 300],
+  ['receptionistTitle', 'receptionist', 'Tiêu đề khung chào mừng', 'text', '✨ Welcome to {server}', 150],
+  ['receptionistText', 'receptionist', 'Nội dung bên trong khung', 'text', '🌸 Chào mừng bạn gia nhập **{server}**!\n\nMỗi thành viên đều là một phần quan trọng của cộng đồng. Đừng ngần ngại gửi lời chào và trò chuyện cùng {role} và mọi người nhé!\n\n✨ Chúc bạn có những phút giây thật vui vẻ tại đây!', 1500],
+  ['receptionistColor', 'receptionist', 'Màu viền khung chào mừng', 'color', '#54a0ff'],
 ];
 const defaults = Object.fromEntries(definitions.map(([key, , , , value]) => [key, value]));
 function getOptions(guildId) {
