@@ -72,17 +72,35 @@ async function handleChatModeration(message) {
   const action = commandMap.get(cmd);
   if (!action) return false;
 
+  // Xóa ngay tin nhắn lệnh của người dùng để các thành viên khác không thấy
+  if (typeof message.delete === 'function') {
+    message.delete().catch(() => {});
+  }
+
+  // Phản hồi kết quả và tự động xóa sau 5 giây để không làm loãng kênh chat
+  const sendFeedback = async (content) => {
+    try {
+      const sent = await message.reply(content).catch(() => message.channel?.send?.(content));
+      if (sent && typeof sent.delete === 'function') {
+        setTimeout(() => sent.delete().catch(() => {}), 5000);
+      }
+      return sent;
+    } catch {
+      return null;
+    }
+  };
+
   const targetArg = parts[1];
   const rest = parts.slice(2);
 
   if (!targetArg) {
-    await message.reply(`❌ Thiếu người dùng. Cú pháp: \`${cmd} @thành_viên [lý do]\``);
+    await sendFeedback(`❌ Thiếu người dùng. Cú pháp: \`${cmd} @thành_viên [lý do]\``);
     return true;
   }
 
   const targetId = targetArg.replace(/^<@!?(\d+)>$/, '$1');
   if (!/^\d{17,20}$/.test(targetId)) {
-    await message.reply(`❌ Vui lòng tag thành viên hoặc nhập ID hợp lệ. Ví dụ: \`${cmd} @user lý do\``);
+    await sendFeedback(`❌ Vui lòng tag thành viên hoặc nhập ID hợp lệ. Ví dụ: \`${cmd} @user lý do\``);
     return true;
   }
 
@@ -100,17 +118,17 @@ async function handleChatModeration(message) {
 
   const neededPerm = permMap[action];
   if (!isOwner && !member.permissions.has(neededPerm)) {
-    await message.reply('❌ Bạn không đủ quyền để thực hiện hành động này.');
+    await sendFeedback('❌ Bạn không đủ quyền để thực hiện hành động này.');
     return true;
   }
 
   // 2. Kiểm tra mục tiêu không phải tác giả hay bot
   if (targetId === message.author.id) {
-    await message.reply('❌ Bạn không thể tự xử phạt bản thân.');
+    await sendFeedback('❌ Bạn không thể tự xử phạt bản thân.');
     return true;
   }
   if (targetId === message.client.user.id) {
-    await message.reply('❌ Bạn không thể xử phạt bot.');
+    await sendFeedback('❌ Bạn không thể xử phạt bot.');
     return true;
   }
 
@@ -125,7 +143,7 @@ async function handleChatModeration(message) {
   // 4. Kiểm tra phân cấp role
   if (targetMember && !isOwner) {
     if (member.roles.highest.comparePositionTo(targetMember.roles.highest) <= 0) {
-      await message.reply('❌ Role của bạn không cao hơn thành viên này.');
+      await sendFeedback('❌ Role của bạn không cao hơn thành viên này.');
       return true;
     }
   }
@@ -134,7 +152,7 @@ async function handleChatModeration(message) {
   try {
     if (action === 'ban') {
       if (targetMember && !targetMember.bannable) {
-        await message.reply('❌ Bot không đủ quyền hoặc vị trí role để ban thành viên này.');
+        await sendFeedback('❌ Bot không đủ quyền hoặc vị trí role để ban thành viên này.');
         return true;
       }
       const reason = rest.join(' ') || 'Không có lý do.';
@@ -149,17 +167,17 @@ async function handleChatModeration(message) {
         reason,
       });
 
-      await message.reply(`🔨 Đã ban <@${targetId}>. Lý do: ${reason}`);
+      await sendFeedback(`🔨 Đã ban <@${targetId}>. Lý do: ${reason}`);
       return true;
     }
 
     if (action === 'kick') {
       if (!targetMember) {
-        await message.reply('❌ Thành viên này không có trong server.');
+        await sendFeedback('❌ Thành viên này không có trong server.');
         return true;
       }
       if (!targetMember.kickable) {
-        await message.reply('❌ Bot không đủ quyền hoặc vị trí role để kick thành viên này.');
+        await sendFeedback('❌ Bot không đủ quyền hoặc vị trí role để kick thành viên này.');
         return true;
       }
       const reason = rest.join(' ') || 'Không có lý do.';
@@ -172,17 +190,17 @@ async function handleChatModeration(message) {
         reason,
       });
 
-      await message.reply(`👢 Đã kick <@${targetId}>. Lý do: ${reason}`);
+      await sendFeedback(`👢 Đã kick <@${targetId}>. Lý do: ${reason}`);
       return true;
     }
 
     if (action === 'timeout') {
       if (!targetMember) {
-        await message.reply('❌ Thành viên này không có trong server.');
+        await sendFeedback('❌ Thành viên này không có trong server.');
         return true;
       }
       if (!targetMember.moderatable) {
-        await message.reply('❌ Bot không đủ quyền hoặc vị trí role để hạn chế thành viên này.');
+        await sendFeedback('❌ Bot không đủ quyền hoặc vị trí role để hạn chế thành viên này.');
         return true;
       }
 
@@ -200,21 +218,21 @@ async function handleChatModeration(message) {
         duration: durationMs,
       });
 
-      await message.reply(`⏱️ Đã hạn chế <@${targetId}> trong **${minutes} phút**. Lý do: ${reason}`);
+      await sendFeedback(`⏱️ Đã hạn chế <@${targetId}> trong **${minutes} phút**. Lý do: ${reason}`);
       return true;
     }
 
     if (action === 'untimeout') {
       if (!targetMember) {
-        await message.reply('❌ Thành viên này không có trong server.');
+        await sendFeedback('❌ Thành viên này không có trong server.');
         return true;
       }
       if (!targetMember.moderatable) {
-        await message.reply('❌ Bot không đủ quyền hoặc vị trí role để gỡ hạn chế thành viên này.');
+        await sendFeedback('❌ Bot không đủ quyền hoặc vị trí role để gỡ hạn chế thành viên này.');
         return true;
       }
       if (!targetMember.isCommunicationDisabled()) {
-        await message.reply('ℹ️ Thành viên này hiện không bị hạn chế.');
+        await sendFeedback('ℹ️ Thành viên này hiện không bị hạn chế.');
         return true;
       }
 
@@ -228,12 +246,12 @@ async function handleChatModeration(message) {
         reason,
       });
 
-      await message.reply(`✅ Đã gỡ hạn chế cho <@${targetId}>. Lý do: ${reason}`);
+      await sendFeedback(`✅ Đã gỡ hạn chế cho <@${targetId}>. Lý do: ${reason}`);
       return true;
     }
   } catch (error) {
     console.error(`[CHAT MOD] Lỗi khi xử lý ${cmd}:`, error);
-    await message.reply(`❌ Có lỗi xảy ra: ${error.message}`).catch(() => {});
+    await sendFeedback(`❌ Có lỗi xảy ra: ${error.message}`).catch(() => {});
     return true;
   }
 

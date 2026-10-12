@@ -75,36 +75,45 @@ const mockGuild = {
 
 function createMessage(content) {
   let replyContent = '';
-  return {
+  const msg = {
     content,
+    deleted: false,
     guild: mockGuild,
     author: { id: 'mod-id', tag: 'Mod#0001', bot: false },
     member: authorMember,
     client: { user: { id: 'bot-id' } },
-    reply: async (msg) => {
-      replyContent = msg;
-      return { id: 'reply-1' };
+    delete: async () => {
+      msg.deleted = true;
+      return msg;
+    },
+    reply: async (text) => {
+      replyContent = text;
+      return { id: 'reply-1', delete: async () => {} };
     },
     get lastReply() {
       return replyContent;
     },
   };
+  return msg;
 }
 
 async function testChatCommands() {
-  // Tin nhắn thường không bị chặn
+  // Tin nhắn thường không bị chặn và không bị xóa
   const normalMsg = createMessage('xin chào server');
   assert.equal(await handleChatModeration(normalMsg), false);
+  assert.equal(normalMsg.deleted, false, 'Tin nhắn thường không được xóa');
 
-  // vnkick thiếu user
+  // vnkick thiếu user (nhưng vẫn xóa lệnh để bảo mật)
   const noArgKick = createMessage('vnkick');
   assert.equal(await handleChatModeration(noArgKick), true);
+  assert.equal(noArgKick.deleted, true, 'Tin nhắn lệnh phải bị xóa ngay');
   assert.ok(noArgKick.lastReply.includes('Thiếu người dùng'));
 
   // vnkick thành công
   sentModLogs.length = 0;
   const kickMsg = createMessage(`vnkick <@${TARGET_ID}> spam link`);
   assert.equal(await handleChatModeration(kickMsg), true);
+  assert.equal(kickMsg.deleted, true, 'Tin nhắn lệnh kick phải bị xóa ngay');
   assert.equal(kicked.length, 1);
   assert.ok(kickMsg.lastReply.includes('Đã kick'));
   assert.equal(sentModLogs.length, 1);
