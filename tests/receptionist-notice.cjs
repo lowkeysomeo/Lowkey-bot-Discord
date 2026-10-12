@@ -22,7 +22,7 @@ function makeOptions(overrides = {}) {
   };
 }
 
-function makeMember({ bot = false, id = 'user-001', username = 'TestUser', hasViewSend = true } = {}) {
+function makeMember({ bot = false, id = 'user-001', username = 'TestUser', hasViewSend = true, hasEmbed = true } = {}) {
   const meObj = { permissions: { has: () => true }, roles: { highest: {} } };
   const guild = {
     id: 'guild-1',
@@ -35,7 +35,12 @@ function makeMember({ bot = false, id = 'user-001', username = 'TestUser', hasVi
         if (chId !== 'ch-general') return null;
         return {
           guildId: 'guild-1', type: 0,
-          permissionsFor: () => ({ has: () => hasViewSend }),
+          permissionsFor: () => ({
+            has: (p) => {
+              if (Array.isArray(p)) return p.every(perm => String(perm) === '16384' ? hasEmbed : hasViewSend);
+              return String(p) === '16384' ? hasEmbed : hasViewSend;
+            },
+          }),
           send: async (payload) => {
             sentContent = payload.content;
             sentOptions = payload.allowedMentions;
@@ -138,10 +143,25 @@ async function run() {
   assert.ok(sentContent !== null, 'Vẫn gửi dù không có role lễ tân');
   assert.deepEqual(sentOptions.roles, [], 'allowedMentions.roles rỗng khi không có role');
 
+  // ────────────────────────────────────────────────
+  // 8. Thiếu quyền EmbedLinks → Tự động fallback sang text thuần, không bỏ sót
+  // ────────────────────────────────────────────────
+  sentContent = null; sentOptions = null; sentEmbeds = null;
+  cust.getOptions = () => makeOptions();
+  await notifyReceptionist(makeMember({
+    id: 'user-004',
+    username: 'Charlie',
+    hasEmbed: false,
+  }));
+  assert.ok(sentContent !== null, 'Vẫn phải gửi tin khi thiếu quyền EmbedLinks (fallback text)');
+  assert.equal(sentEmbeds, undefined, 'Không đính kèm embed khi thiếu quyền EmbedLinks');
+  assert.ok(sentContent.includes('<@user-004>'), 'Text fallback phải tag người mới');
+  assert.ok(sentContent.includes('<@&role-letan>'), 'Text fallback phải tag role lễ tân');
+
   // Khôi phục getOptions gốc
   cust.getOptions = origGet;
 
-  console.log('PASS receptionist notice: bật/tắt, bỏ qua bot, thiếu kênh, thiếu quyền, tag role, embed layout, avatar thumbnail, biến tùy chỉnh.');
+  console.log('PASS receptionist notice: bật/tắt, bỏ qua bot, thiếu kênh, thiếu quyền, tag role, embed layout, avatar thumbnail, biến tùy chỉnh, fallback text.');
 }
 
 run().catch(error => { console.error('FAIL receptionist:', error.message); process.exit(1); });

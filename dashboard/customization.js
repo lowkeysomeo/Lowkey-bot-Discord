@@ -26,11 +26,18 @@ function validateCustomization(input, guild, channels, roles, me) {
     if (type === 'color' && (typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value))) invalid(`${label}: màu không hợp lệ.`);
     if (key === 'securityTrusted' && (typeof value !== 'string' || (value !== 'none' && !/^\d{17,20}(?:[\s,]+\d{17,20})*$/.test(value.trim())))) invalid('Danh sách tin cậy: nhập ID Discord cách nhau bằng dấu phẩy hoặc none.');
     if (type === 'role') {
-      if(typeof value !== 'string')invalid(label + ': chọn role hợp lệ.');
-      if(value) {
-        const role=roles.get(value);
-        const unsafe=[P.Administrator,P.ManageGuild,P.ManageRoles,P.ManageChannels,P.KickMembers,P.BanMembers,P.ModerateMembers];
-        if(!role || role.id===guild.id || role.managed || !me.permissions.has(P.ManageRoles) || me.roles.highest.comparePositionTo(role)<=0 || role.permissions?.any(unsafe))invalid(label + ': chọn role thưởng không có quyền quản trị và nằm dưới role bot.');
+      if (typeof value !== 'string') invalid(label + ': chọn role hợp lệ.');
+      if (value) {
+        const role = roles.get(value);
+        if (!role || role.id === guild.id) invalid(label + ': chọn role hợp lệ trong server.');
+        // Role lễ tân là role để bot mention/tag khi có người mới, không phải role thưởng do bot cấp.
+        // Do đó không bắt buộc role lễ tân phải nằm dưới role bot hay không có quyền quản trị.
+        if (key !== 'receptionistRole') {
+          const unsafe = [P.Administrator, P.ManageGuild, P.ManageRoles, P.ManageChannels, P.KickMembers, P.BanMembers, P.ModerateMembers];
+          if (role.managed || !me.permissions.has(P.ManageRoles) || me.roles.highest.comparePositionTo(role) <= 0 || role.permissions?.any(unsafe)) {
+            invalid(label + ': chọn role thưởng không có quyền quản trị và nằm dưới role bot.');
+          }
+        }
       }
     }
     if (type === 'roles') {

@@ -42,7 +42,10 @@ const client = new Client({
 
 client.commands = loadCommands();
 require('./utils/securitySystem').start(client);
-client.on(Events.GuildMemberAdd, member => require('./utils/inviteSystem').joined(member));
+client.on(Events.GuildMemberAdd, async member => {
+  try { require('./utils/inviteSystem').joined(member); } catch (e) { console.error('[INVITES]', e.message); }
+  try { await require('./utils/receptionistNotice').notifyReceptionist(member); } catch (e) { console.error('[RECEPTIONIST]', e.message); }
+});
 client.on(Events.InviteCreate, invite => require('./utils/inviteSystem').created(invite));
 client.on(Events.GuildCreate, guild => {
   if(getOptions(guild.id).inviteEnabled)require('./utils/inviteSystem').prime(guild).catch(error=>console.warn('[INVITES]',error.message));
