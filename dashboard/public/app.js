@@ -46,7 +46,21 @@ function render() {
   const panelButton = document.querySelector('#confession-panel-send');
   if (panelButton) panelButton.onclick = sendConfessionPanel;
   const testForm = document.querySelector('#test-form');
-  if (testForm) testForm.onsubmit = sendTest;
+  if (testForm) {
+    testForm.onsubmit = sendTest;
+    const typeSelect = testForm.querySelector('#test-type');
+    const updateVisibility = () => {
+      const type = typeSelect ? typeSelect.value : '';
+      const lvlField = testForm.querySelector('#field-test-level');
+      const cfsField = testForm.querySelector('#field-test-confession');
+      if (lvlField) lvlField.style.display = ['chat', 'voice'].includes(type) ? '' : 'none';
+      if (cfsField) cfsField.style.display = type === 'confession' ? '' : 'none';
+    };
+    if (typeSelect) {
+      typeSelect.onchange = updateVisibility;
+      updateVisibility();
+    }
+  }
   if (form) {
     const changed = () => { state.dirty = true; document.querySelector('#save-status').textContent = 'Bạn có thay đổi chưa lưu.'; updateNoticePreview(); };
     form.oninput = changed; form.onchange = changed; form.onsubmit = save;
@@ -169,11 +183,19 @@ function updateNoticePreview() {
 function testPage() {
   return heading('XEM THÔNG BÁO TRÊN DISCORD', 'Gửi thử', 'Dùng cấu hình đã lưu của server. Hãy lưu các chỉnh sửa trước khi gửi thử.') +
     '<form id="test-form">' + panel('Chọn bản thử và nơi nhận', 'Bản thử có nhãn TEST và không ping thành viên.',
-      '<div class="form-grid"><div class="field"><label for="test-type">Loại thông báo</label><select id="test-type" name="type"><option value="chat">Lên cấp Chat</option><option value="voice">Lên cấp Voice</option><option value="monthly">Vinh danh tháng + ảnh Top 10</option><option value="confession">Confession</option></select></div>' +
+      '<div class="form-grid"><div class="field"><label for="test-type">Loại thông báo</label><select id="test-type" name="type">' +
+      '<option value="chat">Lên cấp Chat</option>' +
+      '<option value="voice">Lên cấp Voice</option>' +
+      '<option value="receptionist">👋 Lễ tân chào thành viên mới</option>' +
+      '<option value="confessionMilestone">🏆 Thưởng mốc Confession (Role 100 bài)</option>' +
+      '<option value="roleNotice">🎉 Chúc mừng nhận Role</option>' +
+      '<option value="invite">💌 Thông báo lời mời (Invite)</option>' +
+      '<option value="monthly">Vinh danh tháng + ảnh Top 10</option>' +
+      '<option value="confession">Confession</option></select></div>' +
       '<div class="field"><label for="test-channel">Kênh nhận bản thử</label><select id="test-channel" name="channelId" required><option value="">Chọn kênh…</option>' + state.data.channels.map(c => '<option value="' + h(c.id) + '"># ' + h(c.name) + '</option>').join('') + '</select></div>' +
-      '<div class="field"><label for="test-level">Level mẫu (Chat/Voice)</label><input id="test-level" name="level" type="number" min="1" max="100000" value="25" required></div>' +
-      '<div class="field"><label for="test-confession">Nội dung mẫu (Confession)</label><textarea id="test-confession" name="content" maxlength="4000" rows="3">Đây là confession gửi thử từ dashboard. Chúc cộng đồng luôn vui vẻ!</textarea></div></div>') +
-    '<div class="note">Thông báo lên cấp dùng tên/avatar của bạn và level mẫu. Bảng tháng dùng 10 thành viên minh họa mỗi bảng. Gửi thử không đổi XP, không cấp/gỡ role và không tăng số confession. Nút thích chỉ để xem giao diện, không tạo luồng bình luận. Ảnh tháng xuất hiện khi bạn bật tùy chọn kèm ảnh. Tối đa 6 lần/phút.</div>' +
+      '<div class="field" id="field-test-level"><label for="test-level">Level mẫu (Chat/Voice)</label><input id="test-level" name="level" type="number" min="1" max="100000" value="25" required></div>' +
+      '<div class="field" id="field-test-confession"><label for="test-confession">Nội dung mẫu (Confession)</label><textarea id="test-confession" name="content" maxlength="4000" rows="3">Đây là confession gửi thử từ dashboard. Chúc cộng đồng luôn vui vẻ!</textarea></div></div>') +
+    '<div class="note">Thông báo dùng cấu hình thực tế của server (màu sắc, tiêu đề, nội dung, avatar). Bản thử có nhãn TEST và không ping người thật. Tối đa 6 lần/phút.</div>' +
     '<div class="savebar"><span id="test-status" role="status">Bản thử sẽ được đăng vào kênh bạn chọn.</span><button type="submit" class="primary">Gửi bản thử</button></div><div id="test-result"></div></form>';
 }
 async function sendTest(event) {
