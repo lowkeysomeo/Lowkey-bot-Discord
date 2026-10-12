@@ -139,7 +139,7 @@ function customPage(page) {
         '<div class="notice-preview" id="notice-preview"><h3 id="notice-preview-title"></h3><p id="notice-preview-chat"></p><hr><p id="notice-preview-voice"></p></div>');
   } else if (page === 'receptionist') {
     body = panel('Thông báo lễ tân chào thành viên mới', 'Gửi lời nhắn vào kênh chat chung khi có người mới vào server và tag role lễ tân để họ chủ động chào hỏi.', optionControls('receptionist')) +
-      '<div class="note">Nội dung hỗ trợ các biến: <b>{member}</b> (tag thành viên mới), <b>{role}</b> (tag role lễ tân), <b>{server}</b> (tên server), <b>{username}</b> (tên người mới), <b>{memberCount}</b> (tổng số thành viên). Bot sẽ chỉ ping role lễ tân để thông báo, không ping toàn server.</div>';
+      '<div class="note">Nội dung hỗ trợ các biến: <b>{member}</b> (tag thành viên mới), <b>{role}</b> (tag role lễ tân), <b>{server}</b> (tên server), <b>{username}</b> (tên người mới), <b>{memberCount}</b> (tổng số thành viên). Bot sẽ ping role lễ tân và thành viên mới để thông báo, không ping @everyone / @here.</div>';
   } else {
     body = panel('Tổng kết và role tháng', 'Chốt tháng theo giờ Việt Nam. Role chuyển theo XP tháng trước; XP tổng và level vẫn được giữ.',
       optionControls('monthly') + legacyFields(state.data.fields.filter(([key]) => key.startsWith('MONTHLY_')).map(([key]) => key))) +

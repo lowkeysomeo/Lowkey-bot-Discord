@@ -87,6 +87,7 @@ async function run() {
   assert.ok(sentContent.includes('<@user-001>'), 'Phải tag mention thành viên mới');
   assert.ok(sentContent.includes('<@&role-letan>'), 'Phải tag role lễ tân');
   assert.deepEqual(sentOptions.roles, ['role-letan'], 'allowedMentions.roles phải chứa role lễ tân');
+  assert.deepEqual(sentOptions.users, ['user-001'], 'allowedMentions.users phải chứa member.id để ping thành viên mới');
   assert.deepEqual(sentOptions.parse, [], 'allowedMentions.parse phải rỗng (không @everyone)');
 
   // ────────────────────────────────────────────────

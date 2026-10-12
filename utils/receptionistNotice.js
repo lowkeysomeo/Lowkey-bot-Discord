@@ -42,11 +42,12 @@ async function notifyReceptionist(member) {
     .replace(/\{username\}/g, member.user.username)
     .replace(/\{memberCount\}/g, String(guild.memberCount));
 
-  // Khi gửi: mention role lễ tân (có ping) nhưng KHÔNG ping @member để không tạo cảm giác bị gọi
+  // Gửi tin nhắn: ping role lễ tân và ping thành viên mới
   await channel.send({
     content: text.trim(),
     allowedMentions: {
       parse: [],
+      users: [member.id],
       roles: roleId ? [roleId] : [],
     },
   });
