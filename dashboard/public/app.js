@@ -565,7 +565,7 @@ function ticketPage() {
       '</select></div>' +
       '<div class="field"><label for="ticket-category">📁 Danh mục (Category) tạo phòng Ticket</label><select id="ticket-category" name="categoryId"><option value="">Mặc định (ngoài danh mục)</option>' +
       categories.map(c => `<option value="${h(c.id)}" ${cfg.categoryId === c.id ? 'selected' : ''}>📁 ${h(c.name)}</option>`).join('') +
-      '</select></div>' +
+      '</select><small>Gom các phòng ticket vào một thư mục trên Discord. Nếu menu chỉ có "Mặc định", hãy tạo Danh mục (Create Category) trên Discord rồi F5 tải lại trang.</small></div>' +
       '<div class="field" style="grid-column: 1 / -1;"><label for="ticket-log-channel">📑 Kênh lưu Log & Transcript (Tự động gửi khi đóng Ticket)</label><select id="ticket-log-channel" name="logChannelId"><option value="">Không gửi kênh log (chỉ gửi DM cho khách)</option>' +
       channels.map(c => `<option value="${h(c.id)}" ${cfg.logChannelId === c.id ? 'selected' : ''}># ${h(c.name)}</option>`).join('') +
       '</select></div>' +
