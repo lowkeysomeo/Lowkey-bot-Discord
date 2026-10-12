@@ -99,7 +99,7 @@ function optionControls(group) {
   return '<div class="form-grid">' + state.data.optionDefinitions.filter(d => d[1] === group).map(([key, , label, type, , a, b]) => {
     const value = state.data.options[key], id = 'option_' + key;
     if (type === 'boolean') return '<label class="toggle-field" for="' + id + '"><span>' + h(label) + '</span><input type="checkbox" id="' + id + '" name="' + id + '" ' + (value ? 'checked' : '') + '></label>';
-    if (type === 'role' || (type === 'channel' && ['inviteChannel','securityLogChannel','modLogChannel','confessionNoticeChannel','confessionMilestoneChannel'].includes(key))) return field(id,label,type,value);
+    if (type === 'role' || (type === 'channel' && ['inviteChannel','securityLogChannel','modLogChannel','confessionNoticeChannel','confessionMilestoneChannel','receptionistChannel'].includes(key))) return field(id,label,type,value);
     if (type === 'roles') return '<div class="field"><label>' + h(label) + '</label><input type="hidden" name="' + id + '"><div class="exclusion-list">' + state.data.roles.filter(role => !role.managed).map(role => '<label class="check-row"><input type="checkbox" data-role-option="' + key + '" value="' + h(role.id) + '" ' + (value.includes(role.id) ? 'checked' : '') + '><span>' + h(role.name) + '</span></label>').join('') + '</div></div>';
     if (type === 'channel' && key === 'roleNoticeChannel') return field(id, label, 'channel', value);
     if (type === 'channel') return field(id, label, 'channel', value).replace('Không sử dụng', 'Dùng kênh thông báo chung');
@@ -137,6 +137,9 @@ function customPage(page) {
     body = panel('Chúc mừng nhận role', 'Tự chúc mừng khi nhận role thưởng level hoặc role bạn chọn bên dưới. Role trong danh sách bỏ qua luôn được ưu tiên. Bỏ chọn Member, game, ping để tránh thông báo không cần thiết. Hỗ trợ {user}, {username}, {roles}, {server}, {reason}, {grantedBy}. Bot tự ghi mốc level và người cấp role; cần quyền Xem nhật ký kiểm toán để xác định người cấp từ bên ngoài. Chỉ thông báo role mới nhận sau khi bật.', optionControls('roleNotifications')) + panel('Thông báo lên cấp', 'Chọn kênh chung hoặc kênh riêng cho Chat và Voice.', legacyFields(['LEVEL_CHANNEL_ID']) + optionControls('notifications')) +
       panel('Xem trước nội dung', 'Các biến dùng được: {user}, {username}, {level}, {xp}, {server}, {type}. Xem trước không gửi tin lên Discord.',
         '<div class="notice-preview" id="notice-preview"><h3 id="notice-preview-title"></h3><p id="notice-preview-chat"></p><hr><p id="notice-preview-voice"></p></div>');
+  } else if (page === 'receptionist') {
+    body = panel('Thông báo lễ tân chào thành viên mới', 'Gửi lời nhắn vào kênh chat chung khi có người mới vào server và tag role lễ tân để họ chủ động chào hỏi.', optionControls('receptionist')) +
+      '<div class="note">Nội dung hỗ trợ các biến: <b>{member}</b> (tag thành viên mới), <b>{role}</b> (tag role lễ tân), <b>{server}</b> (tên server), <b>{username}</b> (tên người mới), <b>{memberCount}</b> (tổng số thành viên). Bot sẽ chỉ ping role lễ tân để thông báo, không ping toàn server.</div>';
   } else {
     body = panel('Tổng kết và role tháng', 'Chốt tháng theo giờ Việt Nam. Role chuyển theo XP tháng trước; XP tổng và level vẫn được giữ.',
       optionControls('monthly') + legacyFields(state.data.fields.filter(([key]) => key.startsWith('MONTHLY_')).map(([key]) => key))) +
