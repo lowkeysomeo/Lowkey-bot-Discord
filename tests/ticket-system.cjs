@@ -156,9 +156,19 @@ async function run() {
   // 3. Tạo ticket khi chọn mục & Kiểm tra phân quyền độc quyền
   // ─────────────────────────────────────────────────────────────
   let replyData = null;
+  let panelEditedPayload = null;
+  const mockPanelMessage = {
+    editable: true,
+    edit: async (payload) => {
+      panelEditedPayload = payload;
+      return mockPanelMessage;
+    },
+  };
+
   const selectInteraction = {
     guild,
     user: { id: 'user-001', username: 'MemberA', tag: 'MemberA#0001' },
+    message: mockPanelMessage,
     values: ['nitro_boost'],
     isStringSelectMenu: () => true,
     isButton: () => false,
@@ -171,6 +181,22 @@ async function run() {
   await ticketSystem.handleSelectCategory(selectInteraction);
   assert.ok(replyData.content.includes('Đã tạo Ticket của bạn thành công'));
   assert.equal(createdChannels.length, 1);
+  assert.ok(panelEditedPayload, 'Panel message phải được edit để reset dropdown select menu');
+  const resetMenu = panelEditedPayload.components[0].components[0].toJSON();
+  assert.equal(resetMenu.custom_id, 'ticket:select_category');
+  assert.ok(!resetMenu.options.some(opt => opt.default), 'Không có option nào bị giữ trạng thái default/selected');
+
+  // Kiểm tra chọn lại chính danh mục 'nitro_boost' (ví dụ thành viên khác chọn cùng mục hoặc chọn lại)
+  panelEditedPayload = null;
+  replyData = null;
+  const reselectInteraction = {
+    ...selectInteraction,
+    user: { id: 'user-002', username: 'MemberB', tag: 'MemberB#0002' },
+    values: ['nitro_boost'],
+  };
+  await ticketSystem.handleSelectCategory(reselectInteraction);
+  assert.ok(replyData.content.includes('Đã tạo Ticket của bạn thành công'), 'Chọn lại cùng một danh mục phải tạo ticket thành công');
+  assert.ok(panelEditedPayload, 'Panel message tiếp tục được reset sau khi chọn lại cùng mục');
 
   const ticketChannel = createdChannels[0];
   const overwrites = ticketChannel.permissionOverwrites.data;
@@ -201,24 +227,26 @@ async function run() {
   // ─────────────────────────────────────────────────────────────
   // 4. Cho phép mở tối đa 3 ticket cùng lúc, chặn ticket thứ 4
   // ─────────────────────────────────────────────────────────────
-  // Mở ticket thứ 2 thành công
+  // Mở ticket thứ 2 cho user-001 thành công
   replyData = null;
   selectInteraction.values = ['decor'];
   await ticketSystem.handleSelectCategory(selectInteraction);
   assert.ok(replyData.content.includes('Đã tạo Ticket của bạn thành công'), 'Ticket 2 phải mở thành công');
 
-  // Mở ticket thứ 3 thành công
+  // Mở ticket thứ 3 cho user-001 thành công
   replyData = null;
   selectInteraction.values = ['youtube'];
   await ticketSystem.handleSelectCategory(selectInteraction);
   assert.ok(replyData.content.includes('Đã tạo Ticket của bạn thành công'), 'Ticket 3 phải mở thành công');
-  assert.equal(createdChannels.length, 3, 'Phải có 3 kênh ticket được tạo');
+  assert.equal(createdChannels.length, 4, 'Phải có 4 kênh ticket được tạo (1 user-002 + 3 user-001)');
 
-  // Mở ticket thứ 4 -> Bị chặn!
+  // Mở ticket thứ 4 cho user-001 -> Bị chặn!
   replyData = null;
+  panelEditedPayload = null;
   selectInteraction.values = ['support'];
   await ticketSystem.handleSelectCategory(selectInteraction);
-  assert.ok(replyData && replyData.content && replyData.content.includes('giới hạn tối đa') && replyData.content.includes('3 Ticket'), 'Phải chặn khi đã có 3 ticket đang mở');
+  assert.ok(replyData && replyData.content && replyData.content.includes('giới hạn tối đa') && replyData.content.includes('3 Ticket'), 'Phải chặn khi user-001 đã có 3 ticket đang mở');
+  assert.ok(panelEditedPayload, 'Panel menu vẫn phải được reset khi bị chặn vượt quá số lượng ticket');
 
   // ─────────────────────────────────────────────────────────────
   // 5. Thao tác nút: Đóng ticket -> Tự động lưu transcript, gửi log/DM, xóa kênh sau 5s

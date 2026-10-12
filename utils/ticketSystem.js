@@ -234,6 +234,12 @@ async function handleSelectCategory(interaction) {
     label: selectedValue,
   };
 
+  // Reset lại select menu trên panel message để xóa trạng thái đã chọn (clear checkmark),
+  // giúp thành viên có thể chọn lại cùng một mục mà không bị Discord client chặn sự kiện.
+  if (interaction.message && typeof interaction.message.edit === 'function' && (interaction.message.editable ?? true)) {
+    interaction.message.edit(buildPanelPayload(guild, config)).catch(() => {});
+  }
+
   // 1. Kiểm tra giới hạn số lượng ticket đang mở của thành viên (Tối đa 3 ticket)
   const MAX_OPEN_TICKETS = 3;
   const openTickets = db().prepare(
