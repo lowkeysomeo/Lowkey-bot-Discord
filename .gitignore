@@ -69,3 +69,4 @@ Testing/
 node_modules
 .env
 *.env
+data/*.sqlite*

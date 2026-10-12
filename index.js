@@ -134,7 +134,12 @@ client.once(
 client.on(
   Events.MessageCreate,
   async (message) => {
-    if (!message.guild || message.author.bot) return;
+    if (!message.guild) return;
+    if (message.webhookId) {
+      if (await require('./utils/webhookGuard').onMessage(message)) return;
+      return;
+    }
+    if (message.author.bot) return;
 
     // Xử lý lệnh moderation gõ trực tiếp trong chat (vnban, vnkick, vntimeout, vnuntimeout)
     if (await require('./utils/chatModeration').handleChatModeration(message)) return;

@@ -36,6 +36,14 @@ async function audit(entry, guild) {
   if (entry.action === A.ChannelDelete) {
     require('./channelGuard').onAuditLog(entry, guild).catch(error => console.error('[CHANNEL GUARD]', error.message));
   }
+  // Webhook Guard: tự động phát hiện và xóa Webhook tạo trái phép
+  if (entry.action === A.WebhookCreate || entry.action === A.WebhookUpdate) {
+    require('./webhookGuard').onAuditLog(entry, guild).catch(error => console.error('[WEBHOOK GUARD]', error.message));
+  }
+  // Staff Watch: giám sát hạn mức phạt (Ban/Kick) trong ngày của Staff
+  if (entry.action === A.MemberBanAdd || entry.action === A.MemberKick) {
+    require('./staffWatch').onAuditLog(entry, guild).catch(error => console.error('[STAFF WATCH]', error.message));
+  }
   const o = getOptions(guild.id), id = entry.executorId;
   if (!o.securityEnabled || !o.securityNuke || !id || trusted(guild,id,o) || !watched.has(entry.action)) return;
   if (Date.now() - entry.createdTimestamp > 15000 || seen.has(entry.id)) return;
@@ -66,7 +74,13 @@ async function joined(member) {
   }
 }
 async function message(msg) {
-  if (!msg.guild || msg.author.bot || !msg.member) return;
+  if (!msg.guild) return;
+  // Webhook Guard: kiểm tra tin nhắn phát ra từ Webhook độc hại
+  if (msg.webhookId) {
+    require('./webhookGuard').onMessage(msg).catch(error => console.error('[WEBHOOK GUARD]', error.message));
+    return;
+  }
+  if (msg.author.bot || !msg.member) return;
   const o = getOptions(msg.guild.id);
   if (!o.securityEnabled || !o.securitySpam || trusted(msg.guild,msg.author.id,o)) return;
   const burst = hit(`spam:${msg.guild.id}:${msg.author.id}`,o.securitySpamWindow,o.securitySpamLimit);
@@ -93,11 +107,12 @@ function start(client) {
   client.on(Events.GuildRoleUpdate,safe(require('./securityReview').roleUpdated));
   client.on(Events.GuildMemberRemove,safe(require('./securityReview').memberLeft));
   client.on(Events.MessageCreate,safe(message));
+  client.on(Events.GuildUpdate,safe(require('./staffWatch').onGuildUpdate));
   const timer = setInterval(()=>{
     const now = Date.now();
     for (const [key,list] of buckets) if (!list.length || now-list.at(-1)>300000) buckets.delete(key);
     for (const [key,time] of seen) if (now-time>60000) seen.delete(key);
   },60000); timer.unref();
 }
-function requiredPermissions() { return [P.ViewAuditLog,P.BanMembers,P.KickMembers,P.ModerateMembers,P.ManageMessages,P.ManageRoles,P.ManageChannels]; }
+function requiredPermissions() { return [P.ViewAuditLog,P.BanMembers,P.KickMembers,P.ModerateMembers,P.ManageMessages,P.ManageRoles,P.ManageChannels,P.ManageWebhooks]; }
 module.exports = { start, audit, joined, message, hit, trusted, requiredPermissions };
