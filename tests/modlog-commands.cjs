@@ -16,11 +16,15 @@ const banCommand = require('../commands/admin/vnban');
 const kickCommand = require('../commands/admin/vnkick');
 const timeoutCommand = require('../commands/admin/vntimeout');
 const untimeoutCommand = require('../commands/admin/vnuntimeout');
+const hancheCommand = require('../commands/admin/vnhanche');
+const gohanheCommand = require('../commands/admin/vngohanhe');
 
 assert.equal(banCommand.data.name, 'vnban');
 assert.equal(kickCommand.data.name, 'vnkick');
 assert.equal(timeoutCommand.data.name, 'vntimeout');
 assert.equal(untimeoutCommand.data.name, 'vnuntimeout');
+assert.equal(hancheCommand.data.name, 'vnhanche');
+assert.equal(gohanheCommand.data.name, 'vngohanhe');
 assert.equal(MOD_LOG_CHANNEL_ID, '1555457471596724274', 'Kênh modLog phải đúng 1555457471596724274');
 
 const sentMessages = [];
@@ -183,6 +187,24 @@ async function testCommands() {
   assert.ok(untimeoutInteraction.reply.includes('Đã gỡ hạn chế'));
   assert.equal(sentMessages.length, 4);
   assert.equal(sentMessages[3].embeds[0].data.title, '✅ GỠ TIMEOUT');
+
+  // 5. /vnhanche
+  const hancheInteraction = createInteraction({ minutes: 15, reason: 'Vi phạm tiếng Việt' });
+  await hancheCommand.execute(hancheInteraction);
+  assert.equal(timedOut.length, 3);
+  assert.equal(timedOut[2].d, 15 * 60 * 1000);
+  assert.ok(hancheInteraction.reply.includes('Đã hạn chế'));
+  assert.equal(sentMessages.length, 5);
+  assert.equal(sentMessages[4].embeds[0].data.title, '⏱️ TIMEOUT');
+
+  // 6. /vngohanhe
+  const gohanheInteraction = createInteraction({ reason: 'Gỡ phạt' });
+  await gohanheCommand.execute(gohanheInteraction);
+  assert.equal(timedOut.length, 4);
+  assert.equal(timedOut[3].d, null);
+  assert.ok(gohanheInteraction.reply.includes('Đã gỡ hạn chế'));
+  assert.equal(sentMessages.length, 6);
+  assert.equal(sentMessages[5].embeds[0].data.title, '✅ GỠ TIMEOUT');
 }
 
 async function main() {

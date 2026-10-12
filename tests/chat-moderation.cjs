@@ -137,6 +137,20 @@ async function testChatCommands() {
   assert.equal(sentModLogs.length, 4);
   assert.equal(sentModLogs[3].embeds[0].data.title, '✅ GỠ TIMEOUT');
 
+  // vnhanche (alias tiếng Việt mặc định) thành công với 30m
+  const hancheMsg = createMessage(`vnhanche <@${TARGET_ID}> 30m vi phạm nội quy`);
+  assert.equal(await handleChatModeration(hancheMsg), true);
+  assert.equal(timedOut.length, 3);
+  assert.equal(timedOut[2].d, 30 * 60 * 1000);
+  assert.ok(hancheMsg.lastReply.includes('30 phút'));
+
+  // vngohanhe (alias tiếng Việt mặc định) thành công
+  const goHancheMsg = createMessage(`vngohanhe <@${TARGET_ID}> hết hạn cảnh cáo`);
+  assert.equal(await handleChatModeration(goHancheMsg), true);
+  assert.equal(timedOut.length, 4);
+  assert.equal(timedOut[3].d, null);
+  assert.ok(goHancheMsg.lastReply.includes('Đã gỡ hạn chế'));
+
   // Kiểm tra tùy chỉnh cú pháp chat qua Dashboard options
   const { saveOptions } = require('../utils/customization');
   saveOptions('guild-test', {

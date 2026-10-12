@@ -54,6 +54,17 @@ async function handleChatModeration(message) {
     [untimeoutCmd, 'untimeout'],
   ]);
 
+  // Hỗ trợ thêm alias tiếng Việt thuận tiện cho quản trị viên
+  if (!commandMap.has('vnhanche') && (!options.chatModTimeoutCmd || options.chatModTimeoutCmd === 'vntimeout')) {
+    commandMap.set('vnhanche', 'timeout');
+  }
+  if (!commandMap.has('vngohanhe') && (!options.chatModUntimeoutCmd || options.chatModUntimeoutCmd === 'vnuntimeout')) {
+    commandMap.set('vngohanhe', 'untimeout');
+  }
+  if (!commandMap.has('vnbohanhe') && (!options.chatModUntimeoutCmd || options.chatModUntimeoutCmd === 'vnuntimeout')) {
+    commandMap.set('vnbohanhe', 'untimeout');
+  }
+
   const text = message.content.trim();
   const parts = text.split(/\s+/);
   const cmd = parts[0]?.toLowerCase();
