@@ -1,20 +1,24 @@
 'use strict';
+process.env.DB_PATH = ':memory:';
+
 /**
  * Test: Hệ thống Ticket độc quyền VietNam Legacy
  * Kiểm tra:
- * 1. Lưu & lấy cấu hình ticket
+ * 1. Lưu & lấy cấu hình ticket với AdminTicket & Hỗ Trợ Ticket
  * 2. Tạo giao diện Embed có banner ảnh và Dropdown Menu
  * 3. Phân quyền chặt chẽ: Ẩn với @everyone, chỉ cấp cho Người tạo + Role AdminTicket + Role Hỗ Trợ Ticket
- * 4. Chống mở trùng nhiều ticket
- * 5. Các hành động: Đóng, Mở lại, Transcript, Xóa
+ * 4. Cho phép mở tối đa 3 ticket cùng lúc, chặn ticket thứ 4
+ * 5. Các hành động: Đóng (tự động xuất transcript, gửi log, gửi DM và xóa phòng sau 5s) & Lưu Transcript thủ công
  */
 const assert = require('node:assert/strict');
 const { ChannelType, PermissionFlagsBits: P } = require('discord.js');
+const { getDb } = require('../utils/database');
 const ticketSystem = require('../utils/ticketSystem');
 
 const mockChannels = new Map();
 let createdChannels = [];
 let sentMessages = [];
+let dmSentMessages = [];
 
 function makeGuild() {
   const guild = {
@@ -36,6 +40,7 @@ function makeGuild() {
           name: data.name,
           type: data.type,
           parent: data.parent,
+          deleted: false,
           permissionOverwrites: {
             data: data.permissionOverwrites,
             edit: async (targetId, perms) => {
@@ -66,7 +71,11 @@ function makeGuild() {
     members: {
       fetch: async (id) => ({
         id,
-        user: { username: 'testuser', tag: 'testuser#1234' },
+        user: { username: 'testuser', tag: 'testuser#1234', bot: false },
+        send: async (payload) => {
+          dmSentMessages.push(payload);
+          return { id: 'dm-msg-1' };
+        },
       }),
     },
   };
@@ -74,7 +83,25 @@ function makeGuild() {
 }
 
 async function run() {
+  const db = getDb();
+  ticketSystem.getConfig('init');
+  db.exec('DELETE FROM tickets; DELETE FROM ticket_config;');
+  mockChannels.clear();
+  createdChannels = [];
+  sentMessages = [];
+  dmSentMessages = [];
+
   const guild = makeGuild();
+
+  // Đăng ký sẵn kênh log
+  const logChannel = {
+    id: 'ch-log',
+    send: async (payload) => {
+      sentMessages.push({ ...payload, isLog: true });
+      return { id: 'log-msg-1' };
+    },
+  };
+  mockChannels.set('ch-log', logChannel);
 
   // ─────────────────────────────────────────────────────────────
   // 1. Cấu hình & Lưu cấu hình với 2 role riêng biệt
@@ -84,6 +111,7 @@ async function run() {
     categoryId: 'cat-tickets',
     adminRoleId: 'role-admin-ticket',
     supportRoleId: 'role-support-ticket',
+    logChannelId: 'ch-log',
     title: '🏷️ HỆ THỐNG TICKET VIETNAM LEGACY',
     bannerUrl: 'https://vnl.vn/banner-ticket.png',
     placeholder: 'Chọn sản phẩm / dịch vụ bạn cần...',
@@ -93,6 +121,7 @@ async function run() {
   assert.equal(config.adminRoleId, 'role-admin-ticket');
   assert.equal(config.supportRoleId, 'role-support-ticket');
   assert.equal(config.bannerUrl, 'https://vnl.vn/banner-ticket.png');
+  assert.equal(config.logChannelId, 'ch-log');
 
   // ─────────────────────────────────────────────────────────────
   // 2. Xây dựng Embed và Menu chọn
@@ -152,15 +181,31 @@ async function run() {
   assert.ok(supportRolePerm.allow.includes(P.SendMessages));
 
   // ─────────────────────────────────────────────────────────────
-  // 4. Chống mở trùng ticket
+  // 4. Cho phép mở tối đa 3 ticket cùng lúc, chặn ticket thứ 4
   // ─────────────────────────────────────────────────────────────
+  // Mở ticket thứ 2 thành công
   replyData = null;
+  selectInteraction.values = ['decor'];
   await ticketSystem.handleSelectCategory(selectInteraction);
-  assert.ok(replyData.content.includes('Bạn đã có một Ticket đang mở'), 'Phải chặn không cho mở 2 ticket cùng lúc');
+  assert.ok(replyData.content.includes('Đã tạo Ticket của bạn thành công'), 'Ticket 2 phải mở thành công');
+
+  // Mở ticket thứ 3 thành công
+  replyData = null;
+  selectInteraction.values = ['youtube'];
+  await ticketSystem.handleSelectCategory(selectInteraction);
+  assert.ok(replyData.content.includes('Đã tạo Ticket của bạn thành công'), 'Ticket 3 phải mở thành công');
+  assert.equal(createdChannels.length, 3, 'Phải có 3 kênh ticket được tạo');
+
+  // Mở ticket thứ 4 -> Bị chặn!
+  replyData = null;
+  selectInteraction.values = ['support'];
+  await ticketSystem.handleSelectCategory(selectInteraction);
+  assert.ok(replyData && replyData.content && replyData.content.includes('giới hạn tối đa') && replyData.content.includes('3 Ticket'), 'Phải chặn khi đã có 3 ticket đang mở');
 
   // ─────────────────────────────────────────────────────────────
-  // 5. Thao tác nút: Đóng ticket -> Khóa chat
+  // 5. Thao tác nút: Đóng ticket -> Tự động lưu transcript, gửi log/DM, xóa kênh sau 5s
   // ─────────────────────────────────────────────────────────────
+  let closeReply = null;
   const closeInteraction = {
     guild,
     channel: ticketChannel,
@@ -173,19 +218,34 @@ async function run() {
     isStringSelectMenu: () => false,
     isButton: () => true,
     deferReply: async () => {},
-    reply: async (p) => { replyData = p; },
-    editReply: async (p) => { replyData = p; },
+    reply: async (p) => { closeReply = p; },
+    editReply: async (p) => { closeReply = p; },
   };
 
   await ticketSystem.handleButtonAction(closeInteraction);
-  assert.ok(replyData.embeds[0].data.title.includes('ĐÃ ĐÓNG'), 'Embed phải thông báo ticket đã đóng');
+  assert.ok(closeReply.embeds[0].data.title.includes('ĐÃ HOÀN TẤT VÀ ĐÓNG'), 'Embed phải thông báo ticket đã hoàn tất và đóng');
+  assert.ok(closeReply.files && closeReply.files.length === 1, 'Phải đính kèm file transcript vào thông báo');
+
+  // Kiểm tra gửi transcript vào kênh log
+  const logMsg = sentMessages.find(m => m.isLog);
+  assert.ok(logMsg, 'Transcript phải được chuyển tiếp vào kênh log');
+  assert.ok(logMsg.files && logMsg.files.length === 1, 'Kênh log phải nhận file transcript');
+
+  // Kiểm tra gửi transcript qua DM cho người tạo ticket
+  assert.ok(dmSentMessages.length >= 1, 'Người tạo ticket phải nhận transcript qua tin nhắn riêng (DM)');
+  assert.ok(dmSentMessages[0].files && dmSentMessages[0].files.length === 1, 'DM phải có file transcript');
+
+  // Kiểm tra cập nhật trạng thái trong database
+  const closedTicket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(1);
+  assert.equal(closedTicket.status, 'closed', 'Ticket 1 phải được đánh dấu closed trong database');
 
   // ─────────────────────────────────────────────────────────────
-  // 6. Thao tác nút: Transcript
+  // 6. Thao tác nút: Lưu Transcript thủ công
   // ─────────────────────────────────────────────────────────────
+  let transcriptReply = null;
   const transcriptInteraction = {
     guild,
-    channel: ticketChannel,
+    channel: createdChannels[1], // kênh ticket thứ 2 đang mở
     user: { id: 'admin-001', tag: 'Admin#0001' },
     member: {
       permissions: { has: () => true },
@@ -195,36 +255,15 @@ async function run() {
     isStringSelectMenu: () => false,
     isButton: () => true,
     deferReply: async () => {},
-    reply: async (p) => { replyData = p; },
-    editReply: async (p) => { replyData = p; },
+    reply: async (p) => { transcriptReply = p; },
+    editReply: async (p) => { transcriptReply = p; },
   };
 
   await ticketSystem.handleButtonAction(transcriptInteraction);
-  assert.ok(replyData.content.includes('Transcript'), 'Phải tạo transcript thành công');
-  assert.equal(replyData.files.length, 1);
+  assert.ok(transcriptReply.content.includes('Transcript'), 'Phải tạo transcript thủ công thành công');
+  assert.equal(transcriptReply.files.length, 1);
 
-  // ─────────────────────────────────────────────────────────────
-  // 7. Thao tác nút: Xóa ticket
-  // ─────────────────────────────────────────────────────────────
-  let deleteReply = null;
-  const deleteInteraction = {
-    guild,
-    channel: ticketChannel,
-    user: { id: 'admin-001', tag: 'Admin#0001' },
-    member: {
-      permissions: { has: () => true },
-      roles: { cache: new Map([['role-admin-ticket', true]]) },
-    },
-    customId: 'ticket:btn_delete',
-    isStringSelectMenu: () => false,
-    isButton: () => true,
-    reply: async (p) => { deleteReply = p; },
-  };
-
-  await ticketSystem.handleButtonAction(deleteInteraction);
-  assert.ok(deleteReply.content.includes('5 giây'), 'Phải có thông báo đếm ngược xóa');
-
-  console.log('PASS ticket-system: config, banner embed, select menu, AdminTicket & SupportTicket permissions, dedup open, close, transcript, delete.');
+  console.log('PASS ticket-system: config, banner embed, select menu, AdminTicket & SupportTicket permissions, 3 concurrent tickets limit, instant close with transcript (channel, log & DM).');
 }
 
 run().catch(error => { console.error('FAIL ticket-system:', error); process.exit(1); });

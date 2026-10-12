@@ -202,22 +202,29 @@ async function handleSelectCategory(interaction) {
     label: selectedValue,
   };
 
-  // 1. Kiểm tra xem người này đã có ticket đang mở chưa
-  const existingTicket = db().prepare(
+  // 1. Kiểm tra giới hạn số lượng ticket đang mở của thành viên (Tối đa 3 ticket)
+  const MAX_OPEN_TICKETS = 3;
+  const openTickets = db().prepare(
     'SELECT channel_id FROM tickets WHERE guild_id = ? AND user_id = ? AND status = ?'
-  ).get(guild.id, interaction.user.id, 'open');
+  ).all(guild.id, interaction.user.id, 'open');
 
-  if (existingTicket) {
-    const existingChannel = await guild.channels.fetch(existingTicket.channel_id).catch(() => null);
-    if (existingChannel) {
-      return interaction.reply({
-        content: `⚠️ Bạn đã có một Ticket đang mở tại <#${existingChannel.id}>! Vui lòng hoàn tất hoặc đóng Ticket cũ trước khi mở thêm nhé.`,
-        flags: 64,
-      });
+  const activeChannels = [];
+  for (const t of openTickets) {
+    const ch = await guild.channels.fetch(t.channel_id).catch(() => null);
+    if (ch) {
+      activeChannels.push(ch);
     } else {
-      // Nếu kênh cũ đã bị xóa tay ngoài Discord, đổi status thành closed để không bị nghẽn
-      db().prepare('UPDATE tickets SET status = ? WHERE channel_id = ?').run('closed', existingTicket.channel_id);
+      // Nếu kênh cũ đã bị xóa tay ngoài Discord, đổi status thành closed để không tính vào giới hạn
+      db().prepare('UPDATE tickets SET status = ? WHERE channel_id = ?').run('closed', t.channel_id);
     }
+  }
+
+  if (activeChannels.length >= MAX_OPEN_TICKETS) {
+    const listStr = activeChannels.map(ch => `<#${ch.id}>`).join(', ');
+    return interaction.reply({
+      content: `⚠️ Bạn đã đạt giới hạn tối đa **${MAX_OPEN_TICKETS} Ticket** đang mở (${listStr})! Vui lòng hoàn tất hoặc đóng bớt Ticket cũ trước khi mở thêm nhé.`,
+      flags: 64,
+    });
   }
 
   await interaction.deferReply({ flags: 64 });
@@ -377,8 +384,33 @@ async function handleSelectCategory(interaction) {
   });
 }
 
+async function generateTranscriptAttachment(channel, ticket, guild) {
+  const messages = await channel.messages.fetch({ limit: 100 });
+  const sorted = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+  let text = `========================================================\n`;
+  text += `TRANSCRIPT TICKET #${ticket.id} - ${guild.name}\n`;
+  text += `Loại yêu cầu: ${ticket.category_label}\n`;
+  text += `Người tạo: ${ticket.user_id}\n`;
+  text += `Thời gian xuất: ${new Date().toLocaleString('vi-VN')}\n`;
+  text += `========================================================\n\n`;
+
+  for (const m of sorted) {
+    const time = new Date(m.createdTimestamp).toLocaleString('vi-VN');
+    text += `[${time}] ${m.author?.tag || m.author?.username || 'User'} (${m.author?.id}):\n`;
+    if (m.content) text += `  ${m.content}\n`;
+    if (m.attachments?.size) {
+      text += `  [Đính kèm: ${[...m.attachments.values()].map(a => a.url).join(', ')}]\n`;
+    }
+    text += `\n`;
+  }
+
+  const buffer = Buffer.from(text, 'utf-8');
+  return new AttachmentBuilder(buffer, { name: `transcript-ticket-${ticket.id}.txt` });
+}
+
 /**
- * Xử lý các nút bấm trong kênh Ticket (Đóng, Mở lại, Xóa, Transcript)
+ * Xử lý các nút bấm trong kênh Ticket (Đóng & Lưu transcript & Xóa luôn)
  */
 async function handleButtonAction(interaction) {
   const guild = interaction.guild;
@@ -396,7 +428,7 @@ async function handleButtonAction(interaction) {
   const config = getConfig(guild.id);
   const member = interaction.member;
 
-  // Kiểm tra quyền quản lý ticket: Admin server, người có AdminTicket, người có Hỗ Trợ Ticket, hoặc người tạo ticket (chỉ được đóng)
+  // Quyền đóng ticket: Admin server, người có AdminTicket, người có Hỗ Trợ Ticket, hoặc người tạo ticket
   const isAdmin = member.permissions.has(P.Administrator) || (config.adminRoleId && member.roles.cache.has(config.adminRoleId));
   const isSupport = config.supportRoleId && member.roles.cache.has(config.supportRoleId);
   const isCreator = interaction.user.id === ticket.user_id;
@@ -413,135 +445,92 @@ async function handleButtonAction(interaction) {
 
     await interaction.deferReply();
 
-    // Khóa quyền gửi tin nhắn của người tạo
-    await channel.permissionOverwrites.edit(ticket.user_id, {
-      SendMessages: false,
-    }).catch(() => {});
+    // 1. Tự động xuất transcript cuộc trò chuyện
+    let transcriptAttachment = null;
+    try {
+      transcriptAttachment = await generateTranscriptAttachment(channel, ticket, guild);
+    } catch (err) {
+      console.error('[TRANSCRIPT GENERATE ERROR]', err);
+    }
 
-    // Đổi tên kênh sang closed nếu có thể
-    const closedName = `🔒・closed-${ticket.id}`;
-    await channel.setName(closedName).catch(() => {});
-
+    // 2. Cập nhật Database: đóng ticket
     db().prepare('UPDATE tickets SET status = ?, closed_at = ?, closed_by = ? WHERE id = ?')
       .run('closed', Date.now(), interaction.user.id, ticket.id);
 
-    const closedEmbed = new EmbedBuilder()
+    // 3. Gửi transcript vào kênh Log nếu server có cấu hình
+    if (config.logChannelId && transcriptAttachment) {
+      try {
+        const logChannel = await guild.channels.fetch(config.logChannelId).catch(() => null);
+        if (logChannel) {
+          const logEmbed = new EmbedBuilder()
+            .setColor('#ff4757')
+            .setTitle(`📑 Lịch sử Ticket #${ticket.id} — ${ticket.category_label}`)
+            .setDescription(
+              `👤 **Khách hàng:** <@${ticket.user_id}>\n` +
+              `🔒 **Người đóng:** <@${interaction.user.id}>\n` +
+              `⏰ **Thời gian:** ${new Date().toLocaleString('vi-VN')}`
+            )
+            .setFooter({ text: `${guild.name} • Ticket System Log` })
+            .setTimestamp();
+
+          await logChannel.send({
+            embeds: [logEmbed],
+            files: [transcriptAttachment],
+          });
+        }
+      } catch (logErr) {
+        console.error('[TICKET LOG ERROR]', logErr);
+      }
+    }
+
+    // 4. Gửi transcript qua DM cho người tạo ticket để khách lưu giữ
+    if (transcriptAttachment) {
+      try {
+        const creatorMember = await guild.members.fetch(ticket.user_id).catch(() => null);
+        if (creatorMember && !creatorMember.user.bot) {
+          await creatorMember.send({
+            content: `📑 Chào bạn, Ticket #${ticket.id} (${ticket.category_label}) tại **${guild.name}** đã được hoàn tất. Đây là bản lưu lại toàn bộ nội dung cuộc trò chuyện của bạn!`,
+            files: [transcriptAttachment],
+          }).catch(() => {});
+        }
+      } catch {}
+    }
+
+    // 5. Thông báo trong kênh và tự động xóa kênh sau 5 giây (đóng là xóa luôn)
+    const closeEmbed = new EmbedBuilder()
       .setColor('#ff4757')
-      .setTitle(`🔒 TICKET #${ticket.id} ĐÃ ĐÓNG`)
+      .setTitle(`🔒 TICKET #${ticket.id} ĐÃ HOÀN TẤT VÀ ĐÓNG`)
       .setDescription(
-        `Ticket đã được đóng bởi <@${interaction.user.id}>.\n` +
-        `Người tạo ticket (<@${ticket.user_id}>) đã bị khóa quyền nhắn tin.\n\n` +
-        `• Chọn **Mở lại** nếu cần tiếp tục trao đổi.\n` +
-        `• Chọn **Lưu Transcript** để tải lịch sử tin nhắn.\n` +
-        `• Chọn **Xóa Ticket** để giải phóng kênh phòng chat.`
+        `Ticket đã được đóng bởi <@${interaction.user.id}>.\n\n` +
+        `✅ **Lịch sử trò chuyện (Transcript) đã được tự động lưu trữ.**\n` +
+        `🗑️ Kênh này sẽ tự động **xóa vĩnh viễn sau 5 giây**...`
       )
+      .setFooter({ text: 'VietNam Legacy • Cảm ơn bạn đã sử dụng dịch vụ!' })
       .setTimestamp();
 
-    const reopenBtn = new ButtonBuilder()
-      .setCustomId('ticket:btn_reopen')
-      .setLabel('Mở lại')
-      .setEmoji('🔓')
-      .setStyle(ButtonStyle.Success);
-
-    const transcriptBtn = new ButtonBuilder()
-      .setCustomId('ticket:btn_transcript')
-      .setLabel('Lưu Transcript')
-      .setEmoji('📑')
-      .setStyle(ButtonStyle.Secondary);
-
-    const deleteBtn = new ButtonBuilder()
-      .setCustomId('ticket:btn_delete')
-      .setLabel('Xóa Ticket')
-      .setEmoji('🗑️')
-      .setStyle(ButtonStyle.Danger);
-
-    const closedRow = new ActionRowBuilder().addComponents(reopenBtn, transcriptBtn, deleteBtn);
-
-    return interaction.editReply({
-      embeds: [closedEmbed],
-      components: [closedRow],
-    });
-  }
-
-  if (action === 'reopen') {
-    if (!isAdmin && !isSupport) {
-      return interaction.reply({
-        content: '⛔ Chỉ AdminTicket hoặc Hỗ Trợ Ticket mới có quyền mở lại ticket.',
-        flags: 64,
-      });
-    }
-
-    await interaction.deferReply();
-
-    // Mở lại quyền gửi tin nhắn cho người tạo
-    await channel.permissionOverwrites.edit(ticket.user_id, {
-      SendMessages: true,
-      ViewChannel: true,
-    }).catch(() => {});
-
-    const safeUsername = (await guild.members.fetch(ticket.user_id).catch(() => null))?.user.username || 'user';
-    await channel.setName(`🎫・${ticket.category_value}-${safeUsername.slice(0, 10)}`).catch(() => {});
-
-    db().prepare('UPDATE tickets SET status = ?, closed_at = NULL, closed_by = NULL WHERE id = ?')
-      .run('open', ticket.id);
-
-    return interaction.editReply({
-      content: `🔓 Ticket đã được mở lại bởi <@${interaction.user.id}>! <@${ticket.user_id}> có thể tiếp tục nhắn tin.`,
-    });
-  }
-
-  if (action === 'delete') {
-    if (!isAdmin && !isSupport) {
-      return interaction.reply({
-        content: '⛔ Chỉ AdminTicket hoặc Hỗ Trợ Ticket mới có quyền xóa ticket.',
-        flags: 64,
-      });
-    }
-
-    await interaction.reply({
-      content: '🗑️ Kênh Ticket này sẽ tự động xóa sau **5 giây**...',
+    await interaction.editReply({
+      embeds: [closeEmbed],
+      files: transcriptAttachment ? [transcriptAttachment] : [],
     });
 
-    setTimeout(async () => {
+    const deleteTimer = setTimeout(async () => {
       try {
-        await channel.delete('Ticket đã hoàn tất và được xóa');
-      } catch (err) {
-        console.error('[TICKET DELETE ERROR]', err.message);
+        await channel.delete(`Ticket #${ticket.id} đã hoàn tất và đóng vĩnh viễn`);
+      } catch (delErr) {
+        console.error('[TICKET DELETE ERROR]', delErr.message);
       }
     }, 5000);
+    if (deleteTimer.unref) deleteTimer.unref();
     return;
   }
 
   if (action === 'transcript') {
     await interaction.deferReply({ flags: 64 });
-
     try {
-      const messages = await channel.messages.fetch({ limit: 100 });
-      const sorted = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-
-      let text = `========================================================\n`;
-      text += `TRANSCRIPT TICKET #${ticket.id} - ${guild.name}\n`;
-      text += `Loại yêu cầu: ${ticket.category_label}\n`;
-      text += `Người tạo: ${ticket.user_id}\n`;
-      text += `Thời gian xuất: ${new Date().toLocaleString('vi-VN')}\n`;
-      text += `========================================================\n\n`;
-
-      for (const m of sorted) {
-        const time = new Date(m.createdTimestamp).toLocaleString('vi-VN');
-        text += `[${time}] ${m.author.tag} (${m.author.id}):\n`;
-        if (m.content) text += `  ${m.content}\n`;
-        if (m.attachments.size) {
-          text += `  [Đính kèm: ${[...m.attachments.values()].map(a => a.url).join(', ')}]\n`;
-        }
-        text += `\n`;
-      }
-
-      const buffer = Buffer.from(text, 'utf-8');
-      const attachment = new AttachmentBuilder(buffer, { name: `transcript-ticket-${ticket.id}.txt` });
-
+      const transcriptAttachment = await generateTranscriptAttachment(channel, ticket, guild);
       return interaction.editReply({
         content: `📑 Đã xuất Transcript của Ticket #${ticket.id}!`,
-        files: [attachment],
+        files: [transcriptAttachment],
       });
     } catch (err) {
       console.error('[TRANSCRIPT ERROR]', err);
