@@ -88,6 +88,7 @@ function start(client) {
   client.on(Events.GuildMemberAdd,safe(async member=>{
     await joined(member);
     if(member.user.bot)await require('./securityReview').botJoined(member);
+    await require('./receptionistNotice').notifyReceptionist(member).catch(e=>console.error('[RECEPTIONIST]',e.message));
   }));
   client.on(Events.GuildMemberUpdate,safe(require('./securityReview').memberUpdated));
   client.on(Events.GuildRoleUpdate,safe(require('./securityReview').roleUpdated));

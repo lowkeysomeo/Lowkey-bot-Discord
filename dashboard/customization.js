@@ -47,9 +47,9 @@ function validateCustomization(input, guild, channels, roles, me) {
       if (!channel || channel.guildId !== guild.id || ![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)) invalid(`${label}: kênh không hợp lệ.`);
       const mode = key.startsWith('voice') ? 'voice' : 'chat';
       const perms = [P.ViewChannel, P.SendMessages];
-      if (key === 'roleNoticeChannel' || key === 'inviteChannel' || key === 'modLogChannel' || key === 'confessionNoticeChannel') perms.push(P.EmbedLinks);
-      if (!['roleNoticeChannel','inviteChannel','securityLogChannel','modLogChannel','confessionNoticeChannel','confessionMilestoneChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'card') perms.push(P.AttachFiles);
-      if (!['roleNoticeChannel','inviteChannel','securityLogChannel','modLogChannel','confessionNoticeChannel','confessionMilestoneChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'embed') perms.push(P.EmbedLinks);
+      if (key === 'roleNoticeChannel' || key === 'inviteChannel' || key === 'modLogChannel' || key === 'confessionNoticeChannel' || key === 'receptionistChannel') perms.push(P.EmbedLinks);
+      if (!['roleNoticeChannel','inviteChannel','securityLogChannel','modLogChannel','confessionNoticeChannel','confessionMilestoneChannel','receptionistChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'card') perms.push(P.AttachFiles);
+      if (!['roleNoticeChannel','inviteChannel','securityLogChannel','modLogChannel','confessionNoticeChannel','confessionMilestoneChannel','receptionistChannel'].includes(key) && merged[`${mode}NoticeStyle`] === 'embed') perms.push(P.EmbedLinks);
       if (!channel.permissionsFor(me)?.has(perms)) invalid(`${label}: bot thiếu quyền gửi kiểu thông báo đã chọn.`);
     }
   }
@@ -60,6 +60,7 @@ function validateCustomization(input, guild, channels, roles, me) {
   if(merged.inviteEnabled && !merged.inviteChannel)invalid('Chọn kênh thông báo invite trước khi bật.');
   if(merged.inviteRole50 && merged.inviteRole50===merged.inviteRole100)invalid('Hai mốc invite cần chọn hai role khác nhau.');
   if (merged.roleNoticeEnabled && !merged.roleNoticeChannel) invalid('Hãy chọn kênh chúc mừng trước khi bật thông báo nhận role.');
+  if (merged.receptionistEnabled && !merged.receptionistChannel) invalid('Chọn kênh chat chung trước khi bật thông báo lễ tân.');
   if (merged.chatMin > merged.chatMax) invalid('XP Chat tối thiểu không được lớn hơn XP tối đa.');
   if (input.rewards !== undefined) {
     if (!object(input.rewards)) invalid('Danh sách mốc level không hợp lệ.');

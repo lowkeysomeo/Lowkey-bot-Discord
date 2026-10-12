@@ -84,6 +84,10 @@ const definitions = [
   ['confessionRole', 'confessionRewards', 'Role thưởng mốc confession', 'role', '1558809856973082737'],
   ['confessionMilestoneChannel', 'confessionRewards', 'Kênh confession tính mốc thưởng', 'channel', '1556975173767270450'],
   ['confessionNoticeChannel', 'confessionRewards', 'Kênh thông báo chúc mừng nhận role', 'channel', '1558774418379903086'],
+  ['receptionistEnabled', 'receptionist', 'Bật thông báo lễ tân khi có thành viên mới', 'boolean', false],
+  ['receptionistChannel', 'receptionist', 'Kênh chat chung nhận thông báo lễ tân', 'channel', ''],
+  ['receptionistRole', 'receptionist', 'Role lễ tân được tag khi có người mới', 'role', ''],
+  ['receptionistText', 'receptionist', 'Nội dung thông báo lễ tân', 'text', '👋 {member} vừa vào server! {role} chào thành viên mới nhé~', 500],
 ];
 const defaults = Object.fromEntries(definitions.map(([key, , , , value]) => [key, value]));
 function getOptions(guildId) {

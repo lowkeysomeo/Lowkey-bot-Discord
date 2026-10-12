@@ -15,8 +15,8 @@ async function api(route, data) {
   return result;
 }
 const brand = `<div class="brand"><span class="brand-icon">V</span><span>VietNam Legacy<small>SERVER DASHBOARD</small></span></div>`;
-const labels = { security: 'Bảo vệ server', invites: 'Lời mời & Role', overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp & role', monthly: 'Top tháng', confession: 'Confession', giveaway: 'Giveaway', reactionroles: 'Reaction role', leaderboard: 'Bảng xếp hạng', test: 'Gửi thử' };
-const icons = { security: '🛡️', invites: '💌', overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', giveaway: '🎉', reactionroles: '✧', leaderboard: '≋', test: '▷' };
+const labels = { security: 'Bảo vệ server', invites: 'Lời mời & Role', overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp & role', monthly: 'Top tháng', confession: 'Confession', giveaway: 'Giveaway', reactionroles: 'Reaction role', leaderboard: 'Bảng xếp hạng', receptionist: 'Lễ tân thành viên mới', test: 'Gửi thử' };
+const icons = { security: '🛡️', invites: '💌', overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', giveaway: '🎉', reactionroles: '✧', leaderboard: '≋', receptionist: '👋', test: '▷' };
 function render() {
   if (!state.session?.user) {
     app.innerHTML = `<div class="login"><section class="login-art">${brand}<div class="login-copy"><span class="eyebrow">MỘT NƠI. CẢ CỘNG ĐỒNG.</span><h1>Server của bạn.<br><span>Theo cách của bạn.</span></h1><p>Chăm chút cộng đồng cùng VietNam Legacy. Quản lý level, role thưởng và những câu chuyện ẩn danh trong một nơi.</p><div class="login-pills"><span>↗ Level & Role</span><span>♡ Confession</span><span>≋ Bảng xếp hạng</span></div></div><p class="login-foot">VIETNAM LEGACY · DÀNH CHO CỘNG ĐỒNG CỦA BẠN</p></section><section class="login-panel"><div class="login-box"><span class="badge purple">BẢNG ĐIỀU KHIỂN</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng Discord để chọn server và bắt đầu quản lý.</p>${state.session?.configured ? '<a class="primary" href="/auth/discord">Đăng nhập bằng Discord <span>↗</span></a>' : '<button class="primary" disabled>Đăng nhập Discord</button><div class="error">Dashboard đang chờ hoàn tất kết nối đăng nhập Discord. Chủ bot cần cấu hình OAuth2 để mở đăng nhập.</div>'}<p class="subtle">Chỉ chủ server và thành viên có quyền Administrator được quản lý cấu hình.</p></div></section></div>`;
@@ -72,7 +72,7 @@ function content() {
   if (state.page === 'giveaway') return giveawayPage();
   if (state.page === 'test') return testPage();
   if (state.page === 'level') return levelPage();
-  if (['xp', 'notifications', 'monthly', 'invites', 'security'].includes(state.page)) return customPage(state.page);
+  if (['xp', 'notifications', 'monthly', 'invites', 'security', 'receptionist'].includes(state.page)) return customPage(state.page);
   if (state.page === 'confession') return confessionPage();
   if (state.page === 'leaderboard') return leaderboardPage();
   const stats = state.data.stats;
