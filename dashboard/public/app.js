@@ -14,15 +14,71 @@ async function api(route, data) {
   }
   return result;
 }
-const brand = `<div class="brand"><span class="brand-icon">V</span><span>VietNam Legacy<small>SERVER DASHBOARD</small></span></div>`;
-const labels = { security: 'Bảo vệ server', invites: 'Lời mời & Role', overview: 'Tổng quan', level: 'Mốc level & Role', xp: 'XP & Kênh bỏ qua', notifications: 'Thông báo lên cấp & role', monthly: 'Top tháng', confession: 'Confession', ticket: 'Quản lý Ticket', giveaway: 'Giveaway', reactionroles: 'Reaction role', leaderboard: 'Bảng xếp hạng', receptionist: 'Lễ tân thành viên mới', test: 'Gửi thử' };
-const icons = { security: '🛡️', invites: '💌', overview: '◫', level: '↗', xp: '✦', notifications: '♧', monthly: '♛', confession: '♡', ticket: '🎫', giveaway: '🎉', reactionroles: '✧', leaderboard: '≋', receptionist: '👋', test: '▷' };
+const brand = `<div class="brand"><span class="brand-icon">V</span><span>VietNam Legacy<small>DISCORD COMMUNITY</small></span></div>`;
+
+const icons = {
+  overview: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>`,
+  leaderboard: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>`,
+  receptionist: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/><circle cx="12" cy="2" r="1"/></svg>`,
+  invites: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>`,
+  ticket: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="7" cy="12" r="1.5"/><line x1="12" y1="8" x2="12" y2="16" stroke-dasharray="2 2"/><circle cx="17" cy="12" r="1.5"/></svg>`,
+  level: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>`,
+  xp: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+  notifications: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>`,
+  monthly: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 4 3 12h14l3-12-6 7-4-7-4 7-6-7zm3 16h14"/></svg>`,
+  confession: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>`,
+  giveaway: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 12 20 22 4 22 4 12"/><rect x="2" y="7" width="20" height="5"/><line x1="12" y1="22" x2="12" y2="7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>`,
+  reactionroles: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>`,
+  security: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+  test: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><polygon points="10 11 10 17 15 14 10 11"/></svg>`,
+};
+
+const labels = {
+  overview: 'Tổng quan',
+  leaderboard: 'Bảng xếp hạng',
+  receptionist: 'Lễ tân chào mừng',
+  invites: 'Lời mời & Role',
+  ticket: 'Hệ thống Ticket',
+  level: 'Mốc level & Role',
+  xp: 'XP & Kênh bỏ qua',
+  notifications: 'Thông báo lên cấp & role',
+  monthly: 'Top tháng',
+  confession: 'Trạm Confession',
+  giveaway: 'Sự kiện Giveaway',
+  reactionroles: 'Reaction Role (Menu)',
+  security: 'Bảo vệ server',
+  test: 'Gửi tin thử',
+};
+
+const navGroups = [
+  {
+    title: 'HỆ THỐNG',
+    items: ['overview', 'leaderboard'],
+  },
+  {
+    title: 'TIẾP ĐÓN & THÀNH VIÊN',
+    items: ['receptionist', 'invites', 'ticket'],
+  },
+  {
+    title: 'LEVEL & DANH HIỆU',
+    items: ['level', 'xp', 'notifications', 'monthly'],
+  },
+  {
+    title: 'TƯƠNG TÁC & GIẢI TRÍ',
+    items: ['confession', 'giveaway', 'reactionroles'],
+  },
+  {
+    title: 'BẢO MẬT & CÔNG CỤ',
+    items: ['security', 'test'],
+  },
+];
+
 function render() {
   if (!state.session?.user) {
     app.innerHTML = `<div class="login"><section class="login-art">${brand}<div class="login-copy"><span class="eyebrow">MỘT NƠI. CẢ CỘNG ĐỒNG.</span><h1>Server của bạn.<br><span>Theo cách của bạn.</span></h1><p>Chăm chút cộng đồng cùng VietNam Legacy. Quản lý level, role thưởng và những câu chuyện ẩn danh trong một nơi.</p><div class="login-pills"><span>↗ Level & Role</span><span>♡ Confession</span><span>≋ Bảng xếp hạng</span></div></div><p class="login-foot">VIETNAM LEGACY · DÀNH CHO CỘNG ĐỒNG CỦA BẠN</p></section><section class="login-panel"><div class="login-box"><span class="badge purple">BẢNG ĐIỀU KHIỂN</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng Discord để chọn server và bắt đầu quản lý.</p>${state.session?.configured ? '<a class="primary" href="/auth/discord">Đăng nhập bằng Discord <span>↗</span></a>' : '<button class="primary" disabled>Đăng nhập Discord</button><div class="error">Dashboard đang chờ hoàn tất kết nối đăng nhập Discord. Chủ bot cần cấu hình OAuth2 để mở đăng nhập.</div>'}<p class="subtle">Chỉ chủ server và thành viên có quyền Administrator được quản lý cấu hình.</p></div></section></div>`;
     return;
   }
-  app.innerHTML = `${state.session.preview ? '<div class="preview-banner">BẢN XEM TRƯỚC · Dữ liệu minh họa, không thay đổi server Discord thật.</div>' : ''}<div class="layout"><aside class="sidebar">${brand}<div><p class="nav-label">SERVER CỦA BẠN</p><select class="server-picker" id="server-select" aria-label="Chọn server"><option value="">Chọn server…</option>${state.guilds.filter(guild => guild.installed).map(guild => `<option value="${h(guild.id)}" ${state.guild?.id === guild.id ? 'selected' : ''}>${h(guild.name)}</option>`).join('')}</select></div><div><p class="nav-label">QUẢN LÝ</p><nav class="nav">${Object.entries(labels).map(([key, value]) => `<button data-page="${key}" class="${state.page === key && state.guild ? 'active' : ''}" ${!state.guild ? 'disabled' : ''}><span class="icon">${icons[key]}</span>${value}</button>`).join('')}</nav></div><div class="side-bottom"><div class="bot-status"><span class="dot"></span>${state.session.ready ? 'Bot đã kết nối' : 'Bot đang kết nối'}</div><p class="subtle">VietNam Legacy Dashboard</p></div></aside><div class="workspace"><header class="topbar"><div class="crumb">Dashboard <b>/ ${state.guild ? h(labels[state.page]) : 'Chọn server'}</b></div><div class="account"><span class="avatar">${h(state.session.user.name.slice(0, 1))}</span><span>${h(state.session.user.name)}</span><button class="text-button" id="logout">Đăng xuất</button></div></header><main class="content" id="content">${state.loading ? '<div class="loading" role="status">Đang tải dữ liệu server…</div>' : content()}</main></div></div>`;
+  app.innerHTML = `${state.session.preview ? '<div class="preview-banner">BẢN XEM TRƯỚC · Dữ liệu minh họa, không thay đổi server Discord thật.</div>' : ''}<div class="layout"><aside class="sidebar"><div class="side-top">${brand}<div class="picker-wrap"><p class="nav-label">MÁY CHỦ QUẢN LÝ</p><select class="server-picker" id="server-select" aria-label="Chọn server"><option value="">Chọn server…</option>${state.guilds.filter(guild => guild.installed).map(guild => `<option value="${h(guild.id)}" ${state.guild?.id === guild.id ? 'selected' : ''}>${h(guild.name)}</option>`).join('')}</select></div></div><div class="side-nav-scroll">${navGroups.map(group => `<div class="nav-section"><p class="nav-label">${group.title}</p><nav class="nav">${group.items.map(key => `<button data-page="${key}" class="${state.page === key && state.guild ? 'active' : ''}" ${!state.guild ? 'disabled' : ''}><span class="icon">${icons[key] || ''}</span><span class="label-text">${labels[key]}</span></button>`).join('')}</nav></div>`).join('')}</div><div class="side-bottom"><div class="bot-status"><span class="dot"></span><span>${state.session.ready ? 'Bot đã kết nối' : 'Bot đang kết nối'}</span></div><p class="subtle">VietNam Legacy Dashboard • v1.0</p></div></aside><div class="workspace"><header class="topbar"><div class="crumb"><span class="crumb-root">Dashboard</span><span class="crumb-sep">/</span><b class="crumb-current">${state.guild ? h(labels[state.page] || state.page) : 'Chọn server'}</b></div><div class="account"><span class="avatar">${h(state.session.user.name.slice(0, 1))}</span><span class="account-name">${h(state.session.user.name)}</span><button class="text-button" id="logout">Đăng xuất</button></div></header><main class="content" id="content">${state.loading ? '<div class="loading" role="status">Đang tải dữ liệu server…</div>' : content()}</main></div></div>`;
   document.querySelector('#server-select').onchange = event => selectGuild(event.target.value);
   document.querySelectorAll('[data-page]').forEach(button => { button.onclick = () => changePage(button.dataset.page); });
   document.querySelectorAll('[data-guild]').forEach(button => { button.onclick = () => selectGuild(button.dataset.guild); });
