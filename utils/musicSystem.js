@@ -67,6 +67,25 @@ class MusicSystem {
         });
       }
       clearTimeout(session.timer);
+
+      // Nếu là Playlist / Album Spotify: nạp danh sách và kích hoạt tự động theo dõi
+      if (track?.isCollection && Array.isArray(track.tracks)) {
+        session.spotifyPlaylist = {
+          url: track.url,
+          name: track.name,
+          loadedUris: new Set(track.tracks.map(t => t.uri)),
+          lastChecked: Date.now(),
+        };
+        let addedCount = 0;
+        for (const t of track.tracks) {
+          if (session.queue.length >= 50) break;
+          session.queue.push({ ...t, requestedBy: interaction.user.id });
+          addedCount++;
+        }
+        void this.next(session);
+        return { isPlaylist: true, playlistName: track.name, addedCount };
+      }
+
       session.queue.push({ ...track, requestedBy: interaction.user.id });
       const position = session.current ? session.queue.length : 0;
       void this.next(session);
@@ -123,6 +142,33 @@ class MusicSystem {
     await session.textChannel?.send({ content, allowedMentions: { parse: [] } }).catch(() => {});
   }
 
+  async checkSpotifyPlaylistUpdates(session) {
+    if (!this.active(session) || !session.spotifyPlaylist) return;
+    if (Date.now() - (session.spotifyPlaylist.lastChecked || 0) < 15_000) return;
+    session.spotifyPlaylist.lastChecked = Date.now();
+    try {
+      const { checkNewTracksInPlaylist } = require('./spotifySource');
+      const newTracks = await checkNewTracksInPlaylist(
+        session.spotifyPlaylist.url,
+        session.spotifyPlaylist.loadedUris
+      );
+      if (newTracks.length > 0 && this.active(session)) {
+        let addedCount = 0;
+        for (const t of newTracks) {
+          if (session.queue.length >= 50) break;
+          session.spotifyPlaylist.loadedUris.add(t.uri);
+          session.queue.push({ ...t, requestedBy: 'auto-sync' });
+          addedCount++;
+        }
+        if (addedCount > 0) {
+          await this.tell(session, `🔔 Đã tự động cập nhật thêm **${addedCount} bài hát mới** từ playlist Spotify **${session.spotifyPlaylist.name}** vào hàng chờ!`);
+        }
+      }
+    } catch (err) {
+      console.warn('[SPOTIFY AUTO UPDATE ERROR]', err.message);
+    }
+  }
+
   async next(session) {
     if (!this.active(session) || session.current) return;
     clearTimeout(session.timer);
@@ -133,9 +179,28 @@ class MusicSystem {
     }
     const track = session.queue.shift();
     session.current = track;
+
+    // Tự động kiểm tra và cập nhật bài hát mới từ Playlist Spotify nếu hàng chờ sắp hết
+    if (session.spotifyPlaylist && session.queue.length <= 4) {
+      void this.checkSpotifyPlaylistUpdates(session);
+    }
+
     try {
       await this.audio.entersState(session.connection, this.audio.VoiceConnectionStatus.Ready, 20_000);
       if (!this.active(session) || session.current !== track) return;
+
+      // Nếu track từ Spotify chưa có direct audio url, tìm ngay trước khi phát
+      if (track.isSpotify && !track.url) {
+        try {
+          const resolvedAudio = await this.media.resolveTrack(track.query || track.title);
+          track.url = resolvedAudio.url;
+          if (!track.duration) track.duration = resolvedAudio.duration;
+        } catch (resolveErr) {
+          this.fail(session, track, resolveErr);
+          return;
+        }
+      }
+
       track.audio = this.media.openAudio(track);
       track.audio.onError(error => this.fail(session, track, error));
       const resource = this.audio.createAudioResource(track.audio.stream, { inputType: this.audio.StreamType.Raw });

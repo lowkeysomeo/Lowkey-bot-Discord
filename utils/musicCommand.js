@@ -6,7 +6,7 @@ const { sourceErrorMessage } = require('./musicSource');
 
 function musicCommand(name, description) {
   return { data: { name, description, type: 1,
-    ...(name === 'play' ? { options: [{ name: 'query', description: 'Tên bài hát hoặc link YouTube/SoundCloud', type: 3, required: true }] } : {}) },
+    ...(name === 'play' ? { options: [{ name: 'query', description: 'Tên bài hát hoặc link YouTube/SoundCloud/Spotify (bài hát hoặc playlist)', type: 3, required: true }] } : {}) },
   async execute(interaction) {
     await interaction.deferReply({ flags: name === 'play' ? undefined : 64 });
     try {
@@ -23,8 +23,12 @@ function musicCommand(name, description) {
         }
         if (channel.full && !me.permissions.has(PermissionFlagsBits.MoveMembers)) throw new Error('Kênh voice đang đầy.');
         const result = await music.add(interaction, channel, interaction.options.getString('query', true));
-        content = result.position ? `🎵 Đã thêm **${label(result.track)}** vào hàng chờ (#${result.position}).`
-          : `🎵 Đang chuẩn bị phát **${label(result.track)}**…`;
+        if (result.isPlaylist) {
+          content = `🎶 Đã thêm playlist Spotify **${result.playlistName}** (${result.addedCount} bài hát) vào hàng chờ!\n💡 *Bot sẽ tự động cập nhật khi playlist có thêm bài hát mới trên Spotify.*`;
+        } else {
+          content = result.position ? `🎵 Đã thêm **${label(result.track)}** vào hàng chờ (#${result.position}).`
+            : `🎵 Đang chuẩn bị phát **${label(result.track)}**…`;
+        }
       } else {
         if (!session) throw new Error('Chưa có phiên nhạc. Dùng /play để bắt đầu.');
         if (name === 'queue') {

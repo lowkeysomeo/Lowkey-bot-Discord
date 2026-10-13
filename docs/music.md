@@ -1,8 +1,9 @@
 # Nhạc
 
-Vào kênh voice thường rồi dùng `/play query:<tên bài hoặc link>`.
+Vào kênh voice thường rồi dùng `/play query:<tên bài hoặc link YouTube / SoundCloud / Spotify>`.
 Tìm tên bài trên SoundCloud trước, dùng YouTube nếu tìm nguồn SoundCloud thất bại.
-Hỗ trợ link HTTPS YouTube/SoundCloud, một bài mỗi yêu cầu.
+Hỗ trợ link HTTPS YouTube, SoundCloud và Spotify (cả bài hát lẻ, Album lẫn Playlist).
+Khi dán link Playlist/Album Spotify, bot nạp toàn bộ bài hát vào hàng chờ và tự động kiểm tra, cập nhật thêm bài mới khi playlist trên Spotify có thêm nhạc mới.
 
 - `/queue`: xem bài đang phát và tối đa 10 bài tiếp theo.
 - `/skip`: bỏ bài hiện tại.

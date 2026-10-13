@@ -20,15 +20,16 @@ function terminate(child, group = false) {
 
 function normalizeQuery(input) {
   const query = String(input || '').trim();
-  if (!query || query.length > 500) throw new Error('Nhập tên bài hát hoặc link YouTube/SoundCloud (tối đa 500 ký tự).');
+  if (!query || query.length > 500) throw new Error('Nhập tên bài hát hoặc link YouTube/SoundCloud/Spotify (tối đa 500 ký tự).');
   if (/^[a-z][a-z\d+.-]*:/i.test(query)) {
     let url;
     try { url = new URL(query); } catch { throw new Error('Link bài hát không hợp lệ.'); }
     const host = url.hostname.toLowerCase();
     if (url.protocol !== 'https:' || url.username || url.password || url.port ||
         !['youtube.com', 'www.youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtu.be',
-          'soundcloud.com', 'www.soundcloud.com', 'm.soundcloud.com', 'on.soundcloud.com'].includes(host)) {
-      throw new Error('Chỉ hỗ trợ link HTTPS của YouTube/SoundCloud hoặc tên bài hát.');
+          'soundcloud.com', 'www.soundcloud.com', 'm.soundcloud.com', 'on.soundcloud.com',
+          'open.spotify.com', 'spotify.link', 'spotify.com'].includes(host)) {
+      throw new Error('Chỉ hỗ trợ link HTTPS của YouTube/SoundCloud/Spotify hoặc tên bài hát.');
     }
     return url.href;
   }
@@ -72,14 +73,32 @@ function sourceErrorMessage(error) {
 }
 
 async function resolveTrack(input) {
-  if (input && typeof input === 'object' && input.isLocal) {
+  if (input && typeof input === 'object' && (input.isLocal || input.isSpotify)) {
     return input;
   }
-  if (typeof input === 'string' && input.startsWith('local:')) {
-    const { findTrack, toMusicTrack } = require('./localMusic');
-    const item = findTrack(input.slice(6));
-    if (!item) throw new Error('Không tìm thấy bài hát này trong kho nhạc.');
-    return toMusicTrack(item);
+  if (typeof input === 'string') {
+    if (input.startsWith('local:')) {
+      const { findTrack, toMusicTrack } = require('./localMusic');
+      const item = findTrack(input.slice(6));
+      if (!item) throw new Error('Không tìm thấy bài hát này trong kho nhạc.');
+      return toMusicTrack(item);
+    }
+    const { isSpotifyUrl, resolveSpotify } = require('./spotifySource');
+    if (isSpotifyUrl(input)) {
+      const spotifyData = await resolveSpotify(input);
+      if (spotifyData.isCollection) {
+        return spotifyData;
+      }
+      // Single track from Spotify: search audio on SoundCloud/YouTube with Spotify title
+      const audioTrack = await resolveTrack(spotifyData.query);
+      return {
+        title: spotifyData.title,
+        url: audioTrack.url,
+        duration: audioTrack.duration || spotifyData.duration || 0,
+        isSpotify: true,
+        spotifyUri: spotifyData.uri,
+      };
+    }
   }
   const target = normalizeQuery(input);
   const extract = query => yt(query, { ...sourceFlags(query), dumpSingleJson: true, skipDownload: true },
