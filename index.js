@@ -78,6 +78,7 @@ client.once(
       `[DB] ${getDatabasePath()}`
     );
     giveaway.start(client);
+    require('./utils/reactionRoles').start(client);
     require('./utils/inviteSystem').start(client);
     // Nạp thành viên để phân biệt role có sẵn với role vừa được cấp.
     for (const guild of client.guilds.cache.values()) {
