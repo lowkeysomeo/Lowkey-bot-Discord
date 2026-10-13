@@ -136,13 +136,20 @@ function openLocalAudio(track) {
     'pipe:1'
   ], {
     windowsHide: true,
-    stdio: ['ignore', 'pipe', 'ignore']
+    stdio: ['ignore', 'pipe', 'pipe']
   });
 
+  const stderrChunks = [];
+  if (encoder.stderr) {
+    encoder.stderr.on('data', chunk => stderrChunks.push(chunk));
+  }
   encoder.on('error', fail);
   encoder.stdout.on('error', fail);
   encoder.on('close', code => {
-    if (code && !closed) fail(new Error('Không giải mã được file âm thanh cục bộ.'));
+    if (code && !closed) {
+      const errText = Buffer.concat(stderrChunks).toString('utf8').trim();
+      fail(new Error(errText || 'Không giải mã được file âm thanh cục bộ.'));
+    }
   });
   encoder.stdout.pipe(stream);
 
@@ -154,6 +161,7 @@ function openLocalAudio(track) {
       closed = true;
       terminate(encoder);
       encoder?.stdout?.destroy();
+      encoder?.stderr?.destroy();
       stream.destroy();
     }
   };
@@ -185,10 +193,19 @@ function openAudio(track) {
       ...(proxy ? ['-http_proxy', proxy] : []),
       ...(headers ? ['-headers', headers] : []), '-i', info.url,
       '-vn', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1'], { windowsHide: true,
-      stdio: ['ignore', 'pipe', 'ignore'] });
+      stdio: ['ignore', 'pipe', 'pipe'] });
+    const stderrChunks = [];
+    if (encoder.stderr) {
+      encoder.stderr.on('data', chunk => stderrChunks.push(chunk));
+    }
     encoder.on('error', fail);
     encoder.stdout.on('error', fail);
-    encoder.on('close', code => { if (code && !closed) fail(new Error('Không giải mã được âm thanh.')); });
+    encoder.on('close', code => {
+      if (code && !closed) {
+        const errText = Buffer.concat(stderrChunks).toString('utf8').trim();
+        fail(new Error(errText || 'Không giải mã được âm thanh.'));
+      }
+    });
     encoder.stdout.pipe(stream);
   }).catch(fail);
   return { stream, onError: handler => handlers.add(handler), close() {
@@ -198,7 +215,8 @@ function openAudio(track) {
     terminate(encoder);
     downloader.stdout.destroy();
     downloader.stderr.destroy();
-    encoder?.stdout.destroy();
+    encoder?.stdout?.destroy();
+    encoder?.stderr?.destroy();
     stream.destroy();
   } };
 }
