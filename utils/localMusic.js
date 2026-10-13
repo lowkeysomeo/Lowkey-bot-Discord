@@ -6,50 +6,84 @@ const path = require('path');
 const SUPPORTED_EXTS = new Set(['.mp3', '.mp4', '.m4a', '.wav', '.ogg', '.flac', '.webm', '.aac']);
 
 /**
- * Lấy đường dẫn thư mục lưu trữ nhạc cục bộ
- * Ưu tiên đường dẫn volume /data nếu chạy trên Railway,
- * hoặc thư mục data/local_music trong project.
+ * Lấy danh sách các thư mục chứa nhạc (cả thư mục repo lẫn volume Railway)
  */
-function getMusicDirectory() {
+function getMusicDirectories() {
+  const dirs = [];
+  const localDir = path.join(process.cwd(), 'data', 'local_music');
+  if (fs.existsSync(localDir)) dirs.push(localDir);
+
   const railwayDir = '/data';
   if (fs.existsSync(railwayDir)) {
     const p = path.join(railwayDir, 'local_music');
-    if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
+    if (!fs.existsSync(p)) {
+      try { fs.mkdirSync(p, { recursive: true }); } catch {}
+    }
+    if (fs.existsSync(p) && p !== localDir) dirs.push(p);
+  }
+
+  if (!dirs.length) {
+    try { fs.mkdirSync(localDir, { recursive: true }); } catch {}
+    dirs.push(localDir);
+  }
+  return dirs;
+}
+
+/**
+ * Thư mục ưu tiên để lưu trữ khi tải file mới lên qua Discord
+ */
+function getUploadDirectory() {
+  const railwayDir = '/data';
+  if (fs.existsSync(railwayDir)) {
+    const p = path.join(railwayDir, 'local_music');
+    if (!fs.existsSync(p)) {
+      try { fs.mkdirSync(p, { recursive: true }); } catch {}
+    }
     return p;
   }
   const localDir = path.join(process.cwd(), 'data', 'local_music');
-  if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+  if (!fs.existsSync(localDir)) {
+    try { fs.mkdirSync(localDir, { recursive: true }); } catch {}
+  }
   return localDir;
 }
 
 /**
- * Lấy danh sách tất cả các bài nhạc có sẵn trong kho
+ * Lấy danh sách tất cả các bài nhạc có sẵn trong kho (gộp từ các thư mục)
  */
 function listTracks() {
-  const dir = getMusicDirectory();
-  if (!fs.existsSync(dir)) return [];
-  const files = fs.readdirSync(dir);
-  const tracks = [];
-  for (const file of files) {
-    const ext = path.extname(file).toLowerCase();
-    if (!SUPPORTED_EXTS.has(ext)) continue;
-    const fullPath = path.join(dir, file);
-    try {
-      const stat = fs.statSync(fullPath);
-      if (!stat.isFile()) continue;
-      const nameWithoutExt = path.basename(file, ext);
-      tracks.push({
-        id: file,
-        filename: file,
-        title: nameWithoutExt,
-        ext,
-        sizeBytes: stat.size,
-        sizeMb: (stat.size / (1024 * 1024)).toFixed(2),
-        filePath: fullPath,
-      });
-    } catch {}
+  const dirs = getMusicDirectories();
+  const tracksMap = new Map();
+
+  for (const dir of dirs) {
+    if (!fs.existsSync(dir)) continue;
+    let files = [];
+    try { files = fs.readdirSync(dir); } catch { continue; }
+
+    for (const file of files) {
+      const ext = path.extname(file).toLowerCase();
+      if (!SUPPORTED_EXTS.has(ext)) continue;
+      const fullPath = path.join(dir, file);
+      try {
+        const stat = fs.statSync(fullPath);
+        if (!stat.isFile()) continue;
+        const nameWithoutExt = path.basename(file, ext);
+        if (!tracksMap.has(file)) {
+          tracksMap.set(file, {
+            id: file,
+            filename: file,
+            title: nameWithoutExt,
+            ext,
+            sizeBytes: stat.size,
+            sizeMb: (stat.size / (1024 * 1024)).toFixed(2),
+            filePath: fullPath,
+          });
+        }
+      } catch {}
+    }
   }
-  return tracks.sort((a, b) => a.title.localeCompare(b.title));
+
+  return [...tracksMap.values()].sort((a, b) => a.title.localeCompare(b.title));
 }
 
 /**
@@ -103,7 +137,7 @@ async function saveTrackFromUrl(downloadUrl, originalFilename, customName = null
 
   const safeBaseName = baseRaw.replace(/[\\/:*?"<>|]/g, '_').slice(0, 80) || 'bai_hat';
   const filename = `${safeBaseName}${ext}`;
-  const dir = getMusicDirectory();
+  const dir = getUploadDirectory();
   const targetPath = path.join(dir, filename);
 
   const response = await fetch(downloadUrl);
@@ -142,7 +176,9 @@ function deleteTrack(filenameOrQuery) {
 
 module.exports = {
   SUPPORTED_EXTS,
-  getMusicDirectory,
+  getMusicDirectory: getUploadDirectory,
+  getMusicDirectories,
+  getUploadDirectory,
   listTracks,
   findTrack,
   toMusicTrack,
