@@ -42,29 +42,7 @@ class MusicSystem {
       if (session && session.channelId !== channel.id) throw new Error('Bot đang phát ở kênh voice khác.');
       if (session?.queue.length >= 50) throw new Error('Hàng chờ đã đủ 50 bài.');
       if (!session) {
-        const player = this.audio.createAudioPlayer({ behaviors: { noSubscriber: this.audio.NoSubscriberBehavior.Pause } });
-        const connection = this.audio.joinVoiceChannel({ channelId: channel.id, guildId,
-          adapterCreator: interaction.guild.voiceAdapterCreator, selfDeaf: true });
-        session = { guildId, channelId: channel.id, connection, player, queue: [], current: null,
-          textChannel: interaction.channel, timer: null, recovering: false };
-        this.sessions.set(guildId, session);
-        connection.subscribe(player);
-        player.on(this.audio.AudioPlayerStatus.Idle, () => {
-          if (!session.current) return;
-          session.current.audio?.close();
-          session.current = null;
-          void this.next(session);
-        });
-        player.on('error', () => this.fail(session, session.current));
-        connection.on('error', () => this.destroy(session));
-        connection.on(this.audio.VoiceConnectionStatus.Destroyed, () => this.destroy(session));
-        connection.on(this.audio.VoiceConnectionStatus.Disconnected, async () => {
-          if (session.recovering || !this.active(session)) return;
-          session.recovering = true;
-          try { await this.audio.entersState(connection, this.audio.VoiceConnectionStatus.Ready, 15_000); }
-          catch { this.destroy(session); }
-          finally { session.recovering = false; }
-        });
+        session = this._createSession(guildId, channel, interaction);
       }
       clearTimeout(session.timer);
 
@@ -93,6 +71,59 @@ class MusicSystem {
     } finally { this.requests.delete(requestId); }
   }
 
+  _createSession(guildId, channel, interaction) {
+    const player = this.audio.createAudioPlayer({ behaviors: { noSubscriber: this.audio.NoSubscriberBehavior.Pause } });
+    const connection = this.audio.joinVoiceChannel({
+      channelId: channel.id,
+      guildId,
+      adapterCreator: interaction.guild.voiceAdapterCreator,
+      selfDeaf: true,
+    });
+    const session = {
+      guildId,
+      channelId: channel.id,
+      connection,
+      player,
+      queue: [],
+      current: null,
+      textChannel: interaction.channel,
+      timer: null,
+      recovering: false,
+    };
+    this.sessions.set(guildId, session);
+    connection.subscribe(player);
+
+    player.on(this.audio.AudioPlayerStatus.Idle, () => {
+      if (!session.current) return;
+      session.current.audio?.close();
+      session.current = null;
+      void this.next(session);
+    });
+    player.on('error', (err) => {
+      console.error('[VOICE PLAYER ERROR]', err);
+      this.fail(session, session.current, err);
+    });
+    connection.on('error', (err) => {
+      console.error('[VOICE CONNECTION ERROR]', err);
+      this.destroy(session);
+    });
+    connection.on(this.audio.VoiceConnectionStatus.Destroyed, () => this.destroy(session));
+    connection.on(this.audio.VoiceConnectionStatus.Disconnected, async () => {
+      if (session.recovering || !this.active(session)) return;
+      session.recovering = true;
+      try {
+        await this.audio.entersState(connection, this.audio.VoiceConnectionStatus.Ready, 15_000);
+      } catch (err) {
+        console.warn('[VOICE RECONNECT TIMEOUT]', err?.message || err);
+        this.destroy(session);
+      } finally {
+        session.recovering = false;
+      }
+    });
+
+    return session;
+  }
+
   async addMultiple(interaction, channel, tracks) {
     if (!Array.isArray(tracks) || !tracks.length) throw new Error('Danh sách bài hát trống.');
     const guildId = interaction.guildId;
@@ -100,29 +131,7 @@ class MusicSystem {
     if (before && before.channelId !== channel.id) throw new Error('Bot đang phát ở kênh voice khác. Hãy vào cùng kênh với bot.');
     let session = this.session(guildId);
     if (!session) {
-      const player = this.audio.createAudioPlayer({ behaviors: { noSubscriber: this.audio.NoSubscriberBehavior.Pause } });
-      const connection = this.audio.joinVoiceChannel({ channelId: channel.id, guildId,
-        adapterCreator: interaction.guild.voiceAdapterCreator, selfDeaf: true });
-      session = { guildId, channelId: channel.id, connection, player, queue: [], current: null,
-        textChannel: interaction.channel, timer: null, recovering: false };
-      this.sessions.set(guildId, session);
-      connection.subscribe(player);
-      player.on(this.audio.AudioPlayerStatus.Idle, () => {
-        if (!session.current) return;
-        session.current.audio?.close();
-        session.current = null;
-        void this.next(session);
-      });
-      player.on('error', () => this.fail(session, session.current));
-      connection.on('error', () => this.destroy(session));
-      connection.on(this.audio.VoiceConnectionStatus.Destroyed, () => this.destroy(session));
-      connection.on(this.audio.VoiceConnectionStatus.Disconnected, async () => {
-        if (session.recovering || !this.active(session)) return;
-        session.recovering = true;
-        try { await this.audio.entersState(connection, this.audio.VoiceConnectionStatus.Ready, 15_000); }
-        catch { this.destroy(session); }
-        finally { session.recovering = false; }
-      });
+      session = this._createSession(guildId, channel, interaction);
     }
     clearTimeout(session.timer);
     let addedCount = 0;
@@ -196,18 +205,24 @@ class MusicSystem {
           track.url = resolvedAudio.url;
           if (!track.duration) track.duration = resolvedAudio.duration;
         } catch (resolveErr) {
+          console.error('[SPOTIFY RESOLVE ERROR]', resolveErr);
           this.fail(session, track, resolveErr);
           return;
         }
       }
 
       track.audio = this.media.openAudio(track);
-      track.audio.onError(error => this.fail(session, track, error));
+      track.audio.onError(error => {
+        console.error('[AUDIO STREAM ERROR]', error);
+        this.fail(session, track, error);
+      });
       const resource = this.audio.createAudioResource(track.audio.stream, { inputType: this.audio.StreamType.Raw });
       session.player.play(resource);
       await this.audio.entersState(session.player, this.audio.AudioPlayerStatus.Playing, 25_000);
+      console.log(`[VOICE PLAYING] Started playing: "${label(track)}" (guild: ${session.guildId})`);
       if (this.active(session) && session.current === track) await this.tell(session, `🎶 Đang phát: **${label(track)}**`);
     } catch (error) {
+      console.error('[VOICE NEXT ERROR]', error);
       if (session.connection.state.status !== this.audio.VoiceConnectionStatus.Ready && this.active(session)) {
         await this.tell(session, '❌ Không kết nối được voice. Kiểm tra quyền Kết nối/Nói của bot và thử lại.');
         this.destroy(session);
@@ -217,6 +232,7 @@ class MusicSystem {
 
   fail(session, track, error) {
     if (!track || !this.active(session) || session.current !== track) return;
+    if (error) console.error(`[TRACK FAILED] ${track.title}:`, error?.message || error);
     void this.tell(session, `❌ Không phát được **${label(track)}**. ${source.sourceErrorMessage(error)}`);
     this.skip(session);
   }
