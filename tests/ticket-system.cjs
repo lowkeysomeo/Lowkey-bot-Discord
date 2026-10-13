@@ -309,7 +309,158 @@ async function run() {
   assert.ok(transcriptReply.content.includes('Transcript'), 'Phải tạo transcript thủ công thành công');
   assert.equal(transcriptReply.files.length, 1);
 
-  console.log('PASS ticket-system: config, banner embed, select menu, AdminTicket & SupportTicket permissions, 3 concurrent tickets limit, instant close with transcript (channel, log & DM).');
+  // ─────────────────────────────────────────────────────────────
+  // 7. Nút: Nhận Ticket (Claim)
+  // ─────────────────────────────────────────────────────────────
+  const targetClaimChannel = createdChannels[1]; // kênh ticket thứ 2 (id: 2)
+  let claimReply = null;
+  let originalMessageEdited = null;
+  const mockTicketMessage = {
+    editable: true,
+    edit: async (payload) => {
+      originalMessageEdited = payload;
+      return mockTicketMessage;
+    },
+  };
+
+  // Người tạo ticket thử tự nhận -> Bị từ chối
+  const creatorClaimInteraction = {
+    guild,
+    channel: targetClaimChannel,
+    message: mockTicketMessage,
+    user: { id: 'user-002', tag: 'MemberB#0002' },
+    member: {
+      permissions: { has: () => false },
+      roles: { cache: new Map() },
+    },
+    customId: 'ticket:btn_claim',
+    isStringSelectMenu: () => false,
+    isButton: () => true,
+    isModalSubmit: () => false,
+    reply: async (p) => { claimReply = p; },
+  };
+  await ticketSystem.handleInteraction(creatorClaimInteraction);
+  assert.ok(claimReply.content.includes('Bạn là người tạo ticket này'), 'Người tạo ticket không được nhận ticket');
+
+  // Người ngoài không có role staff -> Bị từ chối
+  claimReply = null;
+  const strangerClaimInteraction = {
+    ...creatorClaimInteraction,
+    user: { id: 'stranger-999', tag: 'Stranger#9999' },
+  };
+  await ticketSystem.handleInteraction(strangerClaimInteraction);
+  assert.ok(claimReply.content.includes('không có quyền nhận ticket'), 'Người không có quyền không được nhận ticket');
+
+  // Staff (role-support-ticket) nhận ticket -> Thành công!
+  claimReply = null;
+  const staffClaimInteraction = {
+    guild,
+    channel: targetClaimChannel,
+    message: mockTicketMessage,
+    user: { id: 'staff-007', username: 'StaffJames', tag: 'StaffJames#0007' },
+    member: {
+      permissions: { has: () => false },
+      roles: { cache: new Map([['role-support-ticket', true]]) },
+    },
+    customId: 'ticket:btn_claim',
+    isStringSelectMenu: () => false,
+    isButton: () => true,
+    isModalSubmit: () => false,
+    reply: async (p) => { claimReply = p; },
+  };
+  await ticketSystem.handleInteraction(staffClaimInteraction);
+  assert.ok(claimReply.content.includes('ticket của bạn đã được tiếp nhận bởi **<@staff-007>**'), 'Phải ping thông báo khách hàng ai đã nhận xử lý');
+  assert.ok(claimReply.embeds[0].data.title.includes('TICKET ĐÃ ĐƯỢC TIẾP NHẬN XỬ LÝ'));
+
+  // Kiểm tra database đã lưu claimed_by
+  const claimedTicketRow = db.prepare('SELECT * FROM tickets WHERE channel_id = ?').get(targetClaimChannel.id);
+  assert.equal(claimedTicketRow.claimed_by, 'staff-007');
+  assert.ok(claimedTicketRow.claimed_at > 0);
+
+  // Kiểm tra message chào mừng được cập nhật với nút Nhận bị disabled
+  assert.ok(originalMessageEdited, 'Message ban đầu phải được cập nhật');
+  const updatedRow = originalMessageEdited.components[0].toJSON();
+  const claimBtn = updatedRow.components.find(c => c.custom_id === 'ticket:btn_claim');
+  assert.ok(claimBtn.disabled, 'Nút claim phải chuyển sang disabled sau khi nhận');
+
+  // Nhân viên khác bấm nhận lại -> Báo đã có người nhận
+  claimReply = null;
+  const staff2ClaimInteraction = {
+    ...staffClaimInteraction,
+    user: { id: 'staff-008', username: 'StaffSecond', tag: 'StaffSecond#0008' },
+  };
+  await ticketSystem.handleInteraction(staff2ClaimInteraction);
+  assert.ok(claimReply.content.includes('đã được tiếp nhận xử lý bởi <@staff-007>'), 'Không cho nhận lại ticket đã có staff nhận');
+
+  // ─────────────────────────────────────────────────────────────
+  // 8. Nút: Đóng Kèm Lý Do -> Mở Modal
+  // ─────────────────────────────────────────────────────────────
+  let shownModal = null;
+  const closeReasonBtnInteraction = {
+    guild,
+    channel: targetClaimChannel,
+    user: { id: 'staff-007', tag: 'StaffJames#0007' },
+    member: {
+      permissions: { has: () => false },
+      roles: { cache: new Map([['role-support-ticket', true]]) },
+    },
+    customId: 'ticket:btn_close_reason',
+    isStringSelectMenu: () => false,
+    isButton: () => true,
+    isModalSubmit: () => false,
+    showModal: async (m) => { shownModal = m; },
+  };
+  await ticketSystem.handleInteraction(closeReasonBtnInteraction);
+  assert.ok(shownModal, 'Phải mở modal nhập lý do');
+  const modalJson = shownModal.toJSON();
+  assert.equal(modalJson.custom_id, 'ticket:modal_close_reason');
+  assert.equal(modalJson.components[0].components[0].custom_id, 'close_reason');
+
+  // ─────────────────────────────────────────────────────────────
+  // 9. Nộp Modal Đóng Ticket với lý do
+  // ─────────────────────────────────────────────────────────────
+  let modalSubmitReply = null;
+  dmSentMessages = [];
+  const modalSubmitInteraction = {
+    guild,
+    channel: targetClaimChannel,
+    user: { id: 'staff-007', username: 'StaffJames', tag: 'StaffJames#0007' },
+    member: {
+      permissions: { has: () => false },
+      roles: { cache: new Map([['role-support-ticket', true]]) },
+    },
+    customId: 'ticket:modal_close_reason',
+    isStringSelectMenu: () => false,
+    isButton: () => false,
+    isModalSubmit: () => true,
+    fields: {
+      getTextInputValue: (fieldId) => {
+        if (fieldId === 'close_reason') return 'Đã tư vấn gói thành công và khách đã thanh toán';
+        return '';
+      },
+    },
+    deferReply: async () => {},
+    editReply: async (p) => { modalSubmitReply = p; },
+    reply: async (p) => { modalSubmitReply = p; },
+  };
+
+  await ticketSystem.handleInteraction(modalSubmitInteraction);
+  assert.ok(modalSubmitReply, 'Phải có phản hồi khi submit modal');
+  assert.ok(modalSubmitReply.embeds[0].data.description.includes('Đã tư vấn gói thành công và khách đã thanh toán'), 'Thông báo đóng phải ghi rõ lý do');
+  assert.ok(modalSubmitReply.embeds[0].data.description.includes('<@staff-007>'), 'Thông báo đóng phải ghi rõ staff tiếp nhận');
+
+  // Kiểm tra database lưu lý do đóng
+  const closedWithReasonRow = db.prepare('SELECT * FROM tickets WHERE channel_id = ?').get(targetClaimChannel.id);
+  assert.equal(closedWithReasonRow.status, 'closed');
+  assert.equal(closedWithReasonRow.close_reason, 'Đã tư vấn gói thành công và khách đã thanh toán');
+  assert.equal(closedWithReasonRow.closed_by, 'staff-007');
+
+  // Kiểm tra DM khách hàng nhận được lý do đóng
+  assert.ok(dmSentMessages.length > 0);
+  assert.ok(dmSentMessages[0].content.includes('Đã tư vấn gói thành công và khách đã thanh toán'), 'DM khách hàng phải có lý do đóng');
+  assert.ok(dmSentMessages[0].content.includes('<@staff-007>'), 'DM khách hàng phải có thông tin staff xử lý');
+
+  console.log('PASS ticket-system: config, banner embed, select menu, AdminTicket & SupportTicket permissions, 3 concurrent tickets limit, claim ticket, modal close reason, transcript (channel, log & DM).');
 }
 
 run().catch(error => { console.error('FAIL ticket-system:', error); process.exit(1); });

@@ -12,6 +12,9 @@ const {
   StringSelectMenuBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   ChannelType,
   PermissionFlagsBits: P,
   AttachmentBuilder,
@@ -58,10 +61,17 @@ function db() {
       category_label TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'open',
       created_at INTEGER NOT NULL,
+      claimed_by TEXT,
+      claimed_at INTEGER,
       closed_at INTEGER,
-      closed_by TEXT
+      closed_by TEXT,
+      close_reason TEXT
     );
   `);
+
+  try { d.exec('ALTER TABLE tickets ADD COLUMN claimed_by TEXT;'); } catch {}
+  try { d.exec('ALTER TABLE tickets ADD COLUMN claimed_at INTEGER;'); } catch {}
+  try { d.exec('ALTER TABLE tickets ADD COLUMN close_reason TEXT;'); } catch {}
   return d;
 }
 
@@ -381,35 +391,20 @@ async function handleSelectCategory(interaction) {
   if (config.supportRoleId) pings.push(`<@&${config.supportRoleId}>`);
   if (config.adminRoleId && config.adminRoleId !== config.supportRoleId) pings.push(`<@&${config.adminRoleId}>`);
 
-  const welcomeEmbed = new EmbedBuilder()
-    .setColor(config.color || '#00a8ff')
-    .setTitle(`🎫 TICKET #${ticketId} — ${option.label}`)
-    .setDescription(
-      `Xin chào <@${interaction.user.id}>! Cảm ơn bạn đã liên hệ với **VietNam Legacy**.\n\n` +
-      `📋 **Yêu cầu hỗ trợ:** **${option.label}**\n` +
-      `👤 **Khách hàng:** <@${interaction.user.id}>\n\n` +
-      `Đội ngũ **AdminTicket** & **Hỗ Trợ Ticket** đã nhận được thông báo và sẽ có mặt hỗ trợ bạn sớm nhất có thể.\n\n` +
-      `💬 *Vui lòng mô tả chi tiết vấn đề / dịch vụ bạn cần để được hỗ trợ nhanh nhất nhé!*`
-    )
-    .setFooter({
-      text: `${guild.name} • Ticket System • Nhấn nút bên dưới để đóng ticket khi xong`,
-      iconURL: guild.iconURL() || undefined,
-    })
-    .setTimestamp();
+  const ticketData = {
+    id: ticketId,
+    guild_id: guild.id,
+    channel_id: ticketChannel.id,
+    user_id: interaction.user.id,
+    category_value: selectedValue,
+    category_label: option.label,
+    status: 'open',
+    created_at: Date.now(),
+    claimed_by: null,
+  };
 
-  const closeButton = new ButtonBuilder()
-    .setCustomId('ticket:btn_close')
-    .setLabel('Đóng Ticket')
-    .setEmoji('🔒')
-    .setStyle(ButtonStyle.Danger);
-
-  const transcriptButton = new ButtonBuilder()
-    .setCustomId('ticket:btn_transcript')
-    .setLabel('Lưu Transcript')
-    .setEmoji('📑')
-    .setStyle(ButtonStyle.Secondary);
-
-  const ticketRow = new ActionRowBuilder().addComponents(closeButton, transcriptButton);
+  const welcomeEmbed = buildTicketWelcomeEmbed(ticketData, interaction.user, config, guild);
+  const ticketRow = buildTicketButtons(ticketData);
 
   await ticketChannel.send({
     content: pings.join(' '),
@@ -422,7 +417,61 @@ async function handleSelectCategory(interaction) {
   });
 }
 
-async function generateTranscriptAttachment(channel, ticket, guild) {
+function buildTicketWelcomeEmbed(ticket, user, config, guild) {
+  const claimedText = ticket.claimed_by
+    ? `<@${ticket.claimed_by}>`
+    : '⏳ *Chưa có Staff tiếp nhận (Bấm nút "Nhận Ticket" bên dưới)*';
+
+  return new EmbedBuilder()
+    .setColor(config.color || '#00a8ff')
+    .setTitle(`🎫 TICKET #${ticket.id} — ${ticket.category_label}`)
+    .setDescription(
+      `Xin chào <@${ticket.user_id}>! Cảm ơn bạn đã liên hệ với **${guild.name}**.\n\n` +
+      `📋 **Yêu cầu hỗ trợ:** **${ticket.category_label}**\n` +
+      `👤 **Khách hàng:** <@${ticket.user_id}>\n` +
+      `🛡️ **Staff tiếp nhận:** ${claimedText}\n\n` +
+      `Đội ngũ **AdminTicket** & **Hỗ Trợ Ticket** đã nhận được thông báo và sẽ có mặt hỗ trợ bạn sớm nhất có thể.\n\n` +
+      `💬 *Vui lòng mô tả chi tiết vấn đề / dịch vụ bạn cần để được hỗ trợ nhanh nhất nhé!*`
+    )
+    .setFooter({
+      text: `${guild.name} • Ticket System • Nhấn nút bên dưới để nhận hoặc đóng ticket`,
+      iconURL: guild.iconURL() || undefined,
+    })
+    .setTimestamp();
+}
+
+function buildTicketButtons(ticket = {}) {
+  const isClaimed = Boolean(ticket.claimed_by);
+
+  const claimButton = new ButtonBuilder()
+    .setCustomId('ticket:btn_claim')
+    .setLabel(isClaimed ? 'Đã Nhận Xử Lý' : 'Nhận Ticket')
+    .setEmoji(isClaimed ? '✅' : '✋')
+    .setStyle(isClaimed ? ButtonStyle.Secondary : ButtonStyle.Success)
+    .setDisabled(isClaimed);
+
+  const closeButton = new ButtonBuilder()
+    .setCustomId('ticket:btn_close')
+    .setLabel('Đóng Ticket')
+    .setEmoji('🔒')
+    .setStyle(ButtonStyle.Danger);
+
+  const closeReasonButton = new ButtonBuilder()
+    .setCustomId('ticket:btn_close_reason')
+    .setLabel('Đóng Kèm Lý Do')
+    .setEmoji('📝')
+    .setStyle(ButtonStyle.Primary);
+
+  const transcriptButton = new ButtonBuilder()
+    .setCustomId('ticket:btn_transcript')
+    .setLabel('Lưu Transcript')
+    .setEmoji('📑')
+    .setStyle(ButtonStyle.Secondary);
+
+  return new ActionRowBuilder().addComponents(claimButton, closeButton, closeReasonButton, transcriptButton);
+}
+
+async function generateTranscriptAttachment(channel, ticket, guild, extra = {}) {
   const messages = await channel.messages.fetch({ limit: 100 });
   const sorted = [...messages.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
@@ -430,6 +479,9 @@ async function generateTranscriptAttachment(channel, ticket, guild) {
   text += `TRANSCRIPT TICKET #${ticket.id} - ${guild.name}\n`;
   text += `Loại yêu cầu: ${ticket.category_label}\n`;
   text += `Người tạo: ${ticket.user_id}\n`;
+  text += `Staff tiếp nhận: ${ticket.claimed_by || 'Chưa tiếp nhận'}\n`;
+  if (extra.closedBy) text += `Người đóng: ${extra.closedBy}\n`;
+  if (extra.reason) text += `Lý do đóng: ${extra.reason}\n`;
   text += `Thời gian xuất: ${new Date().toLocaleString('vi-VN')}\n`;
   text += `========================================================\n\n`;
 
@@ -448,7 +500,117 @@ async function generateTranscriptAttachment(channel, ticket, guild) {
 }
 
 /**
- * Xử lý các nút bấm trong kênh Ticket (Đóng & Lưu transcript & Xóa luôn)
+ * Thực thi đóng ticket: ghi DB, xuất transcript, gửi log/DM và xóa phòng
+ */
+async function executeCloseTicket(interaction, channel, ticket, guild, config, reason = null) {
+  const closeReasonText = (reason && String(reason).trim())
+    ? String(reason).trim()
+    : 'Hoàn tất hỗ trợ (Không nêu lý do)';
+
+  if (!interaction.deferred && !interaction.replied) {
+    if (typeof interaction.deferReply === 'function') {
+      await interaction.deferReply().catch(() => {});
+    }
+  }
+
+  // 1. Tự động xuất transcript cuộc trò chuyện
+  let transcriptAttachment = null;
+  try {
+    transcriptAttachment = await generateTranscriptAttachment(channel, ticket, guild, {
+      closedBy: `${interaction.user.tag || interaction.user.username} (${interaction.user.id})`,
+      reason: closeReasonText,
+    });
+  } catch (err) {
+    console.error('[TRANSCRIPT GENERATE ERROR]', err);
+  }
+
+  // 2. Cập nhật Database: đóng ticket và lưu lý do
+  db().prepare('UPDATE tickets SET status = ?, closed_at = ?, closed_by = ?, close_reason = ? WHERE id = ?')
+    .run('closed', Date.now(), interaction.user.id, closeReasonText, ticket.id);
+
+  // 3. Gửi transcript vào kênh Log nếu server có cấu hình
+  if (config.logChannelId && transcriptAttachment) {
+    try {
+      const logChannel = await guild.channels.fetch(config.logChannelId).catch(() => null);
+      if (logChannel) {
+        const logEmbed = new EmbedBuilder()
+          .setColor('#ff4757')
+          .setTitle(`📑 Lịch sử Ticket #${ticket.id} — ${ticket.category_label}`)
+          .setDescription(
+            `👤 **Khách hàng:** <@${ticket.user_id}>\n` +
+            `🛡️ **Người tiếp nhận:** ${ticket.claimed_by ? `<@${ticket.claimed_by}>` : 'Chưa có'}\n` +
+            `🔒 **Người đóng:** <@${interaction.user.id}>\n` +
+            `📝 **Lý do đóng:** **${closeReasonText}**\n` +
+            `⏰ **Thời gian:** ${new Date().toLocaleString('vi-VN')}`
+          )
+          .setFooter({ text: `${guild.name} • Ticket System Log` })
+          .setTimestamp();
+
+        await logChannel.send({
+          embeds: [logEmbed],
+          files: [transcriptAttachment],
+        });
+      }
+    } catch (logErr) {
+      console.error('[TICKET LOG ERROR]', logErr);
+    }
+  }
+
+  // 4. Gửi transcript qua DM cho người tạo ticket để khách lưu giữ
+  if (transcriptAttachment) {
+    try {
+      const creatorMember = await guild.members.fetch(ticket.user_id).catch(() => null);
+      if (creatorMember && !creatorMember.user.bot) {
+        await creatorMember.send({
+          content:
+            `📑 Chào bạn, Ticket #${ticket.id} (${ticket.category_label}) tại **${guild.name}** đã được hoàn tất.\n` +
+            `🛡️ **Người xử lý:** ${ticket.claimed_by ? `<@${ticket.claimed_by}>` : 'Đội ngũ Hỗ Trợ'}\n` +
+            `🔒 **Người đóng:** <@${interaction.user.id}>\n` +
+            `📝 **Lý do đóng:** **${closeReasonText}**\n\n` +
+            `Đây là bản lưu lại toàn bộ nội dung cuộc trò chuyện của bạn!`,
+          files: [transcriptAttachment],
+        }).catch(() => {});
+      }
+    } catch {}
+  }
+
+  // 5. Thông báo trong kênh và tự động xóa kênh sau 5 giây (đóng là xóa luôn)
+  const closeEmbed = new EmbedBuilder()
+    .setColor('#ff4757')
+    .setTitle(`🔒 TICKET #${ticket.id} ĐÃ HOÀN TẤT VÀ ĐÓNG`)
+    .setDescription(
+      `Ticket đã được đóng bởi <@${interaction.user.id}>.\n` +
+      (ticket.claimed_by ? `🛡️ **Người tiếp nhận:** <@${ticket.claimed_by}>\n` : '') +
+      `📝 **Lý do đóng:** **${closeReasonText}**\n\n` +
+      `✅ **Lịch sử trò chuyện (Transcript) đã được tự động lưu trữ.**\n` +
+      `🗑️ Kênh này sẽ tự động **xóa vĩnh viễn sau 5 giây**...`
+    )
+    .setFooter({ text: `${guild.name} • Cảm ơn bạn đã sử dụng dịch vụ!` })
+    .setTimestamp();
+
+  const replyPayload = {
+    embeds: [closeEmbed],
+    files: transcriptAttachment ? [transcriptAttachment] : [],
+  };
+
+  if (interaction.deferred) {
+    await interaction.editReply(replyPayload).catch(() => {});
+  } else if (!interaction.replied) {
+    await interaction.reply(replyPayload).catch(() => {});
+  }
+
+  const deleteTimer = setTimeout(async () => {
+    try {
+      await channel.delete(`Ticket #${ticket.id} đã hoàn tất và đóng vĩnh viễn`);
+    } catch (delErr) {
+      console.error('[TICKET DELETE ERROR]', delErr.message);
+    }
+  }, 5000);
+  if (deleteTimer.unref) deleteTimer.unref();
+}
+
+/**
+ * Xử lý các nút bấm trong kênh Ticket (Nhận ticket, Đóng, Đóng có lý do, Transcript)
  */
 async function handleButtonAction(interaction) {
   const guild = interaction.guild;
@@ -466,13 +628,84 @@ async function handleButtonAction(interaction) {
   const config = getConfig(guild.id);
   const member = interaction.member;
 
-  // Quyền đóng ticket: Admin server, người có AdminTicket, người có Hỗ Trợ Ticket, hoặc người tạo ticket
+  // Quyền: Admin server, role AdminTicket, role Hỗ Trợ Ticket, hoặc người tạo ticket
   const isAdmin = member.permissions.has(P.Administrator) || (config.adminRoleId && member.roles.cache.has(config.adminRoleId));
   const isSupport = config.supportRoleId && member.roles.cache.has(config.supportRoleId);
   const isCreator = interaction.user.id === ticket.user_id;
 
   const action = interaction.customId.replace('ticket:btn_', '');
 
+  // ─────────────────────────────────────────────────────────────
+  // 1. Nhận xử lý Ticket (Claim)
+  // ─────────────────────────────────────────────────────────────
+  if (action === 'claim') {
+    if (!isAdmin && !isSupport) {
+      if (isCreator) {
+        return interaction.reply({
+          content: '⚠️ Bạn là người tạo ticket này. Vui lòng đợi đội ngũ Staff/Hỗ trợ tiếp nhận nhé!',
+          flags: 64,
+        });
+      }
+      return interaction.reply({
+        content: '⛔ Bạn không có quyền nhận ticket này. Chỉ Staff Hỗ Trợ hoặc Admin mới có quyền nhận.',
+        flags: 64,
+      });
+    }
+
+    if (ticket.claimed_by) {
+      return interaction.reply({
+        content: `⚠️ Ticket này đã được tiếp nhận xử lý bởi <@${ticket.claimed_by}> rồi.`,
+        flags: 64,
+      });
+    }
+
+    // Cập nhật DB
+    const now = Date.now();
+    db().prepare('UPDATE tickets SET claimed_by = ?, claimed_at = ? WHERE id = ?')
+      .run(interaction.user.id, now, ticket.id);
+    ticket.claimed_by = interaction.user.id;
+    ticket.claimed_at = now;
+
+    // Cập nhật topic phòng ticket nếu có
+    if (typeof channel.setTopic === 'function') {
+      const topicText = `Ticket của ${ticket.user_id} • Loại: ${ticket.category_label} • Đang xử lý: ${interaction.user.tag || interaction.user.username}`;
+      channel.setTopic(topicText).catch(() => {});
+    }
+
+    // Cập nhật tin nhắn ban đầu (đổi trạng thái nút bấm và embed)
+    if (interaction.message && typeof interaction.message.edit === 'function' && (interaction.message.editable ?? true)) {
+      const updatedEmbed = buildTicketWelcomeEmbed(ticket, interaction.user, config, guild);
+      const updatedRow = buildTicketButtons(ticket);
+      await interaction.message.edit({
+        embeds: [updatedEmbed],
+        components: [updatedRow],
+      }).catch(() => {});
+    }
+
+    // Gửi thông báo nổi bật vào phòng ticket để người tạo biết ai đang tiếp nhận xử lý
+    const claimEmbed = new EmbedBuilder()
+      .setColor('#2ed573')
+      .setTitle('🙋‍♂️ TICKET ĐÃ ĐƯỢC TIẾP NHẬN XỬ LÝ')
+      .setDescription(
+        `Staff **<@${interaction.user.id}>** đã tiếp nhận hỗ trợ ticket này!\n\n` +
+        `👤 **Khách hàng:** <@${ticket.user_id}>\n` +
+        `🛡️ **Người tiếp nhận:** <@${interaction.user.id}>\n` +
+        `📋 **Danh mục:** **${ticket.category_label}**\n` +
+        `⏰ **Thời gian nhận:** ${new Date(now).toLocaleString('vi-VN')}\n\n` +
+        `💬 *Khách hàng vui lòng trao đổi trực tiếp với nhân viên hỗ trợ tại đây.*`
+      )
+      .setFooter({ text: `${guild.name} • Ticket System` })
+      .setTimestamp();
+
+    return interaction.reply({
+      content: `🔔 <@${ticket.user_id}>, ticket của bạn đã được tiếp nhận bởi **<@${interaction.user.id}>**!`,
+      embeds: [claimEmbed],
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 2. Đóng ticket trực tiếp (Nhanh)
+  // ─────────────────────────────────────────────────────────────
   if (action === 'close') {
     if (!isAdmin && !isSupport && !isCreator) {
       return interaction.reply({
@@ -481,87 +714,46 @@ async function handleButtonAction(interaction) {
       });
     }
 
-    await interaction.deferReply();
-
-    // 1. Tự động xuất transcript cuộc trò chuyện
-    let transcriptAttachment = null;
-    try {
-      transcriptAttachment = await generateTranscriptAttachment(channel, ticket, guild);
-    } catch (err) {
-      console.error('[TRANSCRIPT GENERATE ERROR]', err);
-    }
-
-    // 2. Cập nhật Database: đóng ticket
-    db().prepare('UPDATE tickets SET status = ?, closed_at = ?, closed_by = ? WHERE id = ?')
-      .run('closed', Date.now(), interaction.user.id, ticket.id);
-
-    // 3. Gửi transcript vào kênh Log nếu server có cấu hình
-    if (config.logChannelId && transcriptAttachment) {
-      try {
-        const logChannel = await guild.channels.fetch(config.logChannelId).catch(() => null);
-        if (logChannel) {
-          const logEmbed = new EmbedBuilder()
-            .setColor('#ff4757')
-            .setTitle(`📑 Lịch sử Ticket #${ticket.id} — ${ticket.category_label}`)
-            .setDescription(
-              `👤 **Khách hàng:** <@${ticket.user_id}>\n` +
-              `🔒 **Người đóng:** <@${interaction.user.id}>\n` +
-              `⏰ **Thời gian:** ${new Date().toLocaleString('vi-VN')}`
-            )
-            .setFooter({ text: `${guild.name} • Ticket System Log` })
-            .setTimestamp();
-
-          await logChannel.send({
-            embeds: [logEmbed],
-            files: [transcriptAttachment],
-          });
-        }
-      } catch (logErr) {
-        console.error('[TICKET LOG ERROR]', logErr);
-      }
-    }
-
-    // 4. Gửi transcript qua DM cho người tạo ticket để khách lưu giữ
-    if (transcriptAttachment) {
-      try {
-        const creatorMember = await guild.members.fetch(ticket.user_id).catch(() => null);
-        if (creatorMember && !creatorMember.user.bot) {
-          await creatorMember.send({
-            content: `📑 Chào bạn, Ticket #${ticket.id} (${ticket.category_label}) tại **${guild.name}** đã được hoàn tất. Đây là bản lưu lại toàn bộ nội dung cuộc trò chuyện của bạn!`,
-            files: [transcriptAttachment],
-          }).catch(() => {});
-        }
-      } catch {}
-    }
-
-    // 5. Thông báo trong kênh và tự động xóa kênh sau 5 giây (đóng là xóa luôn)
-    const closeEmbed = new EmbedBuilder()
-      .setColor('#ff4757')
-      .setTitle(`🔒 TICKET #${ticket.id} ĐÃ HOÀN TẤT VÀ ĐÓNG`)
-      .setDescription(
-        `Ticket đã được đóng bởi <@${interaction.user.id}>.\n\n` +
-        `✅ **Lịch sử trò chuyện (Transcript) đã được tự động lưu trữ.**\n` +
-        `🗑️ Kênh này sẽ tự động **xóa vĩnh viễn sau 5 giây**...`
-      )
-      .setFooter({ text: 'VietNam Legacy • Cảm ơn bạn đã sử dụng dịch vụ!' })
-      .setTimestamp();
-
-    await interaction.editReply({
-      embeds: [closeEmbed],
-      files: transcriptAttachment ? [transcriptAttachment] : [],
-    });
-
-    const deleteTimer = setTimeout(async () => {
-      try {
-        await channel.delete(`Ticket #${ticket.id} đã hoàn tất và đóng vĩnh viễn`);
-      } catch (delErr) {
-        console.error('[TICKET DELETE ERROR]', delErr.message);
-      }
-    }, 5000);
-    if (deleteTimer.unref) deleteTimer.unref();
-    return;
+    return executeCloseTicket(interaction, channel, ticket, guild, config, 'Đóng trực tiếp (Không có lý do)');
   }
 
+  // ─────────────────────────────────────────────────────────────
+  // 3. Đóng ticket với lý do (Mở Modal nhập lý do)
+  // ─────────────────────────────────────────────────────────────
+  if (action === 'close_reason') {
+    if (!isAdmin && !isSupport && !isCreator) {
+      return interaction.reply({
+        content: '⛔ Bạn không có quyền đóng ticket này.',
+        flags: 64,
+      });
+    }
+
+    // Mở Modal nhập lý do nếu môi trường client hỗ trợ showModal
+    if (typeof interaction.showModal === 'function') {
+      const modal = new ModalBuilder()
+        .setCustomId('ticket:modal_close_reason')
+        .setTitle(`Đóng Ticket #${ticket.id}`);
+
+      const reasonInput = new TextInputBuilder()
+        .setCustomId('close_reason')
+        .setLabel('Lý do đóng ticket')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('Nhập lý do đóng ticket (ví dụ: Đã giải quyết, Khách không phản hồi...)')
+        .setRequired(true)
+        .setMinLength(1)
+        .setMaxLength(500);
+
+      modal.addComponents(new ActionRowBuilder().addComponents(reasonInput));
+      return interaction.showModal(modal);
+    }
+
+    // Fallback nếu không có showModal (ví dụ chạy unit test mock)
+    return executeCloseTicket(interaction, channel, ticket, guild, config, 'Đóng kèm lý do');
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 4. Xuất Transcript thủ công
+  // ─────────────────────────────────────────────────────────────
   if (action === 'transcript') {
     await interaction.deferReply({ flags: 64 });
     try {
@@ -580,6 +772,39 @@ async function handleButtonAction(interaction) {
 }
 
 /**
+ * Xử lý khi nộp Modal nhập lý do đóng ticket
+ */
+async function handleModalSubmit(interaction) {
+  const guild = interaction.guild;
+  const channel = interaction.channel;
+  if (!guild || !channel) return;
+
+  const ticket = db().prepare('SELECT * FROM tickets WHERE channel_id = ?').get(channel.id);
+  if (!ticket) {
+    return interaction.reply({
+      content: '⚠️ Kênh này không phải là một phòng ticket hợp lệ trong hệ thống.',
+      flags: 64,
+    });
+  }
+
+  const config = getConfig(guild.id);
+  const member = interaction.member;
+  const isAdmin = member.permissions.has(P.Administrator) || (config.adminRoleId && member.roles.cache.has(config.adminRoleId));
+  const isSupport = config.supportRoleId && member.roles.cache.has(config.supportRoleId);
+  const isCreator = interaction.user.id === ticket.user_id;
+
+  if (!isAdmin && !isSupport && !isCreator) {
+    return interaction.reply({
+      content: '⛔ Bạn không có quyền đóng ticket này.',
+      flags: 64,
+    });
+  }
+
+  const reason = interaction.fields?.getTextInputValue('close_reason')?.trim() || 'Không có lý do cụ thể';
+  return executeCloseTicket(interaction, channel, ticket, guild, config, reason);
+}
+
+/**
  * Xử lý mọi tương tác liên quan đến Ticket
  */
 async function handleInteraction(interaction) {
@@ -588,6 +813,9 @@ async function handleInteraction(interaction) {
   }
   if (interaction.isButton() && interaction.customId.startsWith('ticket:btn_')) {
     return handleButtonAction(interaction);
+  }
+  if (interaction.isModalSubmit() && interaction.customId === 'ticket:modal_close_reason') {
+    return handleModalSubmit(interaction);
   }
 }
 
@@ -598,7 +826,11 @@ module.exports = {
   sendTicketPanel,
   handleSelectCategory,
   handleButtonAction,
+  handleModalSubmit,
   handleInteraction,
+  buildTicketButtons,
+  buildTicketWelcomeEmbed,
+  executeCloseTicket,
   DEFAULT_OPTIONS,
   DEFAULT_BANNER,
 };
