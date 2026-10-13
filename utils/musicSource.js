@@ -72,6 +72,15 @@ function sourceErrorMessage(error) {
 }
 
 async function resolveTrack(input) {
+  if (input && typeof input === 'object' && input.isLocal) {
+    return input;
+  }
+  if (typeof input === 'string' && input.startsWith('local:')) {
+    const { findTrack, toMusicTrack } = require('./localMusic');
+    const item = findTrack(input.slice(6));
+    if (!item) throw new Error('Không tìm thấy bài hát này trong kho nhạc.');
+    return toMusicTrack(item);
+  }
   const target = normalizeQuery(input);
   const extract = query => yt(query, { ...sourceFlags(query), dumpSingleJson: true, skipDownload: true },
     { timeout: 30_000, killSignal: 'SIGKILL', maxBuffer: 4 * 1024 * 1024 });
@@ -90,7 +99,51 @@ async function resolveTrack(input) {
   return { title: String(item.title || 'Bài hát').slice(0, 200), url, duration: Number(item.duration) || 0 };
 }
 
+function openLocalAudio(track) {
+  const stream = new PassThrough();
+  let encoder;
+  let closed = false;
+  const handlers = new Set();
+  const fail = error => { if (!closed) for (const handler of handlers) handler(error); };
+
+  encoder = spawn(ffmpeg, [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-i', track.filePath,
+    '-vn',
+    '-f', 's16le',
+    '-ar', '48000',
+    '-ac', '2',
+    'pipe:1'
+  ], {
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'ignore']
+  });
+
+  encoder.on('error', fail);
+  encoder.stdout.on('error', fail);
+  encoder.on('close', code => {
+    if (code && !closed) fail(new Error('Không giải mã được file âm thanh cục bộ.'));
+  });
+  encoder.stdout.pipe(stream);
+
+  return {
+    stream,
+    onError: handler => handlers.add(handler),
+    close() {
+      if (closed) return;
+      closed = true;
+      terminate(encoder);
+      encoder?.stdout?.destroy();
+      stream.destroy();
+    }
+  };
+}
+
 function openAudio(track) {
+  if (track?.isLocal && track.filePath) {
+    return openLocalAudio(track);
+  }
   // Lấy lại link lúc phát vì link âm thanh có thể hết hạn khi đang chờ.
   const stream = new PassThrough();
   const downloader = yt.exec(track.url, { ...sourceFlags(track.url), format: 'bestaudio/best', dumpSingleJson: true, skipDownload: true },
@@ -131,4 +184,4 @@ function openAudio(track) {
   } };
 }
 
-module.exports = { normalizeQuery, resolveTrack, openAudio, sourceFlags, sourceErrorMessage };
+module.exports = { normalizeQuery, resolveTrack, openAudio, openLocalAudio, sourceFlags, sourceErrorMessage };

@@ -9,6 +9,17 @@ Hỗ trợ link HTTPS YouTube/SoundCloud, một bài mỗi yêu cầu.
 - `/pause`, `/resume`: tạm dừng/tiếp tục.
 - `/stop`: dừng, xoá hàng chờ, rời voice.
 
+## Kho Nhạc Cục Bộ (Local Playlist - MP3 / MP4)
+
+Hệ thống cho phép lưu sẵn các file nhạc (.mp3, .mp4, .m4a, .wav, .ogg, .flac) vào kho nhạc của bot để phát bất kỳ lúc nào qua FFmpeg trực tiếp, không phụ thuộc vào YouTube/SoundCloud hay lo bị chặn mạng.
+
+- `/musiclocal add file:<đính kèm> [ten:<tên gợi nhớ>]`: tải và lưu file nhạc vào kho lưu trữ của bot.
+- `/musiclocal list`: xem danh sách tất cả các bài hát đang có trong kho nhạc.
+- `/musiclocal play [bai_hat:<tên bài>]`: phát bài hát từ kho; nếu để trống tham số, bot sẽ mở bảng điều khiển trực quan có Dropdown Menu chọn bài cùng nút `▶️ Phát Tất Cả` và `🔀 Phát Ngẫu Nhiên`.
+- `/musiclocal remove bai_hat:<tên bài>`: xóa bài hát khỏi kho lưu trữ (yêu cầu quyền Quản lý kênh/Admin).
+
+Ngoài ra, bạn cũng có thể copy trực tiếp các file `.mp3` hoặc `.mp4` vào thư mục `data/local_music/` của bot (hoặc volume `/data/local_music` trên Railway), bot sẽ tự động nhận diện bài hát ngay lập tức.
+
 Người điều khiển phải ở cùng voice với bot. Bot cần View Channel, Connect, Speak.
 Hàng chờ độc lập từng server, tối đa 50 bài chờ. Bot rời voice sau 60 giây hết bài
 hoặc ngay khi không còn thành viên thật. Hàng chờ không lưu qua restart.

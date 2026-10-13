@@ -70,3 +70,5 @@ node_modules
 .env
 *.env
 data/*.sqlite*
+data/local_music/*
+!data/local_music/.gitkeep

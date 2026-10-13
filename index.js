@@ -316,6 +316,25 @@ client.on(
       return;
     }
 
+    if ((interaction.isStringSelectMenu?.() || interaction.isButton?.()) && interaction.customId?.startsWith('musiclocal:')) {
+      try { await require('./commands/music/musiclocal').handleInteraction(interaction); }
+      catch (error) {
+        console.error('[MUSIC LOCAL INTERACTION ERROR]', error);
+        const payload = { content: 'Có lỗi xảy ra khi thao tác kho nhạc. Vui lòng thử lại.', flags: 64 };
+        if (interaction.deferred) await interaction.editReply(payload).catch(() => {});
+        else if (!interaction.replied) await interaction.reply(payload).catch(() => {});
+      }
+      return;
+    }
+
+    if (interaction.isAutocomplete?.()) {
+      const command = client.commands.get(interaction.commandName);
+      if (command?.autocomplete) {
+        try { await command.autocomplete(interaction); } catch {}
+      }
+      return;
+    }
+
     if (
       !interaction.isChatInputCommand()
     ) {

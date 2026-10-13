@@ -20,6 +20,9 @@ class MusicSystem {
   session(guildId) { return this.sessions.get(guildId); }
 
   async add(interaction, channel, query) {
+    if (Array.isArray(query)) {
+      return this.addMultiple(interaction, channel, query);
+    }
     const guildId = interaction.guildId;
     const requestId = `${guildId}:${interaction.user.id}`;
     const revision = this.revisions.get(guildId) || 0;
@@ -69,6 +72,48 @@ class MusicSystem {
       void this.next(session);
       return { track, position };
     } finally { this.requests.delete(requestId); }
+  }
+
+  async addMultiple(interaction, channel, tracks) {
+    if (!Array.isArray(tracks) || !tracks.length) throw new Error('Danh sách bài hát trống.');
+    const guildId = interaction.guildId;
+    const before = this.session(guildId);
+    if (before && before.channelId !== channel.id) throw new Error('Bot đang phát ở kênh voice khác. Hãy vào cùng kênh với bot.');
+    let session = this.session(guildId);
+    if (!session) {
+      const player = this.audio.createAudioPlayer({ behaviors: { noSubscriber: this.audio.NoSubscriberBehavior.Pause } });
+      const connection = this.audio.joinVoiceChannel({ channelId: channel.id, guildId,
+        adapterCreator: interaction.guild.voiceAdapterCreator, selfDeaf: true });
+      session = { guildId, channelId: channel.id, connection, player, queue: [], current: null,
+        textChannel: interaction.channel, timer: null, recovering: false };
+      this.sessions.set(guildId, session);
+      connection.subscribe(player);
+      player.on(this.audio.AudioPlayerStatus.Idle, () => {
+        if (!session.current) return;
+        session.current.audio?.close();
+        session.current = null;
+        void this.next(session);
+      });
+      player.on('error', () => this.fail(session, session.current));
+      connection.on('error', () => this.destroy(session));
+      connection.on(this.audio.VoiceConnectionStatus.Destroyed, () => this.destroy(session));
+      connection.on(this.audio.VoiceConnectionStatus.Disconnected, async () => {
+        if (session.recovering || !this.active(session)) return;
+        session.recovering = true;
+        try { await this.audio.entersState(connection, this.audio.VoiceConnectionStatus.Ready, 15_000); }
+        catch { this.destroy(session); }
+        finally { session.recovering = false; }
+      });
+    }
+    clearTimeout(session.timer);
+    let addedCount = 0;
+    for (const track of tracks) {
+      if (session.queue.length >= 50) break;
+      session.queue.push({ ...track, requestedBy: interaction.user.id });
+      addedCount++;
+    }
+    void this.next(session);
+    return { addedCount, totalInQueue: session.queue.length };
   }
 
   active(session) { return this.sessions.get(session.guildId) === session; }
