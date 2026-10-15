@@ -102,10 +102,7 @@ const security = require('../utils/securitySystem');
     securityStaffDailyBanLimit: 2,
     securityStaffDailyKickLimit: 3,
   });
-
-  // ==========================================
-  // 1. TEST ANTI-WEBHOOK
-  // ==========================================
+  // Kiểm tra bảo vệ webhook.
   console.log('1. Testing Anti-Webhook Audit Log detection...');
 
   // 1a. Owner tạo webhook -> Bỏ qua
@@ -147,10 +144,7 @@ const security = require('../utils/securitySystem');
   assert.equal(handled, true);
   assert.equal(msgDeleted, true);
   assert.equal(deletedWebhooks.some(w => w.id === 'wh-123'), true);
-
-  // ==========================================
-  // 2. TEST STAFF WATCH: GIỚI HẠN BAN / KICK
-  // ==========================================
+  // Kiểm tra hạn mức ban và kick của staff.
   console.log('2. Testing Staff Watch: Daily Ban quota...');
 
   // Staff ban lần 1 (cho phép, ghi nhận log)
@@ -169,7 +163,7 @@ const security = require('../utils/securitySystem');
   assert.equal(staffWatch.countStaffActions(guildId, 'staff-456', 'ban'), 2);
   assert.equal(unbans.length, 0);
 
-  // Staff ban lần 3 (VƯỢT HẠN MỨC 2 ban/ngày!) -> Thu hồi quyền, timeout 1h, unban nạn nhân!
+  // Ban lần thứ ba vượt hạn mức: thu hồi quyền, giữ nguyên lệnh ban để chủ server kiểm tra.
   await staffWatch.onAuditLog(
     { action: A.MemberBanAdd, executorId: 'staff-456', targetId: 'user-003' },
     mockGuild
@@ -177,10 +171,7 @@ const security = require('../utils/securitySystem');
   assert.equal(staffWatch.countStaffActions(guildId, 'staff-456', 'ban'), 3);
   assert.equal(unbans.length, 0, 'Không tự mở ban để tránh cho người raid quay lại');
   assert.equal(strippedRoles.some(r => r.roleId === 'mod-role'), true);
-
-  // ==========================================
-  // 3. TEST STAFF WATCH: CẤM TỰ Ý ĐỔI TÊN / ICON SERVER
-  // ==========================================
+  // Kiểm tra bảo vệ tên và ảnh server.
   console.log('3. Testing Staff Watch: Guild Info Guard...');
 
   const oldGuild = {

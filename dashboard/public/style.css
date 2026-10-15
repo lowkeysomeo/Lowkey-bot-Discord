@@ -1,6 +1,4 @@
-/* ==========================================================================
-   VietNam Legacy · SaaS Modern Dashboard Theme
-   ========================================================================== */
+/* Giao diện dashboard VietNam Legacy. */
 
 :root {
   color-scheme: dark;
@@ -72,9 +70,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   outline-offset: 2px;
 }
 
-/* ==========================================================================
-   Main Layout & Sidebar
-   ========================================================================== */
+/* Bố cục chính và thanh bên. */
 
 .layout {
   display: grid;
@@ -169,9 +165,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
-/* ==========================================================================
-   Sidebar Navigation Scroll & Groups
-   ========================================================================== */
+/* Nhóm menu và cuộn thanh bên. */
 
 .side-nav-scroll {
   flex: 1;
@@ -313,9 +307,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   margin: 0;
 }
 
-/* ==========================================================================
-   Topbar & Content Workspace
-   ========================================================================== */
+/* Thanh trên và vùng nội dung. */
 
 .workspace {
   min-width: 0;
@@ -403,9 +395,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   padding: 34px 36px 80px;
 }
 
-/* ==========================================================================
-   Typography & Headers
-   ========================================================================== */
+/* Kiểu chữ và tiêu đề. */
 
 .eyebrow {
   font-size: 10.5px;
@@ -472,9 +462,7 @@ h3 {
   color: #a5b4fc;
 }
 
-/* ==========================================================================
-   Buttons
-   ========================================================================== */
+/* Nút bấm. */
 
 .primary, .secondary {
   display: inline-flex;
@@ -512,9 +500,7 @@ h3 {
   border-color: #3f445c;
 }
 
-/* ==========================================================================
-   Cards & Stats Grid
-   ========================================================================== */
+/* Thẻ nội dung và số liệu. */
 
 .stats {
   display: grid;
@@ -669,9 +655,7 @@ h3 {
   font-weight: 600;
 }
 
-/* ==========================================================================
-   Forms & Inputs
-   ========================================================================== */
+/* Biểu mẫu và ô nhập liệu. */
 
 .form-grid {
   display: grid;
@@ -834,9 +818,7 @@ input:focus, select:focus, textarea:focus {
   font-weight: 500;
 }
 
-/* ==========================================================================
-   Discord Embed & Preview
-   ========================================================================== */
+/* Xem trước thông báo Discord. */
 
 .discord-preview {
   background: #2b2d31;
@@ -909,9 +891,7 @@ input:focus, select:focus, textarea:focus {
   padding: 14px 8px 0;
 }
 
-/* ==========================================================================
-   Server Grid & Login
-   ========================================================================== */
+/* Danh sách server và đăng nhập. */
 
 .server-grid {
   display: grid;
@@ -1082,9 +1062,7 @@ input:focus, select:focus, textarea:focus {
   color: var(--muted);
 }
 
-/* ==========================================================================
-   Leaderboard & Tables
-   ========================================================================== */
+/* Bảng xếp hạng và bảng dữ liệu. */
 
 .table-wrap {
   overflow: auto;
@@ -1165,9 +1143,7 @@ td:last-child {
   font-size: 14px;
 }
 
-/* ==========================================================================
-   Giveaway & Reaction Roles
-   ========================================================================== */
+/* Giveaway và chọn role. */
 
 .giveaway-list {
   display: grid;
@@ -1232,9 +1208,7 @@ td:last-child {
   margin: 16px 0;
 }
 
-/* ==========================================================================
-   Responsive Mobile & Tablet
-   ========================================================================== */
+/* Hiển thị trên điện thoại và máy tính bảng. */
 
 @media (max-width: 1080px) {
   .layout {
