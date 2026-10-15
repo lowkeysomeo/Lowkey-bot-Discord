@@ -1,5 +1,23 @@
 const { getGuildSetting, setGuildSetting } = require('./guildSettings');
 const definitions = [
+  ['securityWebhookTrusted','security','Webhook được miễn kiểm tra: ID hoặc none','text','none',2200],
+  ['securityWebhookLimit','security','Ngưỡng tin nhắn của một webhook','number',3,2,30],
+  ['securityWebhookWindow','security','Khoảng kiểm tra webhook (giây)','number',3,1,30],
+  ['securityStaffUndoBan','security','Tự gỡ ban khi staff vượt hạn mức (cân nhắc nguy cơ cho người raid quay lại)','boolean',false],
+
+  ['securityInvites','security','Chặn link mời Discord','boolean',false],
+  ['securityInviteChannels','security','Kênh được gửi invite: ID cách nhau bằng dấu phẩy, hoặc none','text','none',2200],
+  ['securityInviteRoles','security','Role được gửi invite: ID cách nhau bằng dấu phẩy, hoặc none','text','none',2200],
+  ['securityInviteAction','security','Xử lý link mời trái phép','select','delete',['delete','timeout']],
+  ['securityDuplicate','security','Chặn gửi lặp nội dung (kể cả nhiều kênh)','boolean',false],
+  ['securityDuplicateLimit','security','Số lần lặp nội dung để xử lý','number',4,2,20],
+  ['securityDuplicateWindow','security','Khoảng thời gian kiểm tra lặp (giây)','number',20,3,120],
+  ['securityChatChannels','security','Kênh miễn chống spam/mention: ID hoặc none','text','none',2200],
+  ['securityChatRoles','security','Role miễn chống spam/mention: ID hoặc none','text','none',2200],
+  ['securityChatAction','security','Xử lý spam và mass mention','select','timeout',['delete','timeout']],
+  ['securityTimeoutMinutes','security','Thời gian timeout vi phạm chat (phút)','number',10,1,1440],
+  ['securityMentionEnabled','security','Chống tag hàng loạt và everyone/here','boolean',true],
+
   ['securityBotApproval','security','Cách ly bot mới và chờ chủ server xét duyệt','boolean',true],
   ['channelGuardEnabled','security','Bảo vệ kênh: tạo lại kênh bị xóa không được phép và cảnh báo','boolean',false],
   ['chatModEnabled','moderation','Bật lệnh kiểm duyệt trực tiếp trong chat','boolean',true],

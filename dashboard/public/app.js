@@ -236,9 +236,15 @@ function rewardRow(type, entry) {
     '<button class="text-button danger" type="button" data-remove-reward aria-label="Xóa mốc level">Xóa</button></div>';
 }
 const choiceLabels = { highest: 'Chỉ giữ role mốc cao nhất', all: 'Giữ tất cả role đã đạt', card: 'Tin nhắn + ảnh level', embed: 'Khung thông báo có màu', text: 'Tin nhắn văn bản' };
-function optionControls(group) {
-  return '<div class="form-grid">' + state.data.optionDefinitions.filter(d => d[1] === group).map(([key, , label, type, , a, b]) => {
+function optionControls(group, keys = null) {
+  return '<div class="form-grid">' + state.data.optionDefinitions.filter(d => d[1] === group && (!keys || keys.includes(d[0]))).map(([key, , label, type, , a, b]) => {
     const value = state.data.options[key], id = 'option_' + key;
+    if (['securityInviteChannels','securityInviteRoles','securityChatChannels','securityChatRoles'].includes(key)) {
+      const choices = key.endsWith('Channels') ? state.data.exclusionChannels : state.data.roles;
+      const selected = String(value || '').split(/[\s,]+/);
+      const title = key === 'securityInviteChannels' ? 'Kênh được gửi link mời' : key === 'securityInviteRoles' ? 'Role được gửi link mời ở mọi kênh' : key === 'securityChatChannels' ? 'Kênh miễn kiểm tra spam/mention' : 'Role miễn kiểm tra spam/mention';
+      return '<div class="field"><input type="hidden" name="' + id + '"><details><summary>' + h(title) + ' — bấm để chọn</summary><div class="exclusion-list">' + (choices || []).map(item => '<label class="check-row"><input type="checkbox" data-security-list="' + key + '" value="' + h(item.id) + '" ' + (selected.includes(item.id) ? 'checked' : '') + '><span>' + h(item.name) + '</span></label>').join('') + '</div></details></div>';
+    }
     if (type === 'boolean') return '<label class="toggle-field" for="' + id + '"><span>' + h(label) + '</span><input type="checkbox" id="' + id + '" name="' + id + '" ' + (value ? 'checked' : '') + '></label>';
     if (type === 'role' || (type === 'channel' && ['inviteChannel','securityLogChannel','modLogChannel','confessionNoticeChannel','confessionMilestoneChannel','receptionistChannel'].includes(key))) return field(id,label,type,value);
     if (type === 'roles') return '<div class="field"><label>' + h(label) + '</label><input type="hidden" name="' + id + '"><div class="exclusion-list">' + state.data.roles.filter(role => !role.managed).map(role => '<label class="check-row"><input type="checkbox" data-role-option="' + key + '" value="' + h(role.id) + '" ' + (value.includes(role.id) ? 'checked' : '') + '><span>' + h(role.name) + '</span></label>').join('') + '</div></div>';
@@ -264,7 +270,13 @@ function levelPage() {
 function customPage(page) {
   let body;
   if (page === 'security') {
-    body = panel('Bảo vệ server', 'Chỉ chủ server được lưu cấu hình này. Lưu xong áp dụng ngay, không cần khởi động lại.', optionControls('security')) +
+    body = panel('Bảo vệ server', 'Chỉ chủ server được lưu cấu hình này. Lưu xong áp dụng ngay, không cần khởi động lại.', optionControls('security', ['securityEnabled','securityLogChannel','securityTrusted'])) +
+      panel('1. Chống phá server (Anti-nuke)', 'Đếm thao tác quản trị qua Audit Log. Bot không xử lý được người có role cao hơn bot; hãy đặt role bot phù hợp.', optionControls('security', ['securityNuke','securityNukeLimit','securityNukeWindow','securityNukeAction','channelGuardEnabled'])) +
+      panel('2. Chống vào hàng loạt (Anti-raid)', 'Khi vượt ngưỡng, tạm kick thành viên mới trong thời gian đã chọn. Không tự kick toàn bộ thành viên cũ.', optionControls('security', ['securityRaid','securityRaidLimit','securityRaidWindow','securityGateMinutes'])) +
+      panel('3. Spam và tag hàng loạt', 'Kiểm tra tốc độ, nội dung lặp ở nhiều kênh và tin nhắn sửa lại. Ngoại lệ chat không miễn chống nuke.', optionControls('security', ['securitySpam','securitySpamLimit','securitySpamWindow','securityMentionEnabled','securityMentionLimit','securityDuplicate','securityDuplicateLimit','securityDuplicateWindow','securityChatAction','securityTimeoutMinutes','securityChatChannels','securityChatRoles'])) +
+      panel('4. Link mời Discord', 'Chặn discord.gg và discord.com/invite. Thêm ID Partner Post vào kênh ngoại lệ để đối tác được đăng invite tại đó. Ngoại lệ invite không miễn chống spam.', optionControls('security', ['securityInvites','securityInviteAction','securityInviteChannels','securityInviteRoles'])) +
+      panel('5. Bot, webhook và quyền nhạy cảm', 'Kiểm soát bot mới, webhook và role cấp cho tài khoản mới.', optionControls('security', ['securityBotApproval','securityAntiWebhook','securityWebhookTrusted','securityWebhookLimit','securityWebhookWindow','securityRoleGuard','securityAccountDays','securityMemberDays'])) +
+      panel('6. Giám sát staff', 'Giới hạn số lần ban/kick trong 24 giờ; chủ server và ID tin cậy được miễn.', optionControls('security', ['securityStaffWatch','securityStaffDailyBanLimit','securityStaffDailyKickLimit','securityStaffUndoBan'])) +
       panel('Cú pháp lệnh kiểm duyệt trong chat (không cần /)', 'Tùy chỉnh từ khóa gõ trực tiếp trong chat để ban, kick, timeout thành viên và kênh thông báo xử phạt.', optionControls('moderation')) +
       '<div class="note">Bot mới: gỡ các role có thể gỡ và tắt quyền role riêng của bot trong lúc chờ chủ server xét duyệt bằng nút trong kênh cảnh báo. Bot vẫn có thể có quyền cơ bản của @everyone hoặc quyền riêng của kênh. Không cách ly được quyền nhạy cảm thì thử đuổi bot và báo lỗi. Role nhạy cảm cấp cho người có tuổi tài khoản HOẶC thời gian ở server dưới ngưỡng sẽ bị gỡ, có nút Vẫn cấp role để chủ server duyệt. Không tự xét duyệt người cấp role. Các tùy chọn này chỉ áp dụng khi bật bảo vệ; cách ly đang chờ vẫn được duy trì khi tắt tùy chọn cách ly bot mới. Cần thêm Manage Roles. Chủ server và chính bot luôn được tin cậy. Danh sách tin cậy bỏ qua mọi kiểm tra: chỉ thêm ID thực sự cần thiết. Chống nuke cộng chung các thao tác tạo/sửa/xóa kênh, role, quyền kênh, webhook, sửa server, cấp/gỡ role, kick, ban, prune, thêm bot và xóa AutoMod. Mặc định 3 thao tác/10 giây sẽ BAN người thực hiện, kể cả admin và bot khác; đặt ngưỡng 1 nếu muốn xử lý ngay thao tác đầu tiên. Thêm bot quản lý hợp lệ vào danh sách tin cậy trước khi bật. Raid: kick người vào từ lúc đạt ngưỡng cho đến hết thời gian chặn; người vào trước ngưỡng không bị kick tự động. Spam: xóa tin vi phạm và timeout 10 phút; @everyone/@here bị xử lý ngay. Role bảo vệ phải cao hơn người/bot cần xử lý. Bot cần View Audit Log, Ban Members, Kick Members, Moderate Members, Manage Messages; Server Members Intent phải bật. Đây là xử lý sau sự kiện: các thao tác đầu tiên có thể đã gây thiệt hại, kênh/role đã xóa không được phục hồi. Cổng raid còn hiệu lực sau khởi động lại; bộ đếm ngưỡng bắt đầu lại. Không thể xử lý chủ server, tài khoản ngang/cao hơn bot hoặc khi bot offline/bị gỡ.</div>';
   } else if (page === 'invites') {
@@ -415,7 +427,7 @@ async function save(event) {
   for (const [key, , , type] of state.data.optionDefinitions) {
     const control = form.elements.namedItem('option_' + key);
     if (!control) continue;
-    const value = type === 'roles' ? [...form.querySelectorAll('[data-role-option="' + key + '"]:checked')].map(input => input.value) : type === 'boolean' ? control.checked : type === 'number' ? Number(control.value) : control.value;
+    const value = ['securityInviteChannels','securityInviteRoles','securityChatChannels','securityChatRoles'].includes(key) ? ([...form.querySelectorAll('[data-security-list="' + key + '"]:checked')].map(input => input.value).join(',') || 'none') : type === 'roles' ? [...form.querySelectorAll('[data-role-option="' + key + '"]:checked')].map(input => input.value) : type === 'boolean' ? control.checked : type === 'number' ? Number(control.value) : control.value;
     if (value !== state.data.options[key]) payload.options[key] = value;
   }
   if (state.page === 'level') {

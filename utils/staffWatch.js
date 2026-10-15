@@ -133,7 +133,7 @@ async function onAuditLog(entry, guild) {
 
       // Tự động mở ban cho người bị ban nếu khả dụng
       let unbanned = false;
-      if (entry.targetId && typeof guild.members?.unban === 'function') {
+      if (options.securityStaffUndoBan && entry.targetId && typeof guild.members?.unban === 'function') {
         try {
           await guild.members.unban(entry.targetId, 'Staff Watch: Tự động hoàn tác lệnh ban vượt hạn mức');
           unbanned = true;
@@ -221,7 +221,9 @@ async function onGuildUpdate(oldGuild, newGuild) {
         limit: 1,
       }).catch(() => null);
       const entry = logs?.entries?.first();
-      if (entry && Date.now() - entry.createdTimestamp < 15000) {
+      if (entry && entry.targetId === newGuild.id && Math.abs(Date.now() - entry.createdTimestamp) < 15000 &&
+          (!nameChanged || entry.changes?.some(c => c.key === 'name' && c.old === oldGuild.name && c.new === newGuild.name)) &&
+          (!iconChanged || entry.changes?.some(c => c.key === 'icon_hash' && c.old === oldGuild.icon && c.new === newGuild.icon))) {
         executorId = entry.executorId;
       }
     } catch (e) {
@@ -229,6 +231,8 @@ async function onGuildUpdate(oldGuild, newGuild) {
     }
   }
 
+  // Không đảo ngược thay đổi khi chưa xác định chắc người thực hiện.
+  if (!executorId) return;
   // Nếu là Chủ Server hoặc bot/tin cậy -> Cho phép đổi bình thường
   if (executorId && trusted(newGuild, executorId, options)) return;
 

@@ -175,8 +175,7 @@ const security = require('../utils/securitySystem');
     mockGuild
   );
   assert.equal(staffWatch.countStaffActions(guildId, 'staff-456', 'ban'), 3);
-  assert.equal(unbans.length, 1);
-  assert.equal(unbans[0].targetId, 'user-003');
+  assert.equal(unbans.length, 0, 'Không tự mở ban để tránh cho người raid quay lại');
   assert.equal(strippedRoles.some(r => r.roleId === 'mod-role'), true);
 
   // ==========================================
@@ -199,6 +198,8 @@ const security = require('../utils/securitySystem');
       entries: {
         first: () => ({
           executorId: 'staff-456',
+          targetId: guildId,
+          changes: [{key:'name',old:oldGuild.name,new:'Hacked by Rogue Staff'},{key:'icon_hash',old:oldGuild.icon,new:'new-icon-hash'}],
           createdTimestamp: Date.now(),
         }),
       },

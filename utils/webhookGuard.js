@@ -13,6 +13,7 @@ const recentWebhookBursts = new Map();
 
 function hit(key, seconds, limit, now = Date.now()) {
   const list = (recentWebhookBursts.get(key) || []).filter(t => t > now - seconds * 1000);
+  if (!recentWebhookBursts.has(key) && recentWebhookBursts.size >= 10000) recentWebhookBursts.delete(recentWebhookBursts.keys().next().value);
   list.push(now);
   recentWebhookBursts.set(key, list.slice(-limit));
   return list.length >= limit;
@@ -50,6 +51,7 @@ async function onAuditLog(entry, guild) {
   if (!executorId || trusted(guild, executorId, options)) return;
 
   const targetId = entry.targetId;
+  if (String(options.securityWebhookTrusted || '').split(/[\s,]+/).includes(targetId)) return;
   let deletedWebhook = false;
   let webhookName = 'Webhook #' + (targetId || 'unknown');
 
@@ -115,13 +117,14 @@ async function onAuditLog(entry, guild) {
  * @param {Message} msg
  * @returns {Promise<boolean>} true nếu tin nhắn là spam/độc hại và đã bị xử lý
  */
-async function onMessage(msg) {
+async function onMessage(msg, edited = false) {
   if (!msg.guild || !msg.webhookId) return false;
   const options = getOptions(msg.guild.id);
   if (!options.securityEnabled || !options.securityAntiWebhook) return false;
 
+  if (String(options.securityWebhookTrusted || '').split(/[\s,]+/).includes(msg.webhookId)) return false;
   const burstKey = `wh-burst:${msg.guild.id}:${msg.webhookId}`;
-  const isBurst = hit(burstKey, 3, 3); // 3 tin nhắn trong 3 giây
+  const isBurst = !edited && hit(burstKey, options.securityWebhookWindow, options.securityWebhookLimit); // 3 tin nhắn trong 3 giây
   const hasMassMention = Boolean(
     msg.mentions?.everyone ||
     (msg.mentions?.roles && msg.mentions.roles.size >= 2) ||

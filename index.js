@@ -136,10 +136,8 @@ client.on(
   Events.MessageCreate,
   async (message) => {
     if (!message.guild) return;
-    if (message.webhookId) {
-      if (await require('./utils/webhookGuard').onMessage(message)) return;
-      return;
-    }
+    if (await require('./utils/securitySystem').message(message)) return;
+    if (message.webhookId) return;
     if (message.author.bot) return;
 
     // Xử lý lệnh moderation gõ trực tiếp trong chat (vnban, vnkick, vntimeout, vnuntimeout)

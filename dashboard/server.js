@@ -277,7 +277,7 @@ function createDashboard(client, options = {}) {
         }
         if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
         const input = await body(req);
-        if (input.options && Object.keys(input.options).some(key => key.startsWith('security') || key.startsWith('chatMod') || key === 'modLogChannel') && value.user.id !== guild.ownerId) fail(403, 'Chỉ chủ server được thay đổi bảo vệ và kiểm duyệt.');
+        if (input.options && Object.keys(input.options).some(key => key.startsWith('security') || key.startsWith('chatMod') || key === 'modLogChannel' || key === 'channelGuardEnabled') && value.user.id !== guild.ownerId) fail(403, 'Chỉ chủ server được thay đổi bảo vệ và kiểm duyệt.');
         const optionsPatch = validateCustomization(input, guild, channels, roles, me);
         const changes = input.settings || {};
         if (typeof changes !== 'object' || Array.isArray(changes)) fail(400, 'Cấu hình không hợp lệ.');

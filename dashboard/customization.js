@@ -24,7 +24,11 @@ function validateCustomization(input, guild, channels, roles, me) {
     if (type === 'text' && (typeof value !== 'string' || !value.trim() || value.length > a)) invalid(`${label}: nhập từ 1 đến ${a} ký tự.`);
     if (key.startsWith('chatMod') && key.endsWith('Cmd') && /\s/.test(value.trim())) invalid(`${label}: từ khóa không được chứa khoảng trắng.`);
     if (type === 'color' && (typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value))) invalid(`${label}: màu không hợp lệ.`);
-    if (key === 'securityTrusted' && (typeof value !== 'string' || (value !== 'none' && !/^\d{17,20}(?:[\s,]+\d{17,20})*$/.test(value.trim())))) invalid('Danh sách tin cậy: nhập ID Discord cách nhau bằng dấu phẩy hoặc none.');
+    if (['securityTrusted','securityInviteChannels','securityInviteRoles','securityChatChannels','securityChatRoles','securityWebhookTrusted'].includes(key) && (typeof value !== 'string' || (value !== 'none' && !/^\d{17,20}(?:[\s,]+\d{17,20})*$/.test(value.trim())))) invalid('Danh sách tin cậy/ngoại lệ: nhập ID Discord cách nhau bằng dấu phẩy hoặc none.');
+    if (['securityInviteChannels','securityInviteRoles','securityChatChannels','securityChatRoles'].includes(key) && value !== 'none') {
+      const source = key.endsWith('Channels') ? channels : roles;
+      if (value.split(/[\s,]+/).some(id => !source.has(id) || id === guild.id)) invalid(label + ': chỉ chọn kênh/role thuộc server này, không chọn @everyone.');
+    }
     if (type === 'role') {
       if (typeof value !== 'string') invalid(label + ': chọn role hợp lệ.');
       if (value) {
@@ -62,7 +66,7 @@ function validateCustomization(input, guild, channels, roles, me) {
   }
   if (Object.keys(patch).some(key=>key.startsWith('security')) && merged.securityEnabled) {
     if (!merged.securityLogChannel) invalid('Chọn kênh cảnh báo trước khi bật bảo vệ.');
-    if (!me.permissions.has(require('../utils/securitySystem').requiredPermissions())) invalid('Bot cần View Audit Log, Ban Members, Kick Members, Moderate Members, Manage Messages và Manage Roles.');
+    if (!me.permissions.has(require('../utils/securitySystem').requiredPermissions())) invalid('Bot cần View Audit Log, Ban Members, Kick Members, Moderate Members, Manage Messages, Manage Roles, Manage Channels và Manage Webhooks.');
   }
   if(merged.inviteEnabled && !merged.inviteChannel)invalid('Chọn kênh thông báo invite trước khi bật.');
   if(merged.inviteRole50 && merged.inviteRole50===merged.inviteRole100)invalid('Hai mốc invite cần chọn hai role khác nhau.');

@@ -6,6 +6,7 @@ const watched = new Set([A.ChannelCreate,A.ChannelUpdate,A.ChannelDelete,A.Chann
 const reason = 'Bảo vệ server: phát hiện hành vi vượt ngưỡng';
 function hit(key, seconds, limit, now = Date.now()) {
   const list = (buckets.get(key) || []).filter(t => t > now - seconds * 1000);
+  if (!buckets.has(key) && buckets.size >= 20000) buckets.delete(buckets.keys().next().value);
   list.push(now); buckets.set(key, list.slice(-limit)); return list.length >= limit;
 }
 function trusted(guild, id, o) { return id === guild.ownerId || id === guild.client.user.id || o.securityTrusted.split(/[\s,]+/).includes(id); }
@@ -16,10 +17,10 @@ async function alert(guild, text) {
   try { const channel = await guild.channels.fetch(id); await channel.send({ content: `🛡️ ${text}`.slice(0,1900), allowedMentions: { parse: [] } }); }
   catch (error) { console.error('[SECURITY LOG]', error.message); }
 }
-async function punish(member, kind, customReason = reason) {
+async function punish(member, kind, customReason = reason, timeoutMs = 10 * 60 * 1000) {
   if (kind === 'ban') { if (!member.bannable) throw Error('Bot không đủ quyền/vị trí role để ban.'); await member.ban({ reason: customReason }); }
   else if (kind === 'kick') { if (!member.kickable) throw Error('Bot không đủ quyền/vị trí role để kick.'); await member.kick(customReason); }
-  else { if (!member.moderatable) throw Error('Bot không thể timeout thành viên này.'); await member.timeout(10 * 60 * 1000, customReason); }
+  else { if (!member.moderatable) throw Error('Bot không thể timeout thành viên này.'); await member.timeout(timeoutMs, customReason); }
   const g = member.guild;
   if (g) {
     require('./modLog').sendModLog(g, {
@@ -27,11 +28,13 @@ async function punish(member, kind, customReason = reason) {
       target: member.user || member,
       mod: null,
       reason: customReason,
-      duration: kind === 'timeout' ? 10 * 60 * 1000 : undefined,
+      duration: kind === 'timeout' ? timeoutMs : undefined,
     }).catch(e => console.error('[MOD LOG]', e.message));
   }
 }
 async function audit(entry, guild) {
+  if (!entry?.id || !Number.isFinite(entry.createdTimestamp) || Math.abs(Date.now() - entry.createdTimestamp) > 15000 || seen.has(entry.id)) return;
+  seen.set(entry.id, Date.now());
   // Channel Guard: xử lý riêng cho sự kiện xóa kênh (bất kể securityNuke có bật hay không).
   if (entry.action === A.ChannelDelete) {
     require('./channelGuard').onAuditLog(entry, guild).catch(error => console.error('[CHANNEL GUARD]', error.message));
@@ -46,8 +49,7 @@ async function audit(entry, guild) {
   }
   const o = getOptions(guild.id), id = entry.executorId;
   if (!o.securityEnabled || !o.securityNuke || !id || trusted(guild,id,o) || !watched.has(entry.action)) return;
-  if (Date.now() - entry.createdTimestamp > 15000 || seen.has(entry.id)) return;
-  seen.set(entry.id, Date.now());
+
   if (!hit(`audit:${guild.id}:${id}`,o.securityNukeWindow,o.securityNukeLimit)) return;
   const key = `actor:${guild.id}:${id}`;
   if (busy.has(key)) return;
@@ -73,27 +75,10 @@ async function joined(member) {
     catch (error) { await alert(guild,`Không kick được thành viên raid ${member.id}: ${error.message}`); }
   }
 }
-async function message(msg) {
-  if (!msg.guild) return;
-  // Webhook Guard: kiểm tra tin nhắn phát ra từ Webhook độc hại
-  if (msg.webhookId) {
-    require('./webhookGuard').onMessage(msg).catch(error => console.error('[WEBHOOK GUARD]', error.message));
-    return;
-  }
-  if (msg.author.bot || !msg.member) return;
-  const o = getOptions(msg.guild.id);
-  if (!o.securityEnabled || !o.securitySpam || trusted(msg.guild,msg.author.id,o)) return;
-  const burst = hit(`spam:${msg.guild.id}:${msg.author.id}`,o.securitySpamWindow,o.securitySpamLimit);
-  const mentions = msg.mentions.users.size + msg.mentions.roles.size;
-  if (!burst && mentions < o.securityMentionLimit && !msg.mentions.everyone) return;
-  const key = `spam-action:${msg.guild.id}:${msg.author.id}`;
-  // Xóa cả các tin đến trong khi thao tác timeout đang chạy.
-  try { if (msg.deletable) await msg.delete(); } catch (error) { console.error('[SECURITY DELETE]',error.message); }
-  if (busy.has(key)) return;
-  busy.add(key);
-  try { await punish(msg.member,'timeout','Anti-spam: spam tin nhắn / mass mention'); await alert(msg.guild,`Đã timeout ${msg.author.id} 10 phút do spam/mass mention.`); }
-  catch (error) { await alert(msg.guild,`Không timeout được ${msg.author.id}: ${error.message}`); }
-  finally { busy.delete(key); }
+async function message(msg, edited = false) {
+  if (!msg.guild) return false;
+  if (msg.webhookId) return require('./webhookGuard').onMessage(msg, edited);
+  return require('./securityContent').inspect(msg, { edited, hit, trusted, alert, punish, busy });
 }
 function start(client) {
   if (client.__securityStarted) return; client.__securityStarted = true;
@@ -106,7 +91,10 @@ function start(client) {
   client.on(Events.GuildMemberUpdate,safe(require('./securityReview').memberUpdated));
   client.on(Events.GuildRoleUpdate,safe(require('./securityReview').roleUpdated));
   client.on(Events.GuildMemberRemove,safe(require('./securityReview').memberLeft));
-  client.on(Events.MessageCreate,safe(message));
+  client.on(Events.MessageUpdate,safe(async (oldMsg, newMsg) => {
+    if (newMsg.partial) newMsg = await newMsg.fetch();
+    if (oldMsg.content !== newMsg.content) await message(newMsg, true);
+  }));
   client.on(Events.GuildUpdate,safe(require('./staffWatch').onGuildUpdate));
   const timer = setInterval(()=>{
     const now = Date.now();
