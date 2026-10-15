@@ -14,7 +14,7 @@ assert.equal(system.buildTicketButtons({category_value:'support'},cfg).component
 let actor, added=0, reply='';
 const recipient={roles:{cache:new Map(),add:async r=>{added++;recipient.roles.cache.set(r.id,r);}}};
 const member=(id,position,hasHandler=false)=>({id,user:{tag:id},permissions:{has:()=>false},roles:{cache:new Map(hasHandler?[[handler.id,handler]]:[]),highest:{comparePositionTo:r=>position-(r.position||2)}}});
-const guild={id:'g',ownerId:'owner',name:'VNL',roles:{cache:new Map([[handler.id,handler]]),fetch:async()=>role},members:{fetch:async q=>q.user==='customer'?recipient:actor,fetchMe:async()=>({permissions:{has:()=>true},roles:{highest:{comparePositionTo:()=>10}}})}};
+const guild={id:'g',client:{user:{id:'bot'}},ownerId:'owner',name:'VNL',roles:{cache:new Map([[handler.id,handler]]),fetch:async()=>role},members:{fetch:async q=>q.user==='customer'?recipient:actor,fetchMe:async()=>({permissions:{has:()=>true},roles:{highest:{comparePositionTo:()=>10}}})}};
 const policy=system.ticketPolicy(cfg,{category_value:'partner'});
 assert.equal(system.canHandle(member('low',1),guild,policy),false);
 assert.equal(system.canHandle(member('staff',5,true),guild,policy),true);
