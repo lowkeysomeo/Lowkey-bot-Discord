@@ -9,7 +9,7 @@ function hit(key, seconds, limit, now = Date.now()) {
   if (!buckets.has(key) && buckets.size >= 20000) buckets.delete(buckets.keys().next().value);
   list.push(now); buckets.set(key, list.slice(-limit)); return list.length >= limit;
 }
-function trusted(guild, id, o) { return id === guild.ownerId || id === guild.client.user.id || o.securityTrusted.split(/[\s,]+/).includes(id); }
+function trusted(guild, id, o) { return id === guild.ownerId || id === guild.client.user.id || String(o.securityTrusted || '').split(/[\s,]+/).includes(id); }
 async function alert(guild, text) {
   console.warn('[SECURITY]', guild.id, text);
   const id = getOptions(guild.id).securityLogChannel;
@@ -92,8 +92,9 @@ function start(client) {
   client.on(Events.GuildRoleUpdate,safe(require('./securityReview').roleUpdated));
   client.on(Events.GuildMemberRemove,safe(require('./securityReview').memberLeft));
   client.on(Events.MessageUpdate,safe(async (oldMsg, newMsg) => {
-    if (newMsg.partial) newMsg = await newMsg.fetch();
-    if (oldMsg.content !== newMsg.content) await message(newMsg, true);
+    if (newMsg?.partial && typeof newMsg.fetch === 'function') newMsg = await newMsg.fetch().catch(() => null);
+    if (!newMsg || !newMsg.content) return;
+    if (oldMsg?.content !== newMsg.content) await message(newMsg, true);
   }));
   client.on(Events.GuildUpdate,safe(require('./staffWatch').onGuildUpdate));
   const timer = setInterval(()=>{

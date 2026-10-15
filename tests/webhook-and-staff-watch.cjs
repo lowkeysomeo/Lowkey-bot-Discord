@@ -144,6 +144,33 @@ const security = require('../utils/securitySystem');
   assert.equal(handled, true);
   assert.equal(msgDeleted, true);
   assert.equal(deletedWebhooks.some(w => w.id === 'wh-123'), true);
+
+  // 1d. Test Webhook Invite Link
+  saveOptions(guildId, {
+    securityEnabled: true,
+    securityAntiWebhook: true,
+    securityInvites: true,
+    securityStaffWatch: true,
+    securityStaffDailyBanLimit: 2,
+    securityStaffDailyKickLimit: 3,
+  });
+  let inviteDeleted = false;
+  const inviteWebhookMsg = {
+    guild: mockGuild,
+    channel: mockChannel,
+    channelId: 'ch-chat',
+    webhookId: 'wh-invite',
+    deletable: true,
+    content: 'Tham gia server tại discord.gg/somewhere',
+    mentions: { everyone: false, roles: new Map(), users: new Map() },
+    delete: async () => { inviteDeleted = true; },
+    client: mockGuild.client,
+  };
+  const inviteHandled = await webhookGuard.onMessage(inviteWebhookMsg);
+  assert.equal(inviteHandled, true);
+  assert.equal(inviteDeleted, true);
+  assert.equal(deletedWebhooks.some(w => w.id === 'wh-invite'), true);
+
   // Kiểm tra hạn mức ban và kick của staff.
   console.log('2. Testing Staff Watch: Daily Ban quota...');
 
@@ -171,6 +198,14 @@ const security = require('../utils/securitySystem');
   assert.equal(staffWatch.countStaffActions(guildId, 'staff-456', 'ban'), 3);
   assert.equal(unbans.length, 0, 'Không tự mở ban để tránh cho người raid quay lại');
   assert.equal(strippedRoles.some(r => r.roleId === 'mod-role'), true);
+
+  // Ban với targetId null vẫn ghi nhận log an toàn không lỗi NOT NULL
+  await staffWatch.onAuditLog(
+    { action: A.MemberBanAdd, executorId: 'staff-456', targetId: null },
+    mockGuild
+  );
+  assert.equal(staffWatch.countStaffActions(guildId, 'staff-456', 'ban'), 4);
+
   // Kiểm tra bảo vệ tên và ảnh server.
   console.log('3. Testing Staff Watch: Guild Info Guard...');
 
@@ -201,6 +236,31 @@ const security = require('../utils/securitySystem');
   assert.equal(nameRestored?.name, 'VietNam Legacy Official');
   assert(nameRestored?.reason.includes('Staff Watch'));
   assert.equal(iconRestored?.icon, 'https://cdn.discordapp.com/icons/old-icon.png');
+
+  // Kiểm tra khôi phục icon về null nếu ban đầu server không có icon
+  const oldGuildNoIcon = {
+    id: guildId,
+    name: 'VietNam Legacy Official',
+    icon: null,
+    iconURL: () => null,
+  };
+  const newGuildWithIcon = {
+    ...mockGuild,
+    name: 'VietNam Legacy Official',
+    icon: 'rogue-icon-hash',
+    fetchAuditLogs: async () => ({
+      entries: {
+        first: () => ({
+          executorId: 'staff-456',
+          targetId: guildId,
+          changes: [{ key: 'icon_hash', old: null, new: 'rogue-icon-hash' }],
+          createdTimestamp: Date.now(),
+        }),
+      },
+    }),
+  };
+  await staffWatch.onGuildUpdate(oldGuildNoIcon, newGuildWithIcon);
+  assert.equal(iconRestored?.icon, null);
 
   console.log('PASS: Webhook Guard & Staff Watch successfully verified!');
 })().catch((err) => {

@@ -8,6 +8,7 @@
 
 const { AuditLogEvent, EmbedBuilder } = require('discord.js');
 const { getOptions } = require('./customization');
+const { hasInvite } = require('./securityContent');
 
 const recentWebhookBursts = new Map();
 
@@ -136,7 +137,11 @@ async function onMessage(msg, edited = false) {
     /@(everyone|here).*(free|nitro|steam|gift|airdrop|claim)/i.test(content) ||
     /(discord-nitro|dlscord|discorcl|free-nitro|steamcommunity-).*(\.xyz|\.ru|\.top|\.click|\.gift)/i.test(content);
 
-  if (!isBurst && !hasMassMention && !isPhishing) return false;
+  const hasUnauthorizedInvite = Boolean(
+    options.securityInvites && hasInvite(msg.content)
+  );
+
+  if (!isBurst && !hasMassMention && !isPhishing && !hasUnauthorizedInvite) return false;
 
   // Xóa ngay tin nhắn spam/độc hại
   if (msg.deletable && typeof msg.delete === 'function') {
@@ -155,7 +160,7 @@ async function onMessage(msg, edited = false) {
       const wh = whList?.get(msg.webhookId);
       if (wh && typeof wh.delete === 'function') {
         whName = wh.name || whName;
-        await wh.delete('Anti-webhook: Tiêu hủy webhook phát tán spam / mass mention');
+        await wh.delete('Anti-webhook: Tiêu hủy webhook phát tán spam / mass mention / invite');
         whDeleted = true;
       }
     }
@@ -163,7 +168,7 @@ async function onMessage(msg, edited = false) {
       const wh = await msg.client.fetchWebhook(msg.webhookId).catch(() => null);
       if (wh && typeof wh.delete === 'function') {
         whName = wh.name || whName;
-        await wh.delete('Anti-webhook: Tiêu hủy webhook phát tán spam / mass mention');
+        await wh.delete('Anti-webhook: Tiêu hủy webhook phát tán spam / mass mention / invite');
         whDeleted = true;
       }
     }
@@ -175,6 +180,8 @@ async function onMessage(msg, edited = false) {
     ? 'Chứa nội dung lừa đảo / Phishing Nitro'
     : hasMassMention
     ? 'Spam mass mention (@everyone / nhiều role)'
+    : hasUnauthorizedInvite
+    ? 'Phát tán link mời Discord ngoài khu vực cho phép'
     : 'Spam tin nhắn dồn dập vượt ngưỡng';
 
   const embed = new EmbedBuilder()

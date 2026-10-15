@@ -35,7 +35,8 @@ async function inspect(msg, tools) {
     violation = mass ? 'tag hàng loạt' : burst ? 'gửi tin quá nhanh' : duplicate ? 'lặp nội dung nhiều lần' : '';
   }
   if (!violation) return false;
-  try { if (msg.deletable) await msg.delete(); } catch (error) { console.warn('[SECURITY DELETE]', error.code || error.message); }
+  const canDelete = Boolean(msg.deletable);
+  try { if (canDelete) await msg.delete(); } catch (error) { console.warn('[SECURITY DELETE]', error.code || error.message); }
   const key = msg.guild.id + ':' + msg.author.id;
   const now = Date.now();
   if ((cooldown.get(key) || 0) > now || tools.busy.has(key)) return true;
@@ -44,7 +45,7 @@ async function inspect(msg, tools) {
   cooldown.set(key, now + 30000); tools.busy.add(key);
   try {
     if (action === 'timeout') await tools.punish(msg.member, 'timeout', 'Bảo vệ chat: ' + violation, o.securityTimeoutMinutes * 60000);
-    await tools.alert(msg.guild, msg.author.id + ' tại <#' + msg.channelId + '>: ' + violation + '. ' + (action === 'timeout' ? 'Timeout ' + o.securityTimeoutMinutes + ' phút.' : 'Chỉ xóa tin vi phạm.') + (!msg.deletable ? ' Bot thiếu quyền xóa tin.' : ''));
+    await tools.alert(msg.guild, msg.author.id + ' tại <#' + msg.channelId + '>: ' + violation + '. ' + (action === 'timeout' ? 'Timeout ' + o.securityTimeoutMinutes + ' phút.' : 'Chỉ xóa tin vi phạm.') + (!canDelete ? ' Bot thiếu quyền xóa tin.' : ''));
   } catch (error) { await tools.alert(msg.guild, 'Không xử lý được ' + msg.author.id + ': ' + error.message); }
   finally { tools.busy.delete(key); }
   return true;

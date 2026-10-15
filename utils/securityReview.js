@@ -7,11 +7,14 @@ const sensitive=[P.Administrator,P.ManageGuild,P.ManageRoles,P.ManageChannels,P.
 function db(){const d=getDb();d.exec(`CREATE TABLE IF NOT EXISTS security_reviews (id TEXT PRIMARY KEY,guild_id TEXT NOT NULL,user_id TEXT NOT NULL,kind TEXT NOT NULL,role_id TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'pending',snapshot TEXT NOT NULL DEFAULT '{}',channel_id TEXT,message_id TEXT,created_at INTEGER NOT NULL)`);return d;}
 function pending(guild,id,kind){return db().prepare("SELECT * FROM security_reviews WHERE guild_id=? AND user_id=? AND kind=? AND status='pending' ORDER BY created_at DESC LIMIT 1").get(guild,id,kind);}
 function memberLeft(member){db().prepare("UPDATE security_reviews SET status='expired' WHERE guild_id=? AND user_id=? AND status IN ('pending','approved')").run(member.guild.id,member.id);}
-function trusted(m,o){return m.id===m.guild.ownerId || m.id===m.guild.client.user.id || o.securityTrusted.split(/[\s,]+/).includes(m.id);}
+function trusted(m,o){return m.id===m.guild.ownerId || m.id===m.guild.client.user.id || String(o.securityTrusted || '').split(/[\s,]+/).includes(m.id);}
 const days=t=>Math.max(0,Math.floor((Date.now()-t)/86400000));
 function buttons(row,disabled=false){return new ActionRowBuilder().addComponents((row.kind==='bot'?[['allow','Cho phép bot',ButtonStyle.Success],['kick','Đuổi bot',ButtonStyle.Danger],['ban','Cấm bot',ButtonStyle.Danger]]:[['grant','Vẫn cấp role',ButtonStyle.Success]]).map(([action,label,style])=>new ButtonBuilder().setCustomId(`security:${row.id}:${action}`).setLabel(label).setStyle(style).setDisabled(disabled)));}
 async function post(member,row,description){
- const channel=await member.guild.channels.fetch(getOptions(member.guild.id).securityLogChannel);
+ const channelId = getOptions(member.guild.id).securityLogChannel;
+ if (!channelId) return;
+ const channel = await member.guild.channels.fetch(channelId).catch(() => null);
+ if (!channel || typeof channel.send !== 'function') return;
  const embed=new EmbedBuilder().setColor(0xef4444).setTitle(row.kind==='bot'?'🤖 Bot mới đang chờ bạn xét duyệt':'⚠️ Phát hiện cấp role quản trị đáng ngờ').setDescription(description.slice(0,4000)).setFooter({text:member.guild.name+' • Chỉ chủ server được xét duyệt'}).setTimestamp();
  const msg=await channel.send({embeds:[embed],components:[buttons(row)],allowedMentions:{parse:[]}});
  db().prepare('UPDATE security_reviews SET channel_id=?,message_id=? WHERE id=?').run(channel.id,msg.id,row.id);

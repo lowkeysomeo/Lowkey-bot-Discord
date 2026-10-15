@@ -47,7 +47,7 @@ function recordStaffAction(guildId, staffId, action, targetId) {
   const id = randomUUID();
   db.prepare(
     'INSERT INTO staff_action_logs (id, guild_id, staff_id, action, target_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(id, guildId, staffId, action, targetId, Date.now());
+  ).run(id, guildId, staffId, action, String(targetId || 'unknown'), Date.now());
 }
 
 function countStaffActions(guildId, staffId, action, windowMs = 86400000) {
@@ -252,10 +252,8 @@ async function onGuildUpdate(oldGuild, newGuild) {
   if (iconChanged && typeof newGuild.setIcon === 'function') {
     try {
       const oldIconURL = oldGuild.iconURL ? oldGuild.iconURL({ extension: 'png' }) : null;
-      if (oldIconURL) {
-        await newGuild.setIcon(oldIconURL, 'Staff Watch: Tự động khôi phục icon server do Staff tự ý đổi');
-        restoredIcon = true;
-      }
+      await newGuild.setIcon(oldIconURL || null, 'Staff Watch: Tự động khôi phục icon server do Staff tự ý đổi');
+      restoredIcon = true;
     } catch (e) {
       console.error('[STAFF WATCH] Lỗi khôi phục icon server:', e.message);
     }
