@@ -187,9 +187,19 @@ function createDashboard(client, options = {}) {
           rateLimit(`ticket:${guild.id}:${value.user.id}`, 6);
           const input = await body(req);
           if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'Dữ liệu không hợp lệ.');
+          if (Array.isArray(input.config?.options)) {
+            await guild.roles.fetch();
+            for (const option of input.config.options) {
+              for (const id of [option.handlerRoleId, option.grantRoleId]) {
+                if (id && (id === guild.id || !guild.roles.cache.has(id))) fail(400, 'Role ticket không tồn tại hoặc là @everyone. Hãy chọn lại role.');
+              }
+            }
+          }
           if (input.action === 'save') {
+            const previous = ticketSystem.getConfig(guild.id);
             const saved = ticketSystem.saveConfig(guild.id, input.config || {});
-            return json(res, 200, { ok: true, config: saved });
+            const refreshed = await ticketSystem.refreshOpenTickets(guild, previous, saved);
+            return json(res, 200, { ok: true, config: saved, refreshed });
           }
           if (input.action === 'publish') {
             if (!input.channelId) fail(400, 'Hãy chọn kênh trước khi đăng bảng Ticket.');

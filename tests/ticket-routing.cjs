@@ -1,0 +1,33 @@
+'use strict';
+process.env.DB_PATH = ':memory:';
+const assert = require('node:assert/strict');
+const {PermissionFlagsBits:P}=require('discord.js');
+const system=require('../utils/ticketSystem');
+const {getDb}=require('../utils/database');
+(async()=>{
+const handler={id:'111111111111111111',position:5};
+const role={id:'222222222222222222',managed:false,permissions:{has:()=>false},comparePositionTo:r=>2-r.position};
+const cfg=system.saveConfig('g',{options:[{value:'partner',label:'Partner',handlerRoleId:handler.id,grantRoleId:role.id,grantButtonLabel:'Duyệt Partner'}]});
+assert.equal(system.getConfig('g').options[0].grantRoleId,role.id);
+assert.equal(system.buildTicketButtons({category_value:'partner'},cfg).components.length,5);
+assert.equal(system.buildTicketButtons({category_value:'support'},cfg).components.length,4);
+let actor, added=0, reply='';
+const recipient={roles:{cache:new Map(),add:async r=>{added++;recipient.roles.cache.set(r.id,r);}}};
+const member=(id,position,hasHandler=false)=>({id,user:{tag:id},permissions:{has:()=>false},roles:{cache:new Map(hasHandler?[[handler.id,handler]]:[]),highest:{comparePositionTo:r=>position-(r.position||2)}}});
+const guild={id:'g',ownerId:'owner',name:'VNL',roles:{cache:new Map([[handler.id,handler]]),fetch:async()=>role},members:{fetch:async q=>q.user==='customer'?recipient:actor,fetchMe:async()=>({permissions:{has:()=>true},roles:{highest:{comparePositionTo:()=>10}}})}};
+const policy=system.ticketPolicy(cfg,{category_value:'partner'});
+assert.equal(system.canHandle(member('low',1),guild,policy),false);
+assert.equal(system.canHandle(member('staff',5,true),guild,policy),true);
+assert.equal(system.canHandle(member('senior',8),guild,policy),true);
+getDb().prepare("INSERT INTO tickets(guild_id,channel_id,user_id,category_value,category_label,status,created_at) VALUES('g','ch','customer','partner','Partner','open',1)").run();
+async function click(who){actor=who;reply='';await system.handleButtonAction({guild,channel:{id:'ch',send:async()=>{}},member:who,user:{id:who.id},customId:'ticket:btn_grant_role',deferReply:async()=>{},editReply:async text=>{reply=text;}});}
+await click(member('low',1));assert.equal(added,0);
+await click(member('staff',5,true));assert.equal(added,1);
+await click(member('senior',8));assert.equal(added,1);assert.match(reply,/đã có/);
+recipient.roles.cache.clear();role.permissions.has=p=>p===P.Administrator;
+await click(member('staff',5,true));assert.equal(added,1);
+role.permissions.has=()=>false;
+getDb().prepare("UPDATE tickets SET status='closed' WHERE channel_id='ch'").run();
+await click(member('staff',5,true));assert.equal(added,1);
+console.log('PASS ticket-routing: lưu cấu hình, nhóm xử lý, cấp role, chống cấp sai quyền và ticket đóng.');
+})().catch(e=>{console.error(e);process.exitCode=1;});

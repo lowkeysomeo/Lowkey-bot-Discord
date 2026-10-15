@@ -551,6 +551,7 @@ const DEFAULT_TICKET_OPTIONS = [
 
 function ticketOptionRow(opt, index) {
   const o = opt || { value: '', label: '', description: '', emoji: '' };
+  const roleChoices = selected => '<option value="">Chưa chọn</option>' + (state.data.roles || []).map(r => '<option value="' + h(r.id) + '" ' + (selected === r.id ? 'selected' : '') + '>' + h(r.name) + '</option>').join('');
   return '<div class="ticket-option-item" data-ticket-option style="background:#171920; border:1px solid #30333f; border-radius:10px; padding:16px; margin-bottom:14px;">' +
     '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:8px;">' +
       '<strong style="color:#ffd869; font-size:13px;" data-ticket-option-index>Mục #' + (index + 1) + '</strong>' +
@@ -579,6 +580,11 @@ function ticketOptionRow(opt, index) {
         '<label>Mã định danh (Value/ID) *</label>' +
         '<input type="text" data-ticket-opt-value maxlength="100" placeholder="Ví dụ: nitro_boost" value="' + h(o.value || '') + '" required>' +
       '</div>' +
+    '</div>' +
+    '<div class="form-grid" style="margin-top:12px">' +
+      '<div class="field"><label>Role xử lý và nhận thông báo</label><select data-ticket-opt-handler>' + roleChoices(o.handlerRoleId) + '</select><small>Để trống dùng role hỗ trợ chung.</small></div>' +
+      '<div class="field"><label>Role cấp cho người mở ticket</label><select data-ticket-opt-grant>' + roleChoices(o.grantRoleId) + '</select><small>Để trống để tắt nút cấp role. Role nhận phải nằm dưới role xử lý.</small></div>' +
+      '<div class="field"><label>Tên nút cấp role</label><input data-ticket-opt-grant-label maxlength="80" value="' + h(o.grantButtonLabel || 'Cấp role') + '"></div>' +
     '</div>' +
   '</div>';
 }
@@ -664,6 +670,9 @@ function getTicketFormValues() {
     const description = el.querySelector('[data-ticket-opt-desc]')?.value?.trim() || '';
 
     options.push({
+      handlerRoleId: el.querySelector('[data-ticket-opt-handler]')?.value || '',
+      grantRoleId: el.querySelector('[data-ticket-opt-grant]')?.value || '',
+      grantButtonLabel: el.querySelector('[data-ticket-opt-grant-label]')?.value?.trim() || 'Cấp role',
       value: value.slice(0, 100),
       label: label.slice(0, 100),
       description: description ? description.slice(0, 100) : undefined,
@@ -699,7 +708,7 @@ async function ticketSubmit(e) {
     const res = await api(`/api/guilds/${state.guild.id}/ticket`, { action: 'save', config: cfg });
     if (state.data?.ticket) state.data.ticket.config = res.config;
     state.dirty = false;
-    notify('Đã lưu cấu hình Ticket thành công!');
+    notify(res.refreshed?.failed ? 'Đã lưu cấu hình. Có ' + res.refreshed.failed + ' ticket cũ chưa cập nhật được; kiểm tra quyền bot hoặc tin nhắn mở đầu.' : 'Đã lưu cấu hình và cập nhật ' + (res.refreshed?.updated || 0) + ' ticket đang mở.');
   } catch (err) {
     notify(err.message);
   } finally {

@@ -130,6 +130,9 @@ function saveConfig(guildId, patch) {
       .filter(o => o && typeof o === 'object' && o.label)
       .slice(0, 25)
       .map((o, idx) => ({
+        handlerRoleId: /^\d{17,20}$/.test(o.handlerRoleId || '') ? o.handlerRoleId : '',
+        grantRoleId: /^\d{17,20}$/.test(o.grantRoleId || '') ? o.grantRoleId : '',
+        grantButtonLabel: String(o.grantButtonLabel || 'Cấp role').trim().slice(0, 80) || 'Cấp role',
         value: String(o.value || `opt_${idx + 1}`).trim().slice(0, 100),
         label: String(o.label).trim().slice(0, 100),
         description: o.description ? String(o.description).trim().slice(0, 100) : undefined,
@@ -233,6 +236,18 @@ async function sendTicketPanel(guild, channelId, optionsOverride = {}) {
 /**
  * Xử lý khi thành viên chọn danh mục trong Dropdown Menu
  */
+// Danh mục chưa có role riêng tiếp tục dùng nhóm hỗ trợ chung.
+function ticketPolicy(config, ticket) {
+  const option = (config.options || []).find(o => o.value === ticket.category_value) || {};
+  return { ...option, handlerRoleId: option.handlerRoleId || config.supportRoleId || '' };
+}
+function canHandle(member, guild, policy) {
+  if ((guild.ownerId && member.id === guild.ownerId) || member.permissions.has(P.Administrator)) return true;
+  const role = guild.roles.cache.get(policy.handlerRoleId);
+  return Boolean(role && (member.roles.cache.has(role.id) ||
+    (member.roles.highest?.comparePositionTo && member.roles.highest.comparePositionTo(role) > 0)));
+}
+
 async function handleSelectCategory(interaction) {
   const guild = interaction.guild;
   if (!guild) return;
@@ -244,6 +259,7 @@ async function handleSelectCategory(interaction) {
     label: selectedValue,
   };
 
+  const policy = ticketPolicy(config, { category_value: selectedValue });
   // Reset lại select menu trên panel message để xóa trạng thái đã chọn (clear checkmark),
   // giúp thành viên có thể chọn lại cùng một mục mà không bị Discord client chặn sự kiện.
   if (interaction.message && typeof interaction.message.edit === 'function' && (interaction.message.editable ?? true)) {
@@ -327,9 +343,9 @@ async function handleSelectCategory(interaction) {
     });
   }
 
-  if (config.supportRoleId && guild.roles.cache.has(config.supportRoleId)) {
+  if (policy.handlerRoleId && policy.handlerRoleId !== config.adminRoleId && guild.roles.cache.has(policy.handlerRoleId)) {
     permissionOverwrites.push({
-      id: config.supportRoleId, // Role Hỗ Trợ Ticket
+      id: policy.handlerRoleId, // Nhóm xử lý riêng của danh mục
       allow: [
         P.ViewChannel,
         P.SendMessages,
@@ -388,8 +404,7 @@ async function handleSelectCategory(interaction) {
 
   // 6. Gửi tin nhắn mở đầu trong phòng Ticket
   const pings = [`<@${interaction.user.id}>`];
-  if (config.supportRoleId) pings.push(`<@&${config.supportRoleId}>`);
-  if (config.adminRoleId && config.adminRoleId !== config.supportRoleId) pings.push(`<@&${config.adminRoleId}>`);
+  if (policy.handlerRoleId) pings.push(`<@&${policy.handlerRoleId}>`);
 
   const ticketData = {
     id: ticketId,
@@ -404,10 +419,11 @@ async function handleSelectCategory(interaction) {
   };
 
   const welcomeEmbed = buildTicketWelcomeEmbed(ticketData, interaction.user, config, guild);
-  const ticketRow = buildTicketButtons(ticketData);
+  const ticketRow = buildTicketButtons(ticketData, config);
 
   await ticketChannel.send({
     content: pings.join(' '),
+    allowedMentions: { users: [interaction.user.id], roles: policy.handlerRoleId ? [policy.handlerRoleId] : [] },
     embeds: [welcomeEmbed],
     components: [ticketRow],
   });
@@ -430,7 +446,7 @@ function buildTicketWelcomeEmbed(ticket, user, config, guild) {
       `📋 **Yêu cầu hỗ trợ:** **${ticket.category_label}**\n` +
       `👤 **Khách hàng:** <@${ticket.user_id}>\n` +
       `🛡️ **Staff tiếp nhận:** ${claimedText}\n\n` +
-      `Đội ngũ **AdminTicket** & **Hỗ Trợ Ticket** đã nhận được thông báo và sẽ có mặt hỗ trợ bạn sớm nhất có thể.\n\n` +
+      `Đội ngũ ${ticketPolicy(config, ticket).handlerRoleId ? '<@&' + ticketPolicy(config, ticket).handlerRoleId + '>' : 'hỗ trợ'} sẽ tiếp nhận và đồng hành cùng bạn trong ticket này.\n\n` +
       `💬 *Vui lòng mô tả chi tiết vấn đề / dịch vụ bạn cần để được hỗ trợ nhanh nhất nhé!*`
     )
     .setFooter({
@@ -440,7 +456,7 @@ function buildTicketWelcomeEmbed(ticket, user, config, guild) {
     .setTimestamp();
 }
 
-function buildTicketButtons(ticket = {}) {
+function buildTicketButtons(ticket = {}, config = {}) {
   const isClaimed = Boolean(ticket.claimed_by);
 
   const claimButton = new ButtonBuilder()
@@ -468,7 +484,12 @@ function buildTicketButtons(ticket = {}) {
     .setEmoji('📑')
     .setStyle(ButtonStyle.Secondary);
 
-  return new ActionRowBuilder().addComponents(claimButton, closeButton, closeReasonButton, transcriptButton);
+  const row = new ActionRowBuilder().addComponents(claimButton, closeButton, closeReasonButton, transcriptButton);
+  const policy = ticketPolicy(config, ticket);
+  if (policy.grantRoleId && policy.handlerRoleId) row.addComponents(new ButtonBuilder()
+    .setCustomId('ticket:btn_grant_role').setLabel(policy.grantButtonLabel || 'Cấp role')
+    .setEmoji('🤝').setStyle(ButtonStyle.Success));
+  return row;
 }
 
 async function generateTranscriptAttachment(channel, ticket, guild, extra = {}) {
@@ -630,10 +651,38 @@ async function handleButtonAction(interaction) {
 
   // Quyền: Admin server, role AdminTicket, role Hỗ Trợ Ticket, hoặc người tạo ticket
   const isAdmin = member.permissions.has(P.Administrator) || (config.adminRoleId && member.roles.cache.has(config.adminRoleId));
-  const isSupport = config.supportRoleId && member.roles.cache.has(config.supportRoleId);
+  const isSupport = canHandle(member, guild, ticketPolicy(config, ticket));
   const isCreator = interaction.user.id === ticket.user_id;
 
   const action = interaction.customId.replace('ticket:btn_', '');
+
+  if (action === 'grant_role') {
+    await interaction.deferReply({ flags: 64 });
+    const policy = ticketPolicy(config, ticket);
+    const actor = await guild.members.fetch({ user: interaction.user.id, force: true }).catch(() => null);
+    const role = await guild.roles.fetch(policy.grantRoleId || '0').catch(() => null);
+    const handler = guild.roles.cache.get(policy.handlerRoleId);
+    const me = await guild.members.fetchMe();
+    const dangerous = [P.Administrator, P.ManageGuild, P.ManageRoles, P.ManageChannels, P.BanMembers, P.KickMembers, P.ManageWebhooks];
+    if (ticket.status !== 'open' || !actor || !handler || !policy.grantRoleId || !canHandle(actor, guild, policy)) {
+      return interaction.editReply('⛔ Chỉ nhóm xử lý được chỉ định hoặc người có role cao hơn mới được cấp role trong ticket đang mở.');
+    }
+    if (!role || role.id === guild.id || role.managed || dangerous.some(p => role.permissions.has(p)) ||
+        role.comparePositionTo(handler) >= 0 || !me.permissions.has(P.ManageRoles) || me.roles.highest.comparePositionTo(role) <= 0 ||
+        (actor.id !== guild.ownerId && actor.roles.highest.comparePositionTo(role) <= 0)) {
+      return interaction.editReply('⚠️ Không thể cấp role này. Role nhận phải là role thường, nằm dưới nhóm xử lý và role cao nhất của bot/người cấp.');
+    }
+    const recipient = await guild.members.fetch({ user: ticket.user_id, force: true }).catch(() => null);
+    if (!recipient) return interaction.editReply('⚠️ Người mở ticket không còn trong server.');
+    if (recipient.roles.cache.has(role.id)) return interaction.editReply('✅ Người mở ticket đã có role này rồi.');
+    try {
+      await recipient.roles.add(role, 'Ticket #' + ticket.id + ' được duyệt bởi ' + actor.user.tag + ' (' + actor.id + ')');
+    } catch {
+      return interaction.editReply('❌ Bot chưa cấp được role. Hãy kiểm tra quyền Quản lý role và vị trí role của bot.');
+    }
+    await channel.send({content: '🤝 Chúc mừng <@' + ticket.user_id + '>! Bạn đã được cấp <@&' + role.id + '> sau khi ticket được <@' + actor.id + '> phê duyệt. Cảm ơn bạn đã đồng hành cùng ' + guild.name + '!', allowedMentions: { users: [ticket.user_id], roles: [] }}).catch(() => {});
+    return interaction.editReply('✅ Đã cấp role thành công cho người mở ticket.');
+  }
 
   // ─────────────────────────────────────────────────────────────
   // 1. Nhận xử lý Ticket (Claim)
@@ -675,7 +724,7 @@ async function handleButtonAction(interaction) {
     // Cập nhật tin nhắn ban đầu (đổi trạng thái nút bấm và embed)
     if (interaction.message && typeof interaction.message.edit === 'function' && (interaction.message.editable ?? true)) {
       const updatedEmbed = buildTicketWelcomeEmbed(ticket, interaction.user, config, guild);
-      const updatedRow = buildTicketButtons(ticket);
+      const updatedRow = buildTicketButtons(ticket, config);
       await interaction.message.edit({
         embeds: [updatedEmbed],
         components: [updatedRow],
@@ -755,6 +804,7 @@ async function handleButtonAction(interaction) {
   // 4. Xuất Transcript thủ công
   // ─────────────────────────────────────────────────────────────
   if (action === 'transcript') {
+    if (!isAdmin && !isSupport && !isCreator) return interaction.reply({ content: '⛔ Bạn không có quyền xem transcript này.', flags: 64 });
     await interaction.deferReply({ flags: 64 });
     try {
       const transcriptAttachment = await generateTranscriptAttachment(channel, ticket, guild);
@@ -790,7 +840,7 @@ async function handleModalSubmit(interaction) {
   const config = getConfig(guild.id);
   const member = interaction.member;
   const isAdmin = member.permissions.has(P.Administrator) || (config.adminRoleId && member.roles.cache.has(config.adminRoleId));
-  const isSupport = config.supportRoleId && member.roles.cache.has(config.supportRoleId);
+  const isSupport = canHandle(member, guild, ticketPolicy(config, ticket));
   const isCreator = interaction.user.id === ticket.user_id;
 
   if (!isAdmin && !isSupport && !isCreator) {
@@ -819,7 +869,39 @@ async function handleInteraction(interaction) {
   }
 }
 
+async function refreshOpenTickets(guild, previous, config) {
+  const tickets = db().prepare("SELECT * FROM tickets WHERE guild_id = ? AND status = 'open'").all(guild.id);
+  let updated = 0, failed = 0;
+  for (const ticket of tickets) {
+    try {
+      const channel = await guild.channels.fetch(ticket.channel_id);
+      if (!channel) continue;
+      const oldRole = ticketPolicy(previous, ticket).handlerRoleId;
+      const newRole = ticketPolicy(config, ticket).handlerRoleId;
+      if (newRole && guild.roles.cache.has(newRole)) {
+        await channel.permissionOverwrites.edit(newRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true, AttachFiles: true, EmbedLinks: true });
+      }
+      if (oldRole && oldRole !== newRole && oldRole !== config.adminRoleId && oldRole !== guild.id) {
+        await channel.permissionOverwrites.delete(oldRole);
+      }
+      const messages = await channel.messages.fetch({ limit: 100 });
+      const welcome = messages.find(m => m.author.id === guild.client.user.id && m.embeds.some(e => e.title?.startsWith('🎫 TICKET #' + ticket.id + ' —')));
+      if (welcome) {
+        await welcome.edit({ embeds: [buildTicketWelcomeEmbed(ticket, null, config, guild)], components: [buildTicketButtons(ticket, config)], allowedMentions: { parse: [] } });
+        updated++;
+      } else failed++;
+    } catch (error) {
+      failed++;
+      console.warn('[TICKET REFRESH]', ticket.channel_id, error.code || error.name);
+    }
+  }
+  return { updated, failed };
+}
+
 module.exports = {
+  refreshOpenTickets,
+  ticketPolicy,
+  canHandle,
   getConfig,
   saveConfig,
   buildPanelPayload,
