@@ -262,7 +262,7 @@ if (
 client.on(
   Events.InteractionCreate,
   async (interaction) => {
-    if ((interaction.isStringSelectMenu?.() || interaction.isButton?.() || interaction.isModalSubmit?.()) && interaction.customId?.startsWith('ticket:')) {
+    if ((interaction.isStringSelectMenu?.() || interaction.isUserSelectMenu?.() || interaction.isButton?.() || interaction.isModalSubmit?.()) && interaction.customId?.startsWith('ticket:')) {
       try { await require('./utils/ticketSystem').handleInteraction(interaction); }
       catch (error) {
         console.error('[TICKET INTERACTION ERROR]', error);

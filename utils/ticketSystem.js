@@ -10,6 +10,7 @@ const {
   EmbedBuilder,
   ActionRowBuilder,
   StringSelectMenuBuilder,
+  UserSelectMenuBuilder,
   ButtonBuilder,
   ButtonStyle,
   ModalBuilder,
@@ -478,13 +479,13 @@ function buildTicketButtons(ticket = {}, config = {}) {
     .setEmoji('📝')
     .setStyle(ButtonStyle.Primary);
 
-  const transcriptButton = new ButtonBuilder()
-    .setCustomId('ticket:btn_transcript')
-    .setLabel('Lưu Transcript')
-    .setEmoji('📑')
+  const transferButton = new ButtonBuilder()
+    .setCustomId('ticket:btn_transfer')
+    .setLabel('Chuyển Staff')
+    .setEmoji('🔄')
     .setStyle(ButtonStyle.Secondary);
 
-  const row = new ActionRowBuilder().addComponents(claimButton, closeButton, closeReasonButton, transcriptButton);
+  const row = new ActionRowBuilder().addComponents(claimButton, closeButton, closeReasonButton, transferButton);
   const policy = ticketPolicy(config, ticket);
   if (policy.grantRoleId && policy.handlerRoleId) row.addComponents(new ButtonBuilder()
     .setCustomId('ticket:btn_grant_role').setLabel(policy.grantButtonLabel || 'Cấp role')
@@ -655,6 +656,16 @@ async function handleButtonAction(interaction) {
   const isCreator = interaction.user.id === ticket.user_id;
 
   const action = interaction.customId.replace('ticket:btn_', '');
+
+  if (action === 'transfer') {
+    if (ticket.status !== 'open' || (!isAdmin && !isSupport)) return interaction.reply({ content: '⛔ Chỉ nhân sự có quyền xử lý mới được chuyển ticket đang mở.', flags: 64 });
+    return interaction.reply({
+      content: 'Chọn staff tiếp nhận mới. Người được chọn phải có quyền xử lý loại ticket này.', flags: 64,
+      components: [new ActionRowBuilder().addComponents(new UserSelectMenuBuilder()
+        .setCustomId('ticket:transfer:' + interaction.message.id)
+        .setPlaceholder('Chọn staff tiếp nhận').setMinValues(1).setMaxValues(1))],
+    });
+  }
 
   if (action === 'grant_role') {
     await interaction.deferReply({ flags: 64 });
@@ -857,7 +868,40 @@ async function handleModalSubmit(interaction) {
 /**
  * Xử lý mọi tương tác liên quan đến Ticket
  */
+async function handleTransfer(interaction) {
+  if (!interaction.guild || !interaction.channel) return;
+  await interaction.deferUpdate();
+  const guild = interaction.guild, channel = interaction.channel;
+  const ticket = db().prepare('SELECT * FROM tickets WHERE channel_id = ? AND guild_id = ?').get(channel.id, guild.id);
+  const finish = content => interaction.editReply({ content, components: [] });
+  if (!ticket || ticket.status !== 'open') return finish('⚠️ Ticket đã đóng hoặc không còn tồn tại.');
+  const config = getConfig(guild.id), policy = ticketPolicy(config, ticket);
+  const actor = await guild.members.fetch({ user: interaction.user.id, force: true }).catch(() => null);
+  const target = await guild.members.fetch({ user: interaction.values[0], force: true }).catch(() => null);
+  const eligible = member => member && (canHandle(member, guild, policy) || (config.adminRoleId && member.roles.cache.has(config.adminRoleId)));
+  if (!eligible(actor)) return finish('⛔ Bạn không còn quyền chuyển ticket này.');
+  if (!target || target.user.bot || !eligible(target)) return finish('⚠️ Hãy chọn một staff có quyền xử lý loại ticket này, không chọn tài khoản bot.');
+  if (ticket.claimed_by === target.id) return finish('ℹ️ Staff này đang tiếp nhận ticket rồi.');
+  // Bảo đảm staff được chọn có thể vào phòng, kể cả khi chỉ có role cấp trên.
+  try {
+    await channel.permissionOverwrites.edit(target.id, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true, AttachFiles: true, EmbedLinks: true });
+  } catch { return finish('❌ Bot không thể cấp quyền vào phòng cho staff. Ticket chưa được chuyển.'); }
+  const now = Date.now();
+  const changed = db().prepare("UPDATE tickets SET claimed_by = ?, claimed_at = ? WHERE id = ? AND status = 'open' AND claimed_by IS ?")
+    .run(target.id, now, ticket.id, ticket.claimed_by);
+  if (!changed.changes) return finish('⚠️ Ticket vừa thay đổi người xử lý hoặc đã đóng. Hãy mở lại nút Chuyển Staff.');
+  const previous = ticket.claimed_by;
+  ticket.claimed_by = target.id; ticket.claimed_at = now;
+  const messageId = interaction.customId.slice('ticket:transfer:'.length);
+  const message = await channel.messages.fetch(messageId).catch(() => null);
+  if (message?.author.id === guild.client.user.id) await message.edit({ embeds: [buildTicketWelcomeEmbed(ticket, null, config, guild)], components: [buildTicketButtons(ticket, config)], allowedMentions: { parse: [] } }).catch(() => {});
+  await channel.setTopic('Ticket của ' + ticket.user_id + ' • Loại: ' + ticket.category_label + ' • Đang xử lý: ' + target.user.tag).catch(() => {});
+  await channel.send({ content: '🔄 <@' + ticket.user_id + '>, ticket của bạn đã được chuyển ' + (previous ? 'từ <@' + previous + '> ' : '') + 'sang <@' + target.id + '> tiếp nhận.\nNgười chuyển: <@' + actor.id + '>. Staff mới sẽ tiếp tục hỗ trợ bạn tại đây nhé!', allowedMentions: { users: [ticket.user_id, target.id], roles: [] } }).catch(() => {});
+  return finish('✅ Đã chuyển ticket sang staff mới.');
+}
+
 async function handleInteraction(interaction) {
+  if (interaction.isUserSelectMenu?.() && interaction.customId.startsWith('ticket:transfer:')) return handleTransfer(interaction);
   if (interaction.isStringSelectMenu() && interaction.customId === 'ticket:select_category') {
     return handleSelectCategory(interaction);
   }
@@ -909,6 +953,7 @@ module.exports = {
   handleSelectCategory,
   handleButtonAction,
   handleModalSubmit,
+  handleTransfer,
   handleInteraction,
   buildTicketButtons,
   buildTicketWelcomeEmbed,
