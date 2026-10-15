@@ -104,8 +104,13 @@ function render() {
   const ticketForm = document.querySelector('#ticket-form');
   if (ticketForm) {
     ticketForm.onsubmit = ticketSubmit;
-    ticketForm.oninput = () => { state.dirty = true; };
-    ticketForm.onchange = () => { state.dirty = true; };
+    const markDirty = () => {
+      state.dirty = true;
+      const statusSpan = document.querySelector('#ticket-save-status');
+      if (statusSpan) statusSpan.textContent = '⚠️ Bạn có thay đổi chưa lưu.';
+    };
+    ticketForm.oninput = markDirty;
+    ticketForm.onchange = markDirty;
     ticketForm.onclick = (e) => {
       const addBtn = e.target.closest('#ticket-add-option');
       if (addBtn) {
@@ -113,7 +118,7 @@ function render() {
         const count = container.querySelectorAll('[data-ticket-option]').length;
         if (count >= 25) return notify('Discord chỉ cho phép tối đa 25 danh mục trong một Dropdown Menu.');
         container.insertAdjacentHTML('beforeend', ticketOptionRow({ label: '', value: '', description: '', emoji: '' }, count));
-        state.dirty = true;
+        markDirty();
         updateTicketOptionIndexes(container);
         const newEl = container.lastElementChild;
         newEl?.querySelector('[data-ticket-opt-label]')?.focus();
@@ -125,7 +130,7 @@ function render() {
         if (!confirm('Khôi phục danh sách danh mục mẫu của VietNam Legacy?')) return;
         const container = ticketForm.querySelector('#ticket-options-container');
         container.innerHTML = DEFAULT_TICKET_OPTIONS.map((opt, i) => ticketOptionRow(opt, i)).join('');
-        state.dirty = true;
+        markDirty();
         notify('Đã khôi phục các danh mục mẫu!');
         return;
       }
@@ -138,7 +143,7 @@ function render() {
         const item = removeBtn.closest('[data-ticket-option]');
         if (item) {
           item.remove();
-          state.dirty = true;
+          markDirty();
           updateTicketOptionIndexes(container);
         }
         return;
@@ -150,7 +155,7 @@ function render() {
         const prev = item?.previousElementSibling;
         if (item && prev && prev.matches('[data-ticket-option]')) {
           item.parentNode.insertBefore(item, prev);
-          state.dirty = true;
+          markDirty();
           updateTicketOptionIndexes(item.parentNode);
         }
         return;
@@ -162,7 +167,7 @@ function render() {
         const next = item?.nextElementSibling;
         if (item && next && next.matches('[data-ticket-option]')) {
           item.parentNode.insertBefore(next, item);
-          state.dirty = true;
+          markDirty();
           updateTicketOptionIndexes(item.parentNode);
         }
         return;
@@ -171,6 +176,8 @@ function render() {
   }
   const ticketPanelBtn = document.querySelector('#ticket-panel-send');
   if (ticketPanelBtn) ticketPanelBtn.onclick = sendTicketPanelDashboard;
+  const ticketQuickSaveBtn = document.querySelector('#ticket-quick-save');
+  if (ticketQuickSaveBtn) ticketQuickSaveBtn.onclick = () => ticketSubmit();
   const testForm = document.querySelector('#test-form');
   if (testForm) {
     testForm.onsubmit = sendTest;
@@ -552,13 +559,33 @@ async function rrDisable(id){
  catch(e){notify(e.message);}finally{state.saving=false;}
 }
 const DEFAULT_TICKET_OPTIONS = [
-  { value: 'support', label: '📩 Hỗ Trợ Chung (Support)', description: 'Giải đáp thắc mắc, hỗ trợ các vấn đề trong server', emoji: '📩' },
-  { value: 'staff_app', label: '🛡️ Ứng Tuyển Staff', description: 'Đăng ký ứng tuyển vào đội ngũ Staff của VietNam Legacy', emoji: '🛡️' },
-  { value: 'nitro_boost', label: '⚡ N1tr0 B00st', description: 'N1tr0 D1sc0rd Giá Siêu Rẻ', emoji: '⚡' },
-  { value: 'nitro_first', label: '🎁 N1tr0 Lần Đầu', description: 'Dành Cho Tài Khoản Chưa Từng Dùng N1tr0', emoji: '🎁' },
-  { value: 'server_boost', label: '💎 B00st Server', description: 'Nâng Cấp Server Của Bạn', emoji: '💎' },
-  { value: 'decor', label: '🔮 Khung Dec0r & Hiệu Ứng', description: 'Hiệu ứng & khung Discord giá rẻ', emoji: '🔮' },
-  { value: 'youtube', label: '📺 Y0uTube Premium', description: 'Xem Y0uTube Không Quảng Cáo', emoji: '📺' },
+  {
+    value: 'support',
+    label: '📩 Hỗ Trợ Chung (Support)',
+    description: 'Giải đáp thắc mắc, hỗ trợ các vấn đề trong server',
+    emoji: '📩',
+    handlerRoleId: '1555489979428503602',
+    grantRoleId: '',
+    grantButtonLabel: 'Cấp role',
+  },
+  {
+    value: 'staff_app',
+    label: '🛡️ Ứng Tuyển Staff',
+    description: 'Đăng ký ứng tuyển vào đội ngũ Staff của VietNam Legacy',
+    emoji: '🛡️',
+    handlerRoleId: '1555489980472885319',
+    grantRoleId: '',
+    grantButtonLabel: 'Cấp role',
+  },
+  {
+    value: 'partner',
+    label: '🎓Đăng ký Partner',
+    description: 'Đăng ký làm đối tác với VietNamLegacy',
+    emoji: '🎓',
+    handlerRoleId: '1559742079599382608',
+    grantRoleId: '1559576305576706138',
+    grantButtonLabel: 'Duyệt Partner',
+  },
 ];
 
 function ticketOptionRow(opt, index) {
@@ -614,14 +641,18 @@ function ticketPage() {
   const t = state.data.ticket || {};
   const cfg = t.config || {};
   const categories = t.categories || [];
-  const channels = state.data.channels || [];
+  const channels = (t.channels && t.channels.length) ? t.channels : (state.data.channels || []);
   const roles = state.data.roles || [];
   const currentOptions = (cfg.options && cfg.options.length) ? cfg.options : DEFAULT_TICKET_OPTIONS;
 
   return heading('HỆ THỐNG TICKET ĐỘC QUYỀN', 'Quản lý Ticket', 'Cấu hình bảng Ticket Dropdown Menu, banner VNL Ticket và phân quyền riêng cho AdminTicket & Hỗ Trợ Ticket.') +
-    '<div class="card card-body"><h2>Đăng bảng Ticket vào Discord</h2>' +
-    '<p>Đăng bảng chọn dịch vụ/sản phẩm có Dropdown Menu và banner VNL Ticket vào kênh bạn đã cấu hình bên dưới.</p>' +
-    '<button class="primary" type="button" id="ticket-panel-send">Đăng / Cập nhật bảng Ticket vào Discord</button><div id="ticket-panel-result" style="margin-top:12px;"></div></div>' +
+    '<div class="card card-body"><h2>Bảng Ticket trên Discord</h2>' +
+    '<p>Đăng mới hoặc cập nhật nội dung bảng chọn dịch vụ/sản phẩm có Dropdown Menu và banner VNL Ticket vào kênh Discord đã cấu hình bên dưới.</p>' +
+    '<div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">' +
+      '<button class="primary" type="button" id="ticket-panel-send">🚀 Đăng / Cập nhật bảng Ticket vào Discord</button>' +
+      '<button class="secondary" type="button" id="ticket-quick-save">💾 Lưu cấu hình</button>' +
+    '</div>' +
+    '<div id="ticket-panel-result" style="margin-top:12px;"></div></div>' +
     '<form id="ticket-form">' +
     panel('Phân quyền truy cập phòng Ticket (Độc Quyền)', 'Chỉ Người tạo ticket, Role AdminTicket và Role Hỗ Trợ Ticket mới được xem phòng chat.',
       '<div class="form-grid">' +
@@ -662,8 +693,9 @@ function ticketPage() {
       '<div class="field" style="grid-column: 1 / -1;"><label for="ticket-placeholder">Dòng chữ gợi ý trong Dropdown Menu (Placeholder)</label><input id="ticket-placeholder" name="placeholder" type="text" maxlength="150" value="' + h(cfg.placeholder || 'Nhấn Vào Đây Để Chọn Dịch Vụ / Hỗ Trợ...') + '" required></div>' +
       '</div>') +
     '<div class="note">Khi thành viên chọn một mục trong menu, bot sẽ tự tạo kênh text ẩn với toàn bộ thành viên khác, chỉ cấp quyền ViewChannel cho Người tạo + Role AdminTicket + Role Hỗ Trợ Ticket. Mỗi thành viên được mở tối đa 3 Ticket cùng lúc. Đóng ticket sẽ tự động lưu transcript và xóa kênh sau 5 giây.</div>' +
-    '<div class="savebar"><span id="ticket-save-status">Nhớ lưu cấu hình trước khi đăng bảng vào Discord.</span><button type="submit" class="primary">Lưu cấu hình Ticket</button></div></form>';
+    '<div class="savebar"><span id="ticket-save-status">Nhớ lưu cấu hình trước khi rời trang hoặc đăng bảng vào Discord.</span><button type="submit" class="primary">Lưu cấu hình Ticket</button></div></form>';
 }
+
 function getTicketFormValues() {
   const form = document.querySelector('#ticket-form');
   if (!form) return {};
@@ -706,28 +738,36 @@ function getTicketFormValues() {
     options: options.length > 0 ? options : undefined,
   };
 }
+
 async function ticketSubmit(e) {
-  e.preventDefault();
+  if (e) e.preventDefault();
   if (state.saving) return;
   const cfg = getTicketFormValues();
   if (!cfg.options || !cfg.options.length) {
     return notify('Vui lòng tạo ít nhất 1 danh mục cho bảng Ticket!');
   }
   state.saving = true;
-  const button = document.querySelector('#ticket-form button[type="submit"]');
-  if (button) button.textContent = 'Đang lưu…';
+  const submitBtn = document.querySelector('#ticket-form button[type="submit"]');
+  const quickBtn = document.querySelector('#ticket-quick-save');
+  const statusSpan = document.querySelector('#ticket-save-status');
+  if (submitBtn) submitBtn.textContent = 'Đang lưu…';
+  if (quickBtn) quickBtn.textContent = 'Đang lưu…';
   try {
     const res = await api(`/api/guilds/${state.guild.id}/ticket`, { action: 'save', config: cfg });
     if (state.data?.ticket) state.data.ticket.config = res.config;
     state.dirty = false;
+    if (statusSpan) statusSpan.textContent = '✅ Đã lưu cấu hình thành công!';
     notify(res.refreshed?.failed ? 'Đã lưu cấu hình. Có ' + res.refreshed.failed + ' ticket cũ chưa cập nhật được; kiểm tra quyền bot hoặc tin nhắn mở đầu.' : 'Đã lưu cấu hình và cập nhật ' + (res.refreshed?.updated || 0) + ' ticket đang mở.');
   } catch (err) {
+    if (statusSpan) statusSpan.textContent = '❌ Lỗi khi lưu cấu hình.';
     notify(err.message);
   } finally {
     state.saving = false;
-    if (button) button.textContent = 'Lưu cấu hình Ticket';
+    if (submitBtn) submitBtn.textContent = 'Lưu cấu hình Ticket';
+    if (quickBtn) quickBtn.textContent = '💾 Lưu cấu hình';
   }
 }
+
 async function sendTicketPanelDashboard() {
   const resultDiv = document.querySelector('#ticket-panel-result');
   const button = document.querySelector('#ticket-panel-send');
@@ -735,20 +775,26 @@ async function sendTicketPanelDashboard() {
   const channelId = channelSelect?.value;
   if (!channelId) return notify('Vui lòng chọn Kênh đặt bảng Ticket Panel trước!');
 
-  button.disabled = true; button.textContent = 'Đang đăng bảng…';
-  if (resultDiv) resultDiv.innerHTML = '<span class="subtle">Đang gửi bảng Ticket sang Discord…</span>';
+  button.disabled = true; button.textContent = 'Đang xử lý…';
+  if (resultDiv) resultDiv.innerHTML = '<span class="subtle">Đang lưu và cập nhật bảng Ticket sang Discord…</span>';
   try {
     const res = await api(`/api/guilds/${state.guild.id}/ticket`, {
       action: 'publish',
       channelId,
       config: getTicketFormValues(),
     });
-    if (resultDiv) resultDiv.innerHTML = '<a class="secondary" href="' + h(res.messageUrl) + '" target="_blank" rel="noopener noreferrer">Mở bảng Ticket trên Discord ↗</a>';
-    notify('Đã đăng bảng Ticket vào kênh thành công!');
+    if (res.config && state.data?.ticket) {
+      state.data.ticket.config = res.config;
+    }
+    state.dirty = false;
+    const statusSpan = document.querySelector('#ticket-save-status');
+    if (statusSpan) statusSpan.textContent = '✅ Cấu hình và bảng Ticket đã được đồng bộ.';
+    if (resultDiv) resultDiv.innerHTML = '<span>✅ Đã cập nhật bảng Ticket thành công! </span><a class="secondary" href="' + h(res.messageUrl) + '" target="_blank" rel="noopener noreferrer">Mở bảng Ticket trên Discord ↗</a>';
+    notify('Đã lưu cấu hình và cập nhật bảng Ticket trên Discord thành công!');
   } catch (err) {
     if (resultDiv) resultDiv.innerHTML = `<span class="danger">${h(err.message)}</span>`;
     notify(err.message);
   } finally {
-    button.disabled = false; button.textContent = 'Đăng / Cập nhật bảng Ticket vào Discord';
+    button.disabled = false; button.textContent = '🚀 Đăng / Cập nhật bảng Ticket vào Discord';
   }
 }

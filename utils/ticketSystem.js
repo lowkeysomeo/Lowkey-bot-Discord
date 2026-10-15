@@ -23,9 +23,51 @@ const {
 
 const { getDb } = require('./database');
 
+const DEPLOYED_BANNER = 'https://cdn.discordapp.com/attachments/1555212722638032936/1559104825046859906/VNL_BANNER_DO.png?ex=6ad128c5&is=6acfd745&hm=87d6030e68b7125c701a0697d05fd0f1ba739b9a148d086083c1273435f1e0ce&';
+
+const DEPLOYED_DESCRIPTION =
+  '🏷️ HỆ THỐNG TICKET\n' +
+  '<a:Red_Verification:1555218467991330990> Chào mừng bạn đến với hệ thống hỗ trợ của VietNam Legacy!\n\n' +
+  '<a:vnl_aqua_mail:1557714172949831693> Nếu bạn cần hỗ trợ, mua hàng, báo cáo vấn đề hoặc muốn liên hệ với Staff, hãy chọn loại Ticket phù hợp từ danh mục bên dưới.\n\n' +
+  '⚠️ Lưu ý:\n' +
+  '* Không tạo Ticket khi không có mục đích rõ ràng.\n' +
+  '* Mô tả vấn đề cụ thể để Staff có thể hỗ trợ nhanh hơn.\n' +
+  '* Không spam hoặc tag Staff liên tục.\n' +
+  '* Mỗi vấn đề nên tạo 1 Ticket riêng.\n\n' +
+  'VietNam Legacy - Connect • Community • Legacy';
+
+const DEPLOYED_VNL_OPTIONS = [
+  {
+    value: 'support',
+    label: '📩 Hỗ Trợ Chung (Support)',
+    description: 'Giải đáp thắc mắc, hỗ trợ các vấn đề trong server',
+    emoji: '📩',
+    handlerRoleId: '1555489979428503602',
+    grantRoleId: '',
+    grantButtonLabel: 'Cấp role',
+  },
+  {
+    value: 'staff_app',
+    label: '🛡️ Ứng Tuyển Staff',
+    description: 'Đăng ký ứng tuyển vào đội ngũ Staff của VietNam Legacy',
+    emoji: '🛡️',
+    handlerRoleId: '1555489980472885319',
+    grantRoleId: '',
+    grantButtonLabel: 'Cấp role',
+  },
+  {
+    value: 'partner',
+    label: '🎓Đăng ký Partner',
+    description: 'Đăng ký làm đối tác với VietNamLegacy',
+    emoji: '🎓',
+    handlerRoleId: '1559742079599382608',
+    grantRoleId: '1559576305576706138',
+    grantButtonLabel: 'Duyệt Partner',
+  },
+];
+
 const DEFAULT_OPTIONS = [
-  { value: 'support', label: '📩 Hỗ Trợ Chung (Support)', description: 'Giải đáp thắc mắc, hỗ trợ các vấn đề trong server', emoji: '📩' },
-  { value: 'staff_app', label: '🛡️ Ứng Tuyển Staff', description: 'Đăng ký ứng tuyển vào đội ngũ Staff của VietNam Legacy', emoji: '🛡️' },
+  ...DEPLOYED_VNL_OPTIONS,
   { value: 'nitro_boost', label: '⚡ N1tr0 B00st', description: 'N1tr0 D1sc0rd Giá Siêu Rẻ', emoji: '⚡' },
   { value: 'nitro_first', label: '🎁 N1tr0 Lần Đầu', description: 'Dành Cho Tài Khoản Chưa Từng Dùng N1tr0', emoji: '🎁' },
   { value: 'server_boost', label: '💎 B00st Server', description: 'Nâng Cấp Server Của Bạn', emoji: '💎' },
@@ -33,7 +75,22 @@ const DEFAULT_OPTIONS = [
   { value: 'youtube', label: '📺 Y0uTube Premium', description: 'Xem Y0uTube Không Quảng Cáo', emoji: '📺' },
 ];
 
-const DEFAULT_BANNER = 'https://images-ext-1.discordapp.net/external/vnl-ticket-banner.png';
+const DEFAULT_BANNER = DEPLOYED_BANNER;
+
+const DEPLOYED_VNL_CONFIG = {
+  channelId: '1555211036141817957',
+  categoryId: '1555210784592891914',
+  adminRoleId: '1555489980472885319',
+  supportRoleId: '1555489979428503602',
+  logChannelId: '1555489963955458078',
+  title: '🏷️ HỆ THỐNG TICKET',
+  description: DEPLOYED_DESCRIPTION,
+  bannerUrl: DEPLOYED_BANNER,
+  color: '#00a8ff',
+  placeholder: 'Nhấn Vào Đây Để Chọn Dịch Vụ / Hỗ Trợ...',
+  messageId: '1560185101504086050',
+  options: DEPLOYED_VNL_OPTIONS,
+};
 
 function db() {
   const d = getDb();
@@ -50,7 +107,8 @@ function db() {
       banner_url TEXT,
       color TEXT,
       placeholder TEXT,
-      options_json TEXT
+      options_json TEXT,
+      message_id TEXT
     );
 
     CREATE TABLE IF NOT EXISTS tickets (
@@ -70,9 +128,70 @@ function db() {
     );
   `);
 
+  try { d.exec('ALTER TABLE ticket_config ADD COLUMN message_id TEXT;'); } catch {}
   try { d.exec('ALTER TABLE tickets ADD COLUMN claimed_by TEXT;'); } catch {}
   try { d.exec('ALTER TABLE tickets ADD COLUMN claimed_at INTEGER;'); } catch {}
   try { d.exec('ALTER TABLE tickets ADD COLUMN close_reason TEXT;'); } catch {}
+
+  const mainGuildId = process.env.GUILD_ID || '1555173619129122866';
+  try {
+    const existing = d.prepare('SELECT guild_id, message_id, banner_url, options_json FROM ticket_config WHERE guild_id = ?').get(mainGuildId);
+    if (!existing) {
+      d.prepare(`
+        INSERT INTO ticket_config (
+          guild_id, channel_id, category_id, admin_role_id, support_role_id,
+          log_channel_id, title, description, banner_url, color, placeholder, options_json, message_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        mainGuildId,
+        DEPLOYED_VNL_CONFIG.channelId,
+        DEPLOYED_VNL_CONFIG.categoryId,
+        DEPLOYED_VNL_CONFIG.adminRoleId,
+        DEPLOYED_VNL_CONFIG.supportRoleId,
+        DEPLOYED_VNL_CONFIG.logChannelId,
+        DEPLOYED_VNL_CONFIG.title,
+        DEPLOYED_VNL_CONFIG.description,
+        DEPLOYED_VNL_CONFIG.bannerUrl,
+        DEPLOYED_VNL_CONFIG.color,
+        DEPLOYED_VNL_CONFIG.placeholder,
+        JSON.stringify(DEPLOYED_VNL_CONFIG.options),
+        DEPLOYED_VNL_CONFIG.messageId
+      );
+    } else if (!existing.message_id || !existing.banner_url || !existing.options_json || existing.options_json.includes('nitro_boost')) {
+      // Khôi phục lại cấu hình ticket đã triển khai trước đó nếu đang ở trạng thái rỗng hoặc thiếu
+      d.prepare(`
+        UPDATE ticket_config SET
+          channel_id = ?,
+          category_id = ?,
+          admin_role_id = ?,
+          support_role_id = ?,
+          log_channel_id = ?,
+          title = ?,
+          description = ?,
+          banner_url = ?,
+          color = ?,
+          placeholder = ?,
+          options_json = ?,
+          message_id = ?
+        WHERE guild_id = ?
+      `).run(
+        DEPLOYED_VNL_CONFIG.channelId,
+        DEPLOYED_VNL_CONFIG.categoryId,
+        DEPLOYED_VNL_CONFIG.adminRoleId,
+        DEPLOYED_VNL_CONFIG.supportRoleId,
+        DEPLOYED_VNL_CONFIG.logChannelId,
+        DEPLOYED_VNL_CONFIG.title,
+        DEPLOYED_VNL_CONFIG.description,
+        DEPLOYED_VNL_CONFIG.bannerUrl,
+        DEPLOYED_VNL_CONFIG.color,
+        DEPLOYED_VNL_CONFIG.placeholder,
+        JSON.stringify(DEPLOYED_VNL_CONFIG.options),
+        DEPLOYED_VNL_CONFIG.messageId,
+        mainGuildId
+      );
+    }
+  } catch {}
+
   return d;
 }
 
@@ -80,28 +199,23 @@ function db() {
  * Lấy cấu hình ticket của server
  */
 function getConfig(guildId) {
+  const isMainGuild = !guildId || guildId === (process.env.GUILD_ID || '1555173619129122866');
   const row = db().prepare('SELECT * FROM ticket_config WHERE guild_id = ?').get(guildId);
+  const fallback = isMainGuild ? DEPLOYED_VNL_CONFIG : {};
+
   return {
-    channelId: row?.channel_id || '',
-    categoryId: row?.category_id || '',
-    adminRoleId: row?.admin_role_id || '',
-    supportRoleId: row?.support_role_id || '',
-    logChannelId: row?.log_channel_id || '',
-    title: row?.title || '🏷️ HỆ THỐNG TICKET',
-    description: row?.description || (
-      'Chào mừng bạn đến với hệ thống hỗ trợ của **VietNam Legacy**!\n\n' +
-      'Nếu bạn cần hỗ trợ, mua hàng, báo cáo vấn đề hoặc muốn liên hệ với Staff, hãy chọn loại Ticket phù hợp từ danh mục bên dưới.\n\n' +
-      '📌 **Lưu ý:**\n' +
-      '• Không tạo Ticket khi không có mục đích rõ ràng.\n' +
-      '• Mô tả vấn đề cụ thể để Staff có thể hỗ trợ nhanh hơn.\n' +
-      '• Không spam hoặc tag Staff liên tục.\n' +
-      '• Mỗi vấn đề nên tạo 1 Ticket riêng.\n\n' +
-      '*VietNam Legacy — Connect • Community • Legacy*'
-    ),
-    bannerUrl: row?.banner_url || '',
-    color: row?.color || '#00a8ff',
-    placeholder: row?.placeholder || 'Nhấn Vào Đây Để Chọn Dịch Vụ / Hỗ Trợ...',
-    options: row?.options_json ? JSON.parse(row.options_json) : DEFAULT_OPTIONS,
+    channelId: row?.channel_id || fallback.channelId || '',
+    categoryId: row?.category_id || fallback.categoryId || '',
+    adminRoleId: row?.admin_role_id || fallback.adminRoleId || '',
+    supportRoleId: row?.support_role_id || fallback.supportRoleId || '',
+    logChannelId: row?.log_channel_id || fallback.logChannelId || '',
+    title: row?.title || fallback.title || '🏷️ HỆ THỐNG TICKET',
+    description: row?.description || fallback.description || DEPLOYED_DESCRIPTION,
+    bannerUrl: row?.banner_url || fallback.bannerUrl || '',
+    color: row?.color || fallback.color || '#00a8ff',
+    placeholder: row?.placeholder || fallback.placeholder || 'Nhấn Vào Đây Để Chọn Dịch Vụ / Hỗ Trợ...',
+    messageId: row?.message_id || fallback.messageId || '',
+    options: row?.options_json ? JSON.parse(row.options_json) : (fallback.options || DEFAULT_OPTIONS),
   };
 }
 
@@ -145,8 +259,8 @@ function saveConfig(guildId, patch) {
   db().prepare(`
     INSERT INTO ticket_config (
       guild_id, channel_id, category_id, admin_role_id, support_role_id,
-      log_channel_id, title, description, banner_url, color, placeholder, options_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      log_channel_id, title, description, banner_url, color, placeholder, options_json, message_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(guild_id) DO UPDATE SET
       channel_id = excluded.channel_id,
       category_id = excluded.category_id,
@@ -158,7 +272,8 @@ function saveConfig(guildId, patch) {
       banner_url = excluded.banner_url,
       color = excluded.color,
       placeholder = excluded.placeholder,
-      options_json = excluded.options_json
+      options_json = excluded.options_json,
+      message_id = COALESCE(excluded.message_id, ticket_config.message_id)
   `).run(
     guildId,
     updated.channelId,
@@ -171,7 +286,8 @@ function saveConfig(guildId, patch) {
     updated.bannerUrl,
     updated.color,
     updated.placeholder,
-    JSON.stringify(updated.options)
+    JSON.stringify(updated.options),
+    updated.messageId || null
   );
   return updated;
 }
@@ -218,35 +334,117 @@ function buildPanelPayload(guild, config) {
 }
 
 /**
- * Đăng bảng Ticket Panel vào một kênh Discord
+ * Đăng hoặc cập nhật bảng Ticket Panel vào một kênh Discord
  */
 async function sendTicketPanel(guild, channelId, optionsOverride = {}) {
-  const config = { ...getConfig(guild.id), ...optionsOverride };
+  const current = getConfig(guild.id);
+  const config = { ...current, ...optionsOverride, channelId };
   const channel = await guild.channels.fetch(channelId);
   if (!channel || ![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)) {
     throw new Error('Kênh được chọn không hợp lệ hoặc bot không có quyền truy cập.');
   }
 
   const payload = buildPanelPayload(guild, config);
-  const msg = await channel.send(payload);
+  let msg = null;
 
-  saveConfig(guild.id, { channelId, bannerUrl: config.bannerUrl });
-  return { ok: true, messageId: msg.id, channelId };
+  // Nếu đã có messageId trước đó và cùng kênh, cập nhật trực tiếp tin nhắn cũ
+  const targetMessageId = config.messageId || current.messageId;
+  if (targetMessageId && channel.messages && typeof channel.messages.fetch === 'function') {
+    try {
+      const existing = await channel.messages.fetch(targetMessageId);
+      if (existing && (existing.editable ?? true) && typeof existing.edit === 'function') {
+        msg = await existing.edit(payload);
+      }
+    } catch {
+      // Tin nhắn cũ không còn tồn tại hoặc không thể chỉnh sửa -> gửi tin nhắn mới
+    }
+  }
+
+  if (!msg) {
+    msg = await channel.send(payload);
+  }
+
+  const saved = saveConfig(guild.id, { ...config, channelId, messageId: msg.id });
+  return { ok: true, messageId: msg.id, channelId, config: saved };
 }
 
 /**
  * Xử lý khi thành viên chọn danh mục trong Dropdown Menu
  */
+const PARTNER_MGMT_ROLE_ID = '1559742079599382608';
+
+/**
+ * Kiểm tra xem một member có role Partner Management trở lên hay không
+ */
+function isPartnerManagementOrAbove(member, guild, config = {}, policy = null) {
+  if (!member || !guild) return false;
+  if (member.user?.bot) return false;
+
+  // 1. Chủ server hoặc có quyền Administrator
+  if ((guild.ownerId && member.id === guild.ownerId) || member.permissions?.has?.(P.Administrator)) {
+    return true;
+  }
+
+  // 2. Có role Admin Ticket hoặc Hỗ Trợ Ticket từ config
+  if (config.adminRoleId && member.roles?.cache?.has(config.adminRoleId)) return true;
+  if (config.supportRoleId && member.roles?.cache?.has(config.supportRoleId)) return true;
+
+  // 3. Có role Partner Management trực tiếp (theo ID hoặc theo tên)
+  if (member.roles?.cache?.has(PARTNER_MGMT_ROLE_ID)) return true;
+  if (member.roles?.cache && [...member.roles.cache.values()].some(r => /partner\s*management/i.test(r.name))) return true;
+
+  // 4. Tìm role Partner Management trên server để so sánh position
+  const pmRole = guild.roles?.cache?.get(PARTNER_MGMT_ROLE_ID) ||
+    (guild.roles?.cache && [...guild.roles.cache.values()].find(r => /partner\s*management/i.test(r.name)));
+
+  if (pmRole && member.roles?.highest?.comparePositionTo) {
+    if (member.roles.highest.comparePositionTo(pmRole) >= 0) return true;
+  }
+
+  // 5. Fallback cho nhóm xử lý riêng của ticket hoặc môi trường test
+  if (policy && canHandle(member, guild, policy)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Tải thông tin member an toàn cho cả Discord.js và môi trường test mock
+ */
+async function resolveGuildMember(guild, userOrId) {
+  if (!guild || !userOrId) return null;
+  const userId = typeof userOrId === 'string' ? userOrId : (userOrId.id || userOrId.user);
+  if (!userId) return null;
+
+  if (guild.members?.cache?.has(userId)) {
+    return guild.members.cache.get(userId);
+  }
+  if (typeof guild.members?.fetch !== 'function') return null;
+
+  try {
+    return await guild.members.fetch({ user: userId, force: true });
+  } catch {
+    try {
+      return await guild.members.fetch(userId);
+    } catch {
+      return null;
+    }
+  }
+}
+
 // Danh mục chưa có role riêng tiếp tục dùng nhóm hỗ trợ chung.
 function ticketPolicy(config, ticket) {
   const option = (config.options || []).find(o => o.value === ticket.category_value) || {};
   return { ...option, handlerRoleId: option.handlerRoleId || config.supportRoleId || '' };
 }
 function canHandle(member, guild, policy) {
-  if ((guild.ownerId && member.id === guild.ownerId) || member.permissions.has(P.Administrator)) return true;
-  const role = guild.roles.cache.get(policy.handlerRoleId);
-  return Boolean(role && (member.roles.cache.has(role.id) ||
-    (member.roles.highest?.comparePositionTo && member.roles.highest.comparePositionTo(role) > 0)));
+  if (!member || !guild) return false;
+  if ((guild.ownerId && member.id === guild.ownerId) || (member.permissions?.has && member.permissions.has(P.Administrator))) return true;
+  if (!policy || !policy.handlerRoleId) return false;
+  const role = guild.roles?.cache?.get(policy.handlerRoleId);
+  return Boolean(role && (member.roles?.cache?.has(role.id) ||
+    (member.roles?.highest?.comparePositionTo && member.roles.highest.comparePositionTo(role) > 0)));
 }
 
 async function handleSelectCategory(interaction) {
@@ -649,27 +847,35 @@ async function handleButtonAction(interaction) {
 
   const config = getConfig(guild.id);
   const member = interaction.member;
+  const policy = ticketPolicy(config, ticket);
 
-  // Quyền: Admin server, role AdminTicket, role Hỗ Trợ Ticket, hoặc người tạo ticket
-  const isAdmin = member.permissions.has(P.Administrator) || (config.adminRoleId && member.roles.cache.has(config.adminRoleId));
-  const isSupport = canHandle(member, guild, ticketPolicy(config, ticket));
+  // Quyền: Admin server, role AdminTicket, role Hỗ Trợ Ticket, Partner Management trở lên, hoặc người tạo ticket
+  const isPartnerMgmt = isPartnerManagementOrAbove(member, guild, config, policy);
+  const isAdmin = member.permissions?.has?.(P.Administrator) || (config.adminRoleId && member.roles?.cache?.has?.(config.adminRoleId));
+  const isSupport = canHandle(member, guild, policy) || isPartnerMgmt;
   const isCreator = interaction.user.id === ticket.user_id;
 
   const action = interaction.customId.replace('ticket:btn_', '');
 
   if (action === 'transfer') {
-    if (ticket.status !== 'open' || (!isAdmin && !isSupport)) return interaction.reply({ content: '⛔ Chỉ nhân sự có quyền xử lý mới được chuyển ticket đang mở.', flags: 64 });
+    if (typeof guild.roles?.fetch === 'function') await guild.roles.fetch().catch(() => {});
+    if (ticket.status !== 'open' || (!isAdmin && !isSupport && !isPartnerMgmt)) {
+      return interaction.reply({
+        content: '⛔ Chỉ nhân sự có role Partner Management trở lên mới được chuyển ticket đang mở.',
+        flags: 64,
+      });
+    }
     return interaction.reply({
-      content: 'Chọn staff tiếp nhận mới. Người được chọn phải có quyền xử lý loại ticket này.', flags: 64,
+      content: 'Chọn staff tiếp nhận mới (yêu cầu role **Partner Management** trở lên):',
+      flags: 64,
       components: [new ActionRowBuilder().addComponents(new UserSelectMenuBuilder()
         .setCustomId('ticket:transfer:' + interaction.message.id)
-        .setPlaceholder('Chọn staff tiếp nhận').setMinValues(1).setMaxValues(1))],
+        .setPlaceholder('Chọn staff tiếp nhận (Partner Management trở lên)').setMinValues(1).setMaxValues(1))],
     });
   }
 
   if (action === 'grant_role') {
     await interaction.deferReply({ flags: 64 });
-    const policy = ticketPolicy(config, ticket);
     const actor = await guild.members.fetch({ user: interaction.user.id, force: true }).catch(() => null);
     const role = await guild.roles.fetch(policy.grantRoleId || '0').catch(() => null);
     const handler = guild.roles.cache.get(policy.handlerRoleId);
@@ -699,7 +905,7 @@ async function handleButtonAction(interaction) {
   // 1. Nhận xử lý Ticket (Claim)
   // ─────────────────────────────────────────────────────────────
   if (action === 'claim') {
-    if (!isAdmin && !isSupport) {
+    if (!isAdmin && !isSupport && !isPartnerMgmt) {
       if (isCreator) {
         return interaction.reply({
           content: '⚠️ Bạn là người tạo ticket này. Vui lòng đợi đội ngũ Staff/Hỗ trợ tiếp nhận nhé!',
@@ -707,7 +913,7 @@ async function handleButtonAction(interaction) {
         });
       }
       return interaction.reply({
-        content: '⛔ Bạn không có quyền nhận ticket này. Chỉ Staff Hỗ Trợ hoặc Admin mới có quyền nhận.',
+        content: '⛔ Bạn không có quyền nhận ticket này. Chỉ Staff Hỗ Trợ (Partner Management trở lên) hoặc Admin mới có quyền nhận.',
         flags: 64,
       });
     }
@@ -875,28 +1081,74 @@ async function handleTransfer(interaction) {
   const ticket = db().prepare('SELECT * FROM tickets WHERE channel_id = ? AND guild_id = ?').get(channel.id, guild.id);
   const finish = content => interaction.editReply({ content, components: [] });
   if (!ticket || ticket.status !== 'open') return finish('⚠️ Ticket đã đóng hoặc không còn tồn tại.');
+
+  if (typeof guild.roles?.fetch === 'function') await guild.roles.fetch().catch(() => {});
   const config = getConfig(guild.id), policy = ticketPolicy(config, ticket);
-  const actor = await guild.members.fetch({ user: interaction.user.id, force: true }).catch(() => null);
-  const target = await guild.members.fetch({ user: interaction.values[0], force: true }).catch(() => null);
-  const eligible = member => member && (canHandle(member, guild, policy) || (config.adminRoleId && member.roles.cache.has(config.adminRoleId)));
-  if (!eligible(actor)) return finish('⛔ Bạn không còn quyền chuyển ticket này.');
-  if (!target || target.user.bot || !eligible(target)) return finish('⚠️ Hãy chọn một staff có quyền xử lý loại ticket này, không chọn tài khoản bot.');
+
+  const actor = await resolveGuildMember(guild, interaction.user.id);
+  const targetId = interaction.values?.[0];
+  const target = targetId ? await resolveGuildMember(guild, targetId) : null;
+
+  if (!actor || !isPartnerManagementOrAbove(actor, guild, config, policy)) {
+    return finish('⛔ Bạn không còn quyền chuyển ticket này. Yêu cầu role Partner Management trở lên.');
+  }
+
+  if (!target || target.user?.bot) {
+    return finish('⚠️ Hãy chọn một staff hợp lệ, không chọn tài khoản bot.');
+  }
+
+  if (!isPartnerManagementOrAbove(target, guild, config, policy)) {
+    return finish('⚠️ Không thể chuyển ticket: Người được chọn phải có role Partner Management trở lên.');
+  }
+
   if (ticket.claimed_by === target.id) return finish('ℹ️ Staff này đang tiếp nhận ticket rồi.');
+
   // Bảo đảm staff được chọn có thể vào phòng, kể cả khi chỉ có role cấp trên.
   try {
-    await channel.permissionOverwrites.edit(target.id, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true, AttachFiles: true, EmbedLinks: true });
-  } catch { return finish('❌ Bot không thể cấp quyền vào phòng cho staff. Ticket chưa được chuyển.'); }
+    if (channel.permissionOverwrites?.edit) {
+      await channel.permissionOverwrites.edit(target.id, {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        AttachFiles: true,
+        EmbedLinks: true,
+      });
+    }
+  } catch (err) {
+    console.error('[TICKET TRANSFER OVERWRITE ERROR]', err);
+    return finish('❌ Bot không thể cấp quyền vào phòng cho staff. Ticket chưa được chuyển.');
+  }
+
   const now = Date.now();
   const changed = db().prepare("UPDATE tickets SET claimed_by = ?, claimed_at = ? WHERE id = ? AND status = 'open' AND claimed_by IS ?")
     .run(target.id, now, ticket.id, ticket.claimed_by);
   if (!changed.changes) return finish('⚠️ Ticket vừa thay đổi người xử lý hoặc đã đóng. Hãy mở lại nút Chuyển Staff.');
+
   const previous = ticket.claimed_by;
   ticket.claimed_by = target.id; ticket.claimed_at = now;
   const messageId = interaction.customId.slice('ticket:transfer:'.length);
-  const message = await channel.messages.fetch(messageId).catch(() => null);
-  if (message?.author.id === guild.client.user.id) await message.edit({ embeds: [buildTicketWelcomeEmbed(ticket, null, config, guild)], components: [buildTicketButtons(ticket, config)], allowedMentions: { parse: [] } }).catch(() => {});
-  await channel.setTopic('Ticket của ' + ticket.user_id + ' • Loại: ' + ticket.category_label + ' • Đang xử lý: ' + target.user.tag).catch(() => {});
-  await channel.send({ content: '🔄 <@' + ticket.user_id + '>, ticket của bạn đã được chuyển ' + (previous ? 'từ <@' + previous + '> ' : '') + 'sang <@' + target.id + '> tiếp nhận.\nNgười chuyển: <@' + actor.id + '>. Staff mới sẽ tiếp tục hỗ trợ bạn tại đây nhé!', allowedMentions: { users: [ticket.user_id, target.id], roles: [] } }).catch(() => {});
+  if (messageId && channel.messages?.fetch) {
+    const message = await channel.messages.fetch(messageId).catch(() => null);
+    if (message?.author?.id === guild.client?.user?.id && typeof message.edit === 'function') {
+      await message.edit({
+        embeds: [buildTicketWelcomeEmbed(ticket, null, config, guild)],
+        components: [buildTicketButtons(ticket, config)],
+        allowedMentions: { parse: [] },
+      }).catch(() => {});
+    }
+  }
+
+  if (typeof channel.setTopic === 'function') {
+    await channel.setTopic('Ticket của ' + ticket.user_id + ' • Loại: ' + ticket.category_label + ' • Đang xử lý: ' + (target.user?.tag || target.user?.username || target.id)).catch(() => {});
+  }
+
+  if (typeof channel.send === 'function') {
+    await channel.send({
+      content: '🔄 <@' + ticket.user_id + '>, ticket của bạn đã được chuyển ' + (previous ? 'từ <@' + previous + '> ' : '') + 'sang **<@' + target.id + '>** tiếp nhận.\nNgười chuyển: <@' + actor.id + '>. Staff mới sẽ tiếp tục hỗ trợ bạn tại đây nhé!',
+      allowedMentions: { users: [ticket.user_id, target.id], roles: [] },
+    }).catch(() => {});
+  }
+
   return finish('✅ Đã chuyển ticket sang staff mới.');
 }
 
@@ -946,6 +1198,9 @@ module.exports = {
   refreshOpenTickets,
   ticketPolicy,
   canHandle,
+  isPartnerManagementOrAbove,
+  resolveGuildMember,
+  PARTNER_MGMT_ROLE_ID,
   getConfig,
   saveConfig,
   buildPanelPayload,

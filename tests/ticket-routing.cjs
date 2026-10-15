@@ -44,6 +44,28 @@ actor=member('low',1);await system.handleTransfer(transfer);
 assert.equal(getDb().prepare("SELECT claimed_by FROM tickets WHERE channel_id='ch'").get().claimed_by,'oldstaff');
 actor=member('staff',5,true);newStaff.user.bot=true;await system.handleTransfer(transfer);
 assert.equal(getDb().prepare("SELECT claimed_by FROM tickets WHERE channel_id='ch'").get().claimed_by,'oldstaff');
+
+// Kiểm tra chuyển staff yêu cầu role Partner Management trở lên
+const pmRole = { id: system.PARTNER_MGMT_ROLE_ID, name: 'Partner Management', position: 74 };
+guild.roles.cache.set(pmRole.id, pmRole);
+const pmStaff = { id: 'pm_user', user: { tag: 'pm_user', bot: false }, permissions: { has: () => false }, roles: { cache: new Map([[pmRole.id, pmRole]]), highest: { comparePositionTo: () => 0 } } };
+const lowRoleStaff = { id: 'low_role_user', user: { tag: 'low_role_user', bot: false }, permissions: { has: () => false }, roles: { cache: new Map(), highest: { comparePositionTo: () => -1 } } };
+
+assert.equal(system.isPartnerManagementOrAbove(pmStaff, guild, cfg), true);
+assert.equal(system.isPartnerManagementOrAbove(lowRoleStaff, guild, cfg), false);
+
+getDb().prepare("UPDATE tickets SET claimed_by='oldstaff' WHERE channel_id='ch'").run();
+guild.members.fetch = async q => (q.user === 'low_role_user' ? lowRoleStaff : (q.user === 'pm_user' ? pmStaff : actor));
+const lowTransfer = { ...transfer, values: ['low_role_user'] };
+await system.handleTransfer(lowTransfer);
+assert.equal(getDb().prepare("SELECT claimed_by FROM tickets WHERE channel_id='ch'").get().claimed_by, 'oldstaff');
+assert.match(reply, /Partner Management/);
+
+const pmTransfer = { ...transfer, values: ['pm_user'] };
+await system.handleTransfer(pmTransfer);
+assert.equal(getDb().prepare("SELECT claimed_by FROM tickets WHERE channel_id='ch'").get().claimed_by, 'pm_user');
+assert.match(reply, /Đã chuyển ticket sang staff mới/);
+
 const buttons=system.buildTicketButtons({},cfg).components.map(b=>b.data.custom_id);
 assert(buttons.includes('ticket:btn_transfer'));assert(!buttons.includes('ticket:btn_transcript'));
 console.log('PASS ticket-routing: lưu cấu hình, nhóm xử lý, cấp role, chống cấp sai quyền và ticket đóng.');

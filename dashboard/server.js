@@ -178,9 +178,13 @@ function createDashboard(client, options = {}) {
             const categories = [...allChannels.values()]
               .filter(c => c && c.type === ChannelType.GuildCategory)
               .map(c => ({ id: c.id, name: c.name }));
+            const textChannels = [...allChannels.values()]
+              .filter(c => c && [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(c.type))
+              .map(c => ({ id: c.id, name: c.name, type: c.type }));
             return json(res, 200, {
               config: ticketSystem.getConfig(guild.id),
               categories,
+              channels: textChannels,
             });
           }
           if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
@@ -207,6 +211,7 @@ function createDashboard(client, options = {}) {
             const resPublish = await ticketSystem.sendTicketPanel(guild, input.channelId, saved);
             return json(res, 200, {
               ok: true,
+              config: resPublish.config || ticketSystem.getConfig(guild.id),
               messageUrl: `https://discord.com/channels/${guild.id}/${input.channelId}/${resPublish.messageId}`,
             });
           }
