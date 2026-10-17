@@ -326,6 +326,17 @@ client.on(
       return;
     }
 
+    if (interaction.isButton?.() && interaction.customId?.startsWith('quest:')) {
+      try { await require('./utils/questManager').handleButtonInteraction(interaction); }
+      catch (error) {
+        console.error('[QUEST BUTTON ERROR]', error);
+        const payload = { content: 'Có lỗi xảy ra khi xử lý thao tác Quest. Vui lòng thử lại.', flags: 64 };
+        if (interaction.deferred) await interaction.editReply(payload).catch(() => {});
+        else if (!interaction.replied) await interaction.reply(payload).catch(() => {});
+      }
+      return;
+    }
+
     if (interaction.isAutocomplete?.()) {
       const command = client.commands.get(interaction.commandName);
       if (command?.autocomplete) {
