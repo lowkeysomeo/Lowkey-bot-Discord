@@ -262,6 +262,87 @@ const security = require('../utils/securitySystem');
   await staffWatch.onGuildUpdate(oldGuildNoIcon, newGuildWithIcon);
   assert.equal(iconRestored?.icon, null);
 
+  // 4. Testing Bot Command staff moderation (10 bans / 15 kicks limits and role stripping)
+  console.log('4. Testing Staff Watch: Bot Command tracking & default limits (10 bans / 15 kicks)...');
+  const botCmdGuildId = 'guild-bot-cmd-test';
+  let botCmdStripped = [];
+  let botCmdTimeouts = [];
+
+  const botCmdStaffMember = {
+    id: 'staff-bot-user',
+    guild: { id: botCmdGuildId },
+    moderatable: true,
+    timeout: async (ms, reason) => {
+      botCmdTimeouts.push({ ms, reason });
+    },
+    roles: {
+      cache: new Map([
+        ['role-staff-name', { id: 'role-staff-name', name: 'Ban Quản Trị Staff', editable: true, managed: false, permissions: { any: () => false } }],
+        ['role-mod-name', { id: 'role-mod-name', name: 'Partner Management', editable: true, managed: false, permissions: { any: () => false } }],
+        ['role-member', { id: 'role-member', name: 'Thành viên', editable: true, managed: false, permissions: { any: () => false } }],
+      ]),
+      remove: async (roleId, reason) => {
+        botCmdStripped.push(roleId);
+      },
+    },
+  };
+
+  const botCmdGuild = {
+    id: botCmdGuildId,
+    name: 'Bot Command Test Guild',
+    ownerId: 'owner-999',
+    client: { user: { id: 'bot-self' } },
+    members: {
+      fetch: async (id) => (id === 'staff-bot-user' ? botCmdStaffMember : null),
+    },
+    channels: {
+      fetch: async () => mockChannel,
+    },
+  };
+
+  // Bật securityStaffWatch nhưng dùng mặc định: maxBans = 10, maxKicks = 15
+  saveOptions(botCmdGuildId, {
+    securityEnabled: true,
+    securityStaffWatch: true,
+  });
+
+  // Staff dùng lệnh bot ban 10 người đầu tiên -> Không bị phạt
+  for (let i = 1; i <= 10; i++) {
+    const res = await staffWatch.handleStaffAction(botCmdGuild, 'staff-bot-user', 'ban', `victim-ban-${i}`);
+    assert.equal(res.triggered, false);
+    assert.equal(res.count, i);
+    assert.equal(res.max, 10);
+  }
+  assert.equal(botCmdStripped.length, 0);
+
+  // Staff dùng lệnh bot ban người thứ 11 (> 10 người/ngày) -> Tự xóa role staff & timeout!
+  const ban11 = await staffWatch.handleStaffAction(botCmdGuild, 'staff-bot-user', 'ban', 'victim-ban-11');
+  assert.equal(ban11.triggered, true);
+  assert.equal(ban11.count, 11);
+  assert.equal(ban11.max, 10);
+  assert.ok(botCmdStripped.includes('role-staff-name'), 'Phải xóa role chứa tên Staff');
+  assert.ok(botCmdStripped.includes('role-mod-name'), 'Phải xóa role chứa tên Partner Management');
+  assert.ok(!botCmdStripped.includes('role-member'), 'Không được xóa role thành viên thường');
+  assert.equal(botCmdTimeouts.length, 1);
+
+  // Kiểm tra chặn lệnh ban tiếp theo khi đã vượt hạn mức
+  assert.equal(staffWatch.isStaffLimitExceeded(botCmdGuild, 'staff-bot-user', 'ban'), true);
+
+  // Staff dùng lệnh bot kick 15 người đầu tiên -> Không bị phạt
+  for (let i = 1; i <= 15; i++) {
+    const res = await staffWatch.handleStaffAction(botCmdGuild, 'staff-bot-user', 'kick', `victim-kick-${i}`);
+    assert.equal(res.triggered, false);
+    assert.equal(res.count, i);
+    assert.equal(res.max, 15);
+  }
+
+  // Staff dùng lệnh bot kick người thứ 16 (> 15 người/ngày) -> Tự xóa role staff & timeout!
+  const kick16 = await staffWatch.handleStaffAction(botCmdGuild, 'staff-bot-user', 'kick', 'victim-kick-16');
+  assert.equal(kick16.triggered, true);
+  assert.equal(kick16.count, 16);
+  assert.equal(kick16.max, 15);
+  assert.equal(staffWatch.isStaffLimitExceeded(botCmdGuild, 'staff-bot-user', 'kick'), true);
+
   console.log('PASS: Webhook Guard & Staff Watch successfully verified!');
 })().catch((err) => {
   console.error('FAILED:', err);

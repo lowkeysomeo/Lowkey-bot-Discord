@@ -32,6 +32,13 @@ module.exports.execute = async (interaction) => {
   if (target.id === interaction.client.user.id)
     return interaction.editReply('❌ Không thể ban bot.');
 
+  const { isStaffLimitExceeded, handleStaffAction, stripStaffRoles } = require('../../utils/staffWatch');
+  if (isStaffLimitExceeded(interaction.guild, interaction.user.id, 'ban')) {
+    const staffMember = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+    if (staffMember) await stripStaffRoles(staffMember, 'Staff Watch: Vượt hạn mức ban trong ngày (tự xóa role staff)');
+    return interaction.editReply('❌ Bạn đã vượt quá hạn mức ban trong ngày của Staff. Lệnh ban bị từ chối và role Staff của bạn đã bị thu hồi.');
+  }
+
   let member;
   try { member = await interaction.guild.members.fetch(target.id); } catch { /* Không trong server */ }
 
@@ -57,6 +64,16 @@ module.exports.execute = async (interaction) => {
     mod: interaction.user,
     reason,
   });
+
+  const watchResult = await handleStaffAction(interaction.guild, interaction.user.id, 'ban', target.id);
+  if (watchResult?.triggered) {
+    return interaction.editReply(
+      `🔨 Đã ban **${target.tag || target.username}**. Lý do: ${reason}\n\n` +
+      `🚨 **CẢNH BÁO STAFF WATCH:** Bạn đã thực hiện ${watchResult.count}/${watchResult.max} lượt ban trong 24 giờ qua (vượt quá hạn mức cho phép). ` +
+      `Toàn bộ role Staff của bạn đã bị tự động xóa để bảo vệ an toàn server!` +
+      (watchResult.unbanned ? '\n*(Lệnh ban này đã được tự động hoàn tác theo cài đặt bảo vệ).*' : '')
+    );
+  }
 
   return interaction.editReply(`🔨 Đã ban **${target.tag || target.username}**. Lý do: ${reason}`);
 };

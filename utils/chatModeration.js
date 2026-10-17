@@ -77,12 +77,12 @@ async function handleChatModeration(message) {
     message.delete().catch(() => {});
   }
 
-  // Phản hồi kết quả và tự động xóa sau 5 giây để không làm loãng kênh chat
-  const sendFeedback = async (content) => {
+  // Phản hồi kết quả và tự động xóa sau 5 giây (hoặc thời gian tùy chỉnh) để không làm loãng kênh chat
+  const sendFeedback = async (content, autoDeleteMs = 5000) => {
     try {
       const sent = await message.reply(content).catch(() => message.channel?.send?.(content));
       if (sent && typeof sent.delete === 'function') {
-        setTimeout(() => sent.delete().catch(() => {}), 5000);
+        setTimeout(() => sent.delete().catch(() => {}), autoDeleteMs);
       }
       return sent;
     } catch {
@@ -155,6 +155,13 @@ async function handleChatModeration(message) {
         await sendFeedback('❌ Bot không đủ quyền hoặc vị trí role để ban thành viên này.');
         return true;
       }
+      const staffWatch = require('./staffWatch');
+      if (staffWatch.isStaffLimitExceeded(message.guild, message.author.id, 'ban')) {
+        const staffMember = message.member || await message.guild.members.fetch(message.author.id).catch(() => null);
+        if (staffMember) await staffWatch.stripStaffRoles(staffMember, 'Staff Watch: Vượt hạn mức ban trong ngày (tự xóa role staff)');
+        await sendFeedback('❌ Bạn đã vượt quá hạn mức ban trong ngày của Staff. Lệnh ban bị từ chối và role Staff của bạn đã bị thu hồi.');
+        return true;
+      }
       const reason = rest.join(' ') || 'Không có lý do.';
       await message.guild.members.ban(targetId, {
         reason: `[${message.author.tag}] ${reason}`,
@@ -167,7 +174,17 @@ async function handleChatModeration(message) {
         reason,
       });
 
-      await sendFeedback(`🔨 Đã ban <@${targetId}>. Lý do: ${reason}`);
+      const watchResult = await staffWatch.handleStaffAction(message.guild, message.author.id, 'ban', targetId);
+      if (watchResult?.triggered) {
+        await sendFeedback(
+          `🔨 Đã ban <@${targetId}>. Lý do: ${reason}\n\n🚨 **CẢNH BÁO STAFF WATCH:** Bạn đã thực hiện ${watchResult.count}/${watchResult.max} lượt ban trong 24 giờ qua (vượt quá hạn mức cho phép). ` +
+          `Toàn bộ role Staff của bạn đã bị tự động xóa để bảo vệ an toàn server!` +
+          (watchResult.unbanned ? ' (Lệnh ban đã được tự động hoàn tác).' : ''),
+          15000
+        );
+      } else {
+        await sendFeedback(`🔨 Đã ban <@${targetId}>. Lý do: ${reason}`);
+      }
       return true;
     }
 
@@ -180,6 +197,13 @@ async function handleChatModeration(message) {
         await sendFeedback('❌ Bot không đủ quyền hoặc vị trí role để kick thành viên này.');
         return true;
       }
+      const staffWatch = require('./staffWatch');
+      if (staffWatch.isStaffLimitExceeded(message.guild, message.author.id, 'kick')) {
+        const staffMember = message.member || await message.guild.members.fetch(message.author.id).catch(() => null);
+        if (staffMember) await staffWatch.stripStaffRoles(staffMember, 'Staff Watch: Vượt hạn mức kick trong ngày (tự xóa role staff)');
+        await sendFeedback('❌ Bạn đã vượt quá hạn mức kick trong ngày của Staff. Lệnh kick bị từ chối và role Staff của bạn đã bị thu hồi.');
+        return true;
+      }
       const reason = rest.join(' ') || 'Không có lý do.';
       await targetMember.kick(`[${message.author.tag}] ${reason}`);
 
@@ -190,7 +214,16 @@ async function handleChatModeration(message) {
         reason,
       });
 
-      await sendFeedback(`👢 Đã kick <@${targetId}>. Lý do: ${reason}`);
+      const watchResult = await staffWatch.handleStaffAction(message.guild, message.author.id, 'kick', targetId);
+      if (watchResult?.triggered) {
+        await sendFeedback(
+          `👢 Đã kick <@${targetId}>. Lý do: ${reason}\n\n🚨 **CẢNH BÁO STAFF WATCH:** Bạn đã thực hiện ${watchResult.count}/${watchResult.max} lượt kick trong 24 giờ qua (vượt quá hạn mức cho phép). ` +
+          `Toàn bộ role Staff của bạn đã bị tự động xóa để bảo vệ an toàn server!`,
+          15000
+        );
+      } else {
+        await sendFeedback(`👢 Đã kick <@${targetId}>. Lý do: ${reason}`);
+      }
       return true;
     }
 

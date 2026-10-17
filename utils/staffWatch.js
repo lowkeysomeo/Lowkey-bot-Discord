@@ -79,19 +79,29 @@ async function sendAlert(guild, options, embed) {
   }
 }
 
+function isStaffRole(role, guild) {
+  if (!role || role.id === guild?.id || role.managed) return false;
+  if (role.permissions?.any && role.permissions.any(sensitivePermissions)) return true;
+  const name = String(role.name || '').toLowerCase();
+  if (/(staff|admin|mod|quản\s*trị|bảo\s*vệ|partner\s*management|hỗ\s*trợ|supporter|kiểm\s*duyệt)/i.test(name)) return true;
+  return false;
+}
+
 /**
- * Tạm thời thu hồi toàn bộ role chứa quyền nhạy cảm/quản trị của Staff
+ * Tự động xóa/thu hồi toàn bộ role Staff và role chứa quyền nhạy cảm của Staff
  */
-async function stripStaffRoles(member, reason = 'Staff Watch: Thu hồi quyền quản trị') {
+async function stripStaffRoles(member, reason = 'Staff Watch: Vượt hạn mức ban/kick trong ngày (tự xóa role staff)') {
   if (!member || !member.roles?.cache) return [];
   const removedRoles = [];
   for (const role of member.roles.cache.values()) {
     if (role.id === member.guild.id || role.managed) continue;
-    if (role.permissions?.any(sensitivePermissions)) {
-      if (role.editable) {
+    if (role.permissions?.any?.(sensitivePermissions) || isStaffRole(role, member.guild)) {
+      if (role.editable || role.editable === undefined) {
         try {
-          await member.roles.remove(role.id, reason);
-          removedRoles.push(role.name);
+          if (typeof member.roles.remove === 'function') {
+            await member.roles.remove(role.id, reason);
+            removedRoles.push(role.name || role.id);
+          }
         } catch (e) {
           console.error('[STAFF WATCH] Không gỡ được role:', role.name, e.message);
         }
@@ -102,21 +112,46 @@ async function stripStaffRoles(member, reason = 'Staff Watch: Thu hồi quyền 
 }
 
 /**
- * Xử lý sự kiện Audit Log (Ban, Kick) để giám sát hạn mức của Staff
+ * Kiểm tra xem Staff đã vượt quá hạn mức Ban/Kick trong 24h hay chưa
  */
-async function onAuditLog(entry, guild) {
-  if (!entry) return;
+function isStaffLimitExceeded(guild, executorId, action) {
+  if (!guild || !executorId) return false;
   const options = getOptions(guild.id);
-  if (!options.securityEnabled || !options.securityStaffWatch) return;
+  if (!options.securityStaffWatch) return false;
+  if (trusted(guild, executorId, options)) return false;
 
-  const executorId = entry.executorId;
-  if (!executorId || trusted(guild, executorId, options)) return;
+  if (action === 'ban') {
+    const banCount = countStaffActions(guild.id, executorId, 'ban', 86400000);
+    const maxBans = Number(options.securityStaffDailyBanLimit) || 10;
+    return banCount > maxBans;
+  }
+  if (action === 'kick') {
+    const kickCount = countStaffActions(guild.id, executorId, 'kick', 86400000);
+    const maxKicks = Number(options.securityStaffDailyKickLimit) || 15;
+    return kickCount > maxKicks;
+  }
+  return false;
+}
+
+/**
+ * Giám sát và xử lý khi Staff thực hiện hành động Ban hoặc Kick (qua Discord UI hoặc qua lệnh Bot)
+ * @param {Guild} guild
+ * @param {string} executorId - ID của Staff thực hiện
+ * @param {'ban'|'kick'} action - Loại hành động
+ * @param {string} targetId - ID của người bị ban/kick
+ * @returns {Promise<{ triggered: boolean, action?: string, count?: number, max?: number, stripped?: string[], unbanned?: boolean }>}
+ */
+async function handleStaffAction(guild, executorId, action, targetId) {
+  if (!guild || !executorId) return { triggered: false };
+  const options = getOptions(guild.id);
+  if (!options.securityStaffWatch) return { triggered: false };
+  if (trusted(guild, executorId, options)) return { triggered: false };
 
   // 1. Giám sát lệnh BAN của Staff
-  if (entry.action === AuditLogEvent.MemberBanAdd) {
-    recordStaffAction(guild.id, executorId, 'ban', entry.targetId);
+  if (action === 'ban' || action === AuditLogEvent.MemberBanAdd) {
+    recordStaffAction(guild.id, executorId, 'ban', targetId);
     const banCount = countStaffActions(guild.id, executorId, 'ban', 86400000);
-    const maxBans = options.securityStaffDailyBanLimit || 5;
+    const maxBans = Number(options.securityStaffDailyBanLimit) || 10;
 
     if (banCount > maxBans) {
       let staffMember = null;
@@ -124,7 +159,7 @@ async function onAuditLog(entry, guild) {
       if (typeof guild.members?.fetch === 'function') {
         staffMember = await guild.members.fetch(executorId).catch(() => null);
         if (staffMember) {
-          stripped = await stripStaffRoles(staffMember, 'Staff Watch: Vượt hạn mức ban trong ngày');
+          stripped = await stripStaffRoles(staffMember, 'Staff Watch: Vượt hạn mức ban trong ngày (tự xóa role staff)');
           if (staffMember.moderatable && typeof staffMember.timeout === 'function') {
             await staffMember.timeout(60 * 60 * 1000, 'Staff Watch: Vượt hạn mức ban trong ngày').catch(() => {});
           }
@@ -133,9 +168,9 @@ async function onAuditLog(entry, guild) {
 
       // Tự động mở ban cho người bị ban nếu khả dụng
       let unbanned = false;
-      if (options.securityStaffUndoBan && entry.targetId && typeof guild.members?.unban === 'function') {
+      if (options.securityStaffUndoBan && targetId && typeof guild.members?.unban === 'function') {
         try {
-          await guild.members.unban(entry.targetId, 'Staff Watch: Tự động hoàn tác lệnh ban vượt hạn mức');
+          await guild.members.unban(targetId, 'Staff Watch: Tự động hoàn tác lệnh ban vượt hạn mức');
           unbanned = true;
         } catch (e) {
           console.error('[STAFF WATCH] Không unban được nạn nhân:', e.message);
@@ -146,25 +181,26 @@ async function onAuditLog(entry, guild) {
         .setColor(0xdc2626)
         .setTitle('🚨 STAFF WATCH: Cảnh báo Staff vượt quá hạn mức Ban trong ngày!')
         .setDescription(
-          `Staff <@${executorId}> (\`${executorId}\`) vừa ban thành viên <@${entry.targetId}>.\n\n` +
+          `Staff <@${executorId}> (\`${executorId}\`) vừa ban thành viên <@${targetId}>.\n\n` +
           `📊 **Thống kê:** Staff này đã thực hiện **${banCount}/${maxBans} lượt ban** trong vòng 24 giờ qua (vượt quá giới hạn an toàn).\n\n` +
           `🔒 **Hành động bảo vệ tự động:**\n` +
-          `• ${stripped.length ? `Đã tạm thu hồi các role quản trị: **${stripped.join(', ')}**` : 'Đã gắn cờ cảnh báo'}\n` +
+          `• ${stripped.length ? `Đã tự động thu hồi toàn bộ role Staff/quản trị: **${stripped.join(', ')}**` : 'Đã gắn cờ cảnh báo (không tìm thấy role có thể gỡ)'}\n` +
           `• Đã tạm hạn chế (timeout) Staff 60 phút để phòng chống nguy cơ nuke/lạm quyền.\n` +
-          `• ${unbanned ? `✅ Đã tự động gỡ ban cho nạn nhân <@${entry.targetId}>.` : `⚠️ Hãy kiểm tra và cân nhắc gỡ ban cho <@${entry.targetId}> nếu đây là lệnh ban nhầm.`}`
+          `• ${unbanned ? `✅ Đã tự động gỡ ban cho nạn nhân <@${targetId}>.` : `⚠️ Hãy kiểm tra và cân nhắc gỡ ban cho <@${targetId}> nếu đây là lệnh ban nhầm.`}`
         )
         .setTimestamp();
 
       await sendAlert(guild, options, embed);
-      return { triggered: true, action: 'ban', banCount };
+      return { triggered: true, action: 'ban', count: banCount, max: maxBans, stripped, unbanned };
     }
+    return { triggered: false, action: 'ban', count: banCount, max: maxBans };
   }
 
   // 2. Giám sát lệnh KICK của Staff
-  if (entry.action === AuditLogEvent.MemberKick) {
-    recordStaffAction(guild.id, executorId, 'kick', entry.targetId);
+  if (action === 'kick' || action === AuditLogEvent.MemberKick) {
+    recordStaffAction(guild.id, executorId, 'kick', targetId);
     const kickCount = countStaffActions(guild.id, executorId, 'kick', 86400000);
-    const maxKicks = options.securityStaffDailyKickLimit || 10;
+    const maxKicks = Number(options.securityStaffDailyKickLimit) || 15;
 
     if (kickCount > maxKicks) {
       let staffMember = null;
@@ -172,7 +208,7 @@ async function onAuditLog(entry, guild) {
       if (typeof guild.members?.fetch === 'function') {
         staffMember = await guild.members.fetch(executorId).catch(() => null);
         if (staffMember) {
-          stripped = await stripStaffRoles(staffMember, 'Staff Watch: Vượt hạn mức kick trong ngày');
+          stripped = await stripStaffRoles(staffMember, 'Staff Watch: Vượt hạn mức kick trong ngày (tự xóa role staff)');
           if (staffMember.moderatable && typeof staffMember.timeout === 'function') {
             await staffMember.timeout(60 * 60 * 1000, 'Staff Watch: Vượt hạn mức kick trong ngày').catch(() => {});
           }
@@ -183,17 +219,39 @@ async function onAuditLog(entry, guild) {
         .setColor(0xdc2626)
         .setTitle('🚨 STAFF WATCH: Cảnh báo Staff vượt quá hạn mức Kick trong ngày!')
         .setDescription(
-          `Staff <@${executorId}> (\`${executorId}\`) vừa kick thành viên <@${entry.targetId}>.\n\n` +
+          `Staff <@${executorId}> (\`${executorId}\`) vừa kick thành viên <@${targetId}>.\n\n` +
           `📊 **Thống kê:** Staff này đã thực hiện **${kickCount}/${maxKicks} lượt kick** trong vòng 24 giờ qua.\n\n` +
-          `🔒 **Hành động bảo vệ:**\n` +
-          `• ${stripped.length ? `Đã tạm thu hồi các role quản trị: **${stripped.join(', ')}**` : 'Đã gắn cờ cảnh báo'}\n` +
+          `🔒 **Hành động bảo vệ tự động:**\n` +
+          `• ${stripped.length ? `Đã tự động thu hồi toàn bộ role Staff/quản trị: **${stripped.join(', ')}**` : 'Đã gắn cờ cảnh báo (không tìm thấy role có thể gỡ)'}\n` +
           `• Đã timeout Staff 60 phút để ngăn ngừa hành vi kick hàng loạt.`
         )
         .setTimestamp();
 
       await sendAlert(guild, options, embed);
-      return { triggered: true, action: 'kick', kickCount };
+      return { triggered: true, action: 'kick', count: kickCount, max: maxKicks, stripped };
     }
+    return { triggered: false, action: 'kick', count: kickCount, max: maxKicks };
+  }
+
+  return { triggered: false };
+}
+
+/**
+ * Xử lý sự kiện Audit Log (Ban, Kick) để giám sát hạn mức của Staff
+ */
+async function onAuditLog(entry, guild) {
+  if (!entry || !guild) return { triggered: false };
+  const options = getOptions(guild.id);
+  if (!options.securityStaffWatch) return { triggered: false };
+
+  const executorId = entry.executorId;
+  if (!executorId || trusted(guild, executorId, options)) return { triggered: false };
+
+  if (entry.action === AuditLogEvent.MemberBanAdd) {
+    return handleStaffAction(guild, executorId, 'ban', entry.targetId);
+  }
+  if (entry.action === AuditLogEvent.MemberKick) {
+    return handleStaffAction(guild, executorId, 'kick', entry.targetId);
   }
 
   return { triggered: false };
@@ -294,6 +352,9 @@ async function onGuildUpdate(oldGuild, newGuild) {
 module.exports = {
   onAuditLog,
   onGuildUpdate,
+  handleStaffAction,
+  isStaffLimitExceeded,
+  isStaffRole,
   recordStaffAction,
   countStaffActions,
   stripStaffRoles,
