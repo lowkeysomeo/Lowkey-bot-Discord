@@ -21,6 +21,7 @@ module.exports.data = {
       required: false,
       choices: [
         { name: '🔮 Bảng điều khiển Quest & ORB (Mặc định)', value: 'hub' },
+        { name: '🏪 Cửa hàng Mua Bán Auto Quest & Gói Tháng', value: 'shop' },
         { name: '⏰ Đặt lịch Tự động quét & làm Quest mới', value: 'auto' },
         { name: '🔄 Quét tìm nhiệm vụ mới ngay lập tức', value: 'scan' },
         { name: '🤖 Auto 100% bằng User Token (Mở Modal)', value: 'token' },
@@ -49,6 +50,11 @@ module.exports.execute = async (interaction) => {
       });
     }
     return interaction.reply({ flags: 64, ...buildAdminListPayload() });
+  }
+
+  if (action === 'shop') {
+    const { buildShopPanelPayload } = require('../../utils/questShop');
+    return interaction.reply({ flags: 64, ...buildShopPanelPayload() });
   }
 
   if (action === 'auto') {

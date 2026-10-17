@@ -81,6 +81,7 @@ client.once(
     require('./utils/reactionRoles').start(client);
     require('./utils/inviteSystem').start(client);
     require('./utils/questScheduler').start(client);
+    require('./utils/questShop').ensureShopPanel(client).catch(err => console.warn('[QUEST SHOP]', err.message));
     // Nạp thành viên để phân biệt role có sẵn với role vừa được cấp.
     for (const guild of client.guilds.cache.values()) {
       if (getOptions(guild.id).roleNoticeEnabled) {
@@ -345,6 +346,18 @@ client.on(
         const payload = { content: 'Có lỗi xảy ra khi xử lý Auto Quest bằng Token. Vui lòng thử lại.', flags: 64 };
         if (interaction.deferred) await interaction.editReply(payload).catch(() => {});
         else if (!interaction.replied) await interaction.reply(payload).catch(() => {});
+      }
+      return;
+    }
+
+    if (interaction.customId?.startsWith('qshop:')) {
+      try { await require('./utils/questShop').handleShopInteraction(interaction, client); }
+      catch (error) {
+        console.error('[QUEST SHOP ERROR]', error);
+        const payload = { content: 'Có lỗi xảy ra khi thao tác trên Cửa Hàng Quest. Vui lòng thử lại sau.', flags: 64 };
+        if (interaction.deferred) await interaction.editReply(payload).catch(() => {});
+        else if (interaction.replied) await interaction.followUp(payload).catch(() => {});
+        else await interaction.reply(payload).catch(() => {});
       }
       return;
     }

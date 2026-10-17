@@ -52,21 +52,30 @@ function listSubscribers(onlyEnabled = true) {
     ? db.prepare('SELECT * FROM quest_subscribers WHERE enabled = 1').all()
     : db.prepare('SELECT * FROM quest_subscribers').all();
   const { isApproved } = require('./questAuth');
-  return rows.filter((r) => isApproved(r.user_id));
+  const now = Date.now();
+  return rows.filter((r) => {
+    if (!isApproved(r.user_id)) return false;
+    if (r.expires_at && r.expires_at > 0 && r.expires_at < now) {
+      return false;
+    }
+    return true;
+  });
 }
 
-function registerSubscriber(userId, token, username = null, notifyDm = 1) {
+function registerSubscriber(userId, token, username = null, notifyDm = 1, packageType = 'monthly', expiresAt = 0) {
   const db = getDb();
   const now = Date.now();
   db.prepare(`
-    INSERT INTO quest_subscribers (user_id, token, username, notify_dm, enabled, created_at)
-    VALUES (?, ?, ?, ?, 1, ?)
+    INSERT INTO quest_subscribers (user_id, token, username, notify_dm, enabled, package_type, expires_at, created_at)
+    VALUES (?, ?, ?, ?, 1, ?, ?, ?)
     ON CONFLICT(user_id) DO UPDATE SET
       token = excluded.token,
       username = coalesce(excluded.username, quest_subscribers.username),
       notify_dm = excluded.notify_dm,
+      package_type = coalesce(excluded.package_type, quest_subscribers.package_type),
+      expires_at = case when excluded.expires_at > 0 then excluded.expires_at else quest_subscribers.expires_at end,
       enabled = 1
-  `).run(userId, token.trim(), username, notifyDm ? 1 : 0, now);
+  `).run(userId, token.trim(), username, notifyDm ? 1 : 0, packageType, expiresAt, now);
 }
 
 function toggleSubscriber(userId, enabled = null) {

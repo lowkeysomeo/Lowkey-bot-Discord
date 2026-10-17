@@ -153,6 +153,24 @@ function createDashboard(client, options = {}) {
         try { value = session(req); } catch { /* Chưa đăng nhập. */ }
         return json(res, 200, { user: value?.user || null, csrf: value?.csrf, configured, ready: client.isReady(), invite: invite() });
       }
+      if (req.method === 'POST' && route === '/api/sepay/webhook') {
+        try {
+          const payload = await body(req);
+          const content = String(payload.content || payload.description || '').toUpperCase();
+          const amount = parseInt(payload.transferAmount || payload.amountIn || payload.amount || 0, 10);
+          const db = getDb();
+          const pendingOrders = db.prepare("SELECT * FROM quest_orders WHERE status = 'pending'").all();
+          const matched = pendingOrders.find(o => content.includes(o.order_id) && amount >= o.amount);
+          if (matched) {
+            const { processPaidOrder } = require('../utils/questShop');
+            processPaidOrder(matched.order_id, client).catch(console.error);
+            return json(res, 200, { success: true, order_id: matched.order_id });
+          }
+          return json(res, 200, { success: false, message: 'No matching order' });
+        } catch (err) {
+          return json(res, 400, { success: false, error: err.message });
+        }
+      }
       if (route.startsWith('/api/')) {
         const value = session(req);
         rateLimit(`session:${hash(cookie(req, 'vnl_session'))}`, 90);

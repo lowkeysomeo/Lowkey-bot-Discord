@@ -107,7 +107,32 @@ function initializeDatabase() {
       approved_at INTEGER NOT NULL DEFAULT 0,
       approved_by TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS quest_shop_config (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS quest_orders (
+      order_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      username TEXT,
+      token TEXT NOT NULL,
+      package_type TEXT NOT NULL,
+      quest_ids_json TEXT,
+      quest_names_json TEXT,
+      quest_count INTEGER NOT NULL DEFAULT 1,
+      amount INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at INTEGER NOT NULL,
+      paid_at INTEGER,
+      completed_at INTEGER,
+      error_message TEXT
+    );
   `);
+
+  try { db.prepare("ALTER TABLE quest_subscribers ADD COLUMN package_type TEXT NOT NULL DEFAULT 'monthly'").run(); } catch {}
+  try { db.prepare("ALTER TABLE quest_subscribers ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0").run(); } catch {}
 
   migrateLegacyJsonIfNeeded();
   repairLegacyUserIds(db);
