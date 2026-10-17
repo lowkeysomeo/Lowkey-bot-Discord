@@ -87,10 +87,13 @@ async function approveUser(userId, approverId, client) {
   const now = Date.now();
 
   db.prepare(`
-    UPDATE quest_permissions
-    SET status = 'approved', approved_at = ?, approved_by = ?
-    WHERE user_id = ?
-  `).run(now, String(approverId), String(userId));
+    INSERT INTO quest_permissions (user_id, username, status, requested_at, approved_at, approved_by)
+    VALUES (?, ?, 'approved', ?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      status = 'approved',
+      approved_at = excluded.approved_at,
+      approved_by = excluded.approved_by
+  `).run(String(userId), String(userId), now, now, String(approverId));
 
   // Gửi thông báo DM cho người dùng
   if (client) {

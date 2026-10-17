@@ -41,9 +41,11 @@ module.exports.data = {
 module.exports.execute = async (interaction) => {
   const action = interaction.options?.getString?.('action') || 'hub';
   const { isApproved, isOwner, buildAccessGatePayload, buildAdminListPayload } = require('../../utils/questAuth');
+  const userId = interaction.user?.id || interaction.member?.id || null;
+  const userObj = interaction.user || interaction.member || { id: userId, tag: 'User' };
 
   if (action === 'admin') {
-    if (!isOwner(interaction.user.id)) {
+    if (!isOwner(userId)) {
       return interaction.reply({
         content: '❌ Lệnh này chỉ dành riêng cho Admin (ID: 604729446649298963)!',
         flags: 64,
@@ -58,22 +60,22 @@ module.exports.execute = async (interaction) => {
   }
 
   if (action === 'auto') {
-    if (!isApproved(interaction.user.id)) {
-      return interaction.reply({ flags: 64, ...buildAccessGatePayload(interaction.user) });
+    if (!isApproved(userId)) {
+      return interaction.reply({ flags: 64, ...buildAccessGatePayload(userObj) });
     }
     const { buildAutoStatusPayload } = require('../../utils/questScheduler');
-    return interaction.reply({ flags: 64, ...buildAutoStatusPayload(interaction.user.id) });
+    return interaction.reply({ flags: 64, ...buildAutoStatusPayload(userId) });
   }
 
   if (action === 'scan') {
-    if (!isApproved(interaction.user.id)) {
-      return interaction.reply({ flags: 64, ...buildAccessGatePayload(interaction.user) });
+    if (!isApproved(userId)) {
+      return interaction.reply({ flags: 64, ...buildAccessGatePayload(userObj) });
     }
     if (typeof interaction.deferReply === 'function') {
       await interaction.deferReply({ flags: 64 });
     }
     const { getSubscriber, scanUserQuests, buildAutoStatusPayload } = require('../../utils/questScheduler');
-    const sub = getSubscriber(interaction.user.id);
+    const sub = getSubscriber(userId);
     if (!sub) {
       return interaction.editReply({
         content: '⚠️ Bạn chưa nạp Token vào hệ thống bot. Hãy dùng lệnh `/quest action:token` để nạp token và kích hoạt nhé!',
@@ -83,18 +85,18 @@ module.exports.execute = async (interaction) => {
     if (res.actions?.length > 0) {
       return interaction.editReply({
         content: `🎉 Đã quét xong: Tự động xử lý thành công **${res.actions.length}** nhiệm vụ! Kiểm tra DM để xem chi tiết.`,
-        ...buildAutoStatusPayload(interaction.user.id),
+        ...buildAutoStatusPayload(userId),
       });
     }
     return interaction.editReply({
       content: '✅ Đã quét xong: Hiện tại không có nhiệm vụ mới nào trên tài khoản của bạn.',
-      ...buildAutoStatusPayload(interaction.user.id),
+      ...buildAutoStatusPayload(userId),
     });
   }
 
   if (action === 'token') {
-    if (!isApproved(interaction.user.id)) {
-      return interaction.reply({ flags: 64, ...buildAccessGatePayload(interaction.user) });
+    if (!isApproved(userId)) {
+      return interaction.reply({ flags: 64, ...buildAccessGatePayload(userObj) });
     }
     if (typeof interaction.showModal === 'function') {
       return interaction.showModal(buildTokenModal());
@@ -165,6 +167,6 @@ module.exports.execute = async (interaction) => {
   }
 
   // Default: hub
-  const payload = buildMainHubPayload(interaction.guildId, interaction.user.id);
+  const payload = buildMainHubPayload(interaction.guildId, userId);
   return interaction.reply(payload);
 };

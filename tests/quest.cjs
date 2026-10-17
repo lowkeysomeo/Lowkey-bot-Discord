@@ -78,6 +78,9 @@ const {
     showModal: async (m) => { modalShown = m; },
   });
 
+  const { approveUser } = require('../utils/questAuth');
+  approveUser('user-123', 'test-suite');
+
   // /quest hub
   await questCmd.execute(mockInteraction('hub'));
   assert.match(replyData.embeds[0].data.title, /TRUNG TÂM AUTO QUEST/);
@@ -158,6 +161,7 @@ const {
     assert.equal(getQuestStreamStatus('g1'), null);
 
     // 6. Kiểm tra Button interactions
+    approveUser('user-in-vc', 'test-suite');
     let updatedPayload = null;
     let deferred = false;
     let editedReply = null;
@@ -168,6 +172,7 @@ const {
       member: mockMemberInVoice,
       channel: { id: 'text-1', send: async () => {} },
       update: async (p) => { updatedPayload = p; },
+      reply: async (p) => { updatedPayload = p; },
       deferReply: async () => { deferred = true; },
       editReply: async (p) => { editedReply = p; },
       showModal: async (m) => { buttonModalShown = m; },
@@ -325,6 +330,7 @@ const {
     let modalReply = null;
     const mockModalSubmit = (tokenVal) => ({
       customId: 'quest:modal_submit',
+      user: { id: 'user-123', tag: 'Tester#0001' },
       fields: { getTextInputValue: () => tokenVal },
       deferReply: async () => {},
       editReply: async (d) => { modalReply = d; },

@@ -308,7 +308,7 @@ function buildTokenGuidePayload() {
         '2. Bấm phím `F12` hoặc tổ hợp phím `Ctrl + Shift + I` (trên Mac: `Cmd + Option + I`).\n' +
         '3. Chuyển sang tab **Network** (Mạng).\n' +
         '4. Gõ chữ `api` hoặc `science` vào ô tìm kiếm (Filter).\n' +
-        '5. Bấm vào bất kỳ một dòng yêu cầu nào trong danh sách $\\rightarrow$ Chọn tab **Headers**.\n' +
+        '5. Bấm vào bất kỳ một dòng yêu cầu nào trong danh sách ➔ Chọn tab **Headers**.\n' +
         '6. Kéo xuống mục **Request Headers**, tìm dòng **`Authorization`**.\n' +
         '7. Sao chép toàn bộ chuỗi ký tự sau chữ `Authorization` (đó chính là User Token của bạn).\n\n' +
         '🔒 **Cam kết bảo mật:**\n' +
@@ -318,20 +318,7 @@ function buildTokenGuidePayload() {
     .setFooter({ text: 'Lowkey Auto Quest • Không bao giờ chia sẻ token cho người lạ' })
     .setTimestamp();
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('quest:modal')
-      .setLabel('Bắt đầu Auto Token ngay')
-      .setEmoji('🤖')
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId('quest:hub')
-      .setLabel('Quay lại Menu Chính')
-      .setEmoji('↩️')
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  return { embeds: [embed], components: [row] };
+  return { embeds: [embed], components: [] };
 }
 
 function buildMainHubPayload(guildId, userId = null) {
@@ -519,11 +506,13 @@ function buildInfoPayload() {
 
 async function handleButtonInteraction(interaction) {
   const action = interaction.customId.replace('quest:', '');
+  const userObj = interaction.user || interaction.member || {};
+  const userId = userObj.id || null;
 
   if (action === 'modal') {
     const { isApproved, buildAccessGatePayload } = require('./questAuth');
-    if (!isApproved(interaction.user.id)) {
-      const gate = buildAccessGatePayload(interaction.user);
+    if (!isApproved(userId)) {
+      const gate = buildAccessGatePayload(userObj);
       if (interaction.message?.flags?.has?.(64)) return interaction.update(gate);
       return interaction.reply({ flags: 64, ...gate });
     }
@@ -536,7 +525,7 @@ async function handleButtonInteraction(interaction) {
   }
 
   if (action === 'hub') {
-    const payload = buildMainHubPayload(interaction.guildId, interaction.user.id);
+    const payload = buildMainHubPayload(interaction.guildId, userId);
     return interaction.update({ content: null, ...payload });
   }
 
@@ -583,13 +572,13 @@ async function handleButtonInteraction(interaction) {
 
   if (action === 'auto_menu') {
     const { isApproved, buildAccessGatePayload } = require('./questAuth');
-    if (!isApproved(interaction.user.id)) {
-      const gate = buildAccessGatePayload(interaction.user);
+    if (!isApproved(userId)) {
+      const gate = buildAccessGatePayload(userObj);
       if (interaction.message?.flags?.has?.(64)) return interaction.update(gate);
       return interaction.reply({ flags: 64, ...gate });
     }
     const { buildAutoStatusPayload } = require('./questScheduler');
-    const payload = buildAutoStatusPayload(interaction.user.id);
+    const payload = buildAutoStatusPayload(userId);
     if (interaction.message?.flags?.has?.(64)) {
       return interaction.update(payload);
     }
@@ -599,8 +588,8 @@ async function handleButtonInteraction(interaction) {
   if (action === 'request_access') {
     await interaction.deferUpdate();
     const { requestAccess, buildAccessGatePayload } = require('./questAuth');
-    await requestAccess(interaction.user, interaction.client);
-    const gate = buildAccessGatePayload(interaction.user);
+    await requestAccess(userObj, interaction.client);
+    const gate = buildAccessGatePayload(userObj);
     return interaction.editReply(gate);
   }
 
@@ -703,8 +692,11 @@ async function handleModalInteraction(interaction) {
     return interaction.editReply({ content: '❌ Token không được để trống.' });
   }
 
+  const userId = interaction.user?.id || interaction.member?.id || 'unknown';
+  const username = interaction.user?.tag || interaction.member?.user?.tag || 'User';
+
   const { isApproved } = require('./questAuth');
-  if (!isApproved(interaction.user.id)) {
+  if (!isApproved(userId)) {
     return interaction.editReply({
       content: '❌ Bạn chưa được Admin (ID: 604729446649298963) phê duyệt sử dụng tính năng này.',
     });
@@ -712,7 +704,7 @@ async function handleModalInteraction(interaction) {
 
   try {
     const { registerSubscriber } = require('./questScheduler');
-    registerSubscriber(interaction.user.id, token, interaction.user.tag, 1);
+    registerSubscriber(userId, token, username, 1);
   } catch (e) {}
 
   let lastUpdate = 0;
