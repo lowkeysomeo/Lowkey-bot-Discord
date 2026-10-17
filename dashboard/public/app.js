@@ -31,6 +31,7 @@ const icons = {
   reactionroles: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>`,
   security: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
   test: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><polygon points="10 11 10 17 15 14 10 11"/></svg>`,
+  questshop: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>`,
 };
 
 const labels = {
@@ -48,6 +49,7 @@ const labels = {
   reactionroles: 'Reaction Role (Menu)',
   security: 'Bảo vệ server',
   test: 'Gửi tin thử',
+  questshop: 'Auto Quest Shop',
 };
 
 const navGroups = [
@@ -78,7 +80,14 @@ function render() {
     app.innerHTML = `<div class="login"><section class="login-art">${brand}<div class="login-copy"><span class="eyebrow">MỘT NƠI. CẢ CỘNG ĐỒNG.</span><h1>Server của bạn.<br><span>Theo cách của bạn.</span></h1><p>Chăm chút cộng đồng cùng VietNam Legacy. Quản lý level, role thưởng và những câu chuyện ẩn danh trong một nơi.</p><div class="login-pills"><span>↗ Level & Role</span><span>♡ Confession</span><span>≋ Bảng xếp hạng</span></div></div><p class="login-foot">VIETNAM LEGACY · DÀNH CHO CỘNG ĐỒNG CỦA BẠN</p></section><section class="login-panel"><div class="login-box"><span class="badge purple">BẢNG ĐIỀU KHIỂN</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng Discord để chọn server và bắt đầu quản lý.</p>${state.session?.configured ? '<a class="primary" href="/auth/discord">Đăng nhập bằng Discord <span>↗</span></a>' : '<button class="primary" disabled>Đăng nhập Discord</button><div class="error">Dashboard đang chờ hoàn tất kết nối đăng nhập Discord. Chủ bot cần cấu hình OAuth2 để mở đăng nhập.</div>'}<p class="subtle">Chỉ chủ server và thành viên có quyền Administrator được quản lý cấu hình.</p></div></section></div>`;
     return;
   }
-  app.innerHTML = `${state.session.preview ? '<div class="preview-banner">BẢN XEM TRƯỚC · Dữ liệu minh họa, không thay đổi server Discord thật.</div>' : ''}<div class="layout"><aside class="sidebar"><div class="side-top">${brand}<div class="picker-wrap"><p class="nav-label">MÁY CHỦ QUẢN LÝ</p><select class="server-picker" id="server-select" aria-label="Chọn server"><option value="">Chọn server…</option>${state.guilds.filter(guild => guild.installed).map(guild => `<option value="${h(guild.id)}" ${state.guild?.id === guild.id ? 'selected' : ''}>${h(guild.name)}</option>`).join('')}</select></div></div><div class="side-nav-scroll">${navGroups.map(group => `<div class="nav-section"><p class="nav-label">${group.title}</p><nav class="nav">${group.items.map(key => `<button data-page="${key}" class="${state.page === key && state.guild ? 'active' : ''}" ${!state.guild ? 'disabled' : ''}><span class="icon">${icons[key] || ''}</span><span class="label-text">${labels[key]}</span></button>`).join('')}</nav></div>`).join('')}</div><div class="side-bottom"><div class="bot-status"><span class="dot"></span><span>${state.session.ready ? 'Bot đã kết nối' : 'Bot đang kết nối'}</span></div><p class="subtle">VietNam Legacy Dashboard • v1.0</p></div></aside><div class="workspace"><header class="topbar"><div class="crumb"><span class="crumb-root">Dashboard</span><span class="crumb-sep">/</span><b class="crumb-current">${state.guild ? h(labels[state.page] || state.page) : 'Chọn server'}</b></div><div class="account"><span class="avatar">${h(state.session.user.name.slice(0, 1))}</span><span class="account-name">${h(state.session.user.name)}</span><button class="text-button" id="logout">Đăng xuất</button></div></header><main class="content" id="content">${state.loading ? '<div class="loading" role="status">Đang tải dữ liệu server…</div>' : content()}</main></div></div>`;
+  const displayNavGroups = [...navGroups];
+  if (state.session?.isOwner) {
+    displayNavGroups.push({
+      title: '👑 CHỦ SỞ HỮU BOT',
+      items: ['questshop'],
+    });
+  }
+  app.innerHTML = `${state.session.preview ? '<div class="preview-banner">BẢN XEM TRƯỚC · Dữ liệu minh họa, không thay đổi server Discord thật.</div>' : ''}<div class="layout"><aside class="sidebar"><div class="side-top">${brand}<div class="picker-wrap"><p class="nav-label">MÁY CHỦ QUẢN LÝ</p><select class="server-picker" id="server-select" aria-label="Chọn server"><option value="">Chọn server…</option>${state.guilds.filter(guild => guild.installed).map(guild => `<option value="${h(guild.id)}" ${state.guild?.id === guild.id ? 'selected' : ''}>${h(guild.name)}</option>`).join('')}</select></div></div><div class="side-nav-scroll">${displayNavGroups.map(group => `<div class="nav-section"><p class="nav-label">${group.title}</p><nav class="nav">${group.items.map(key => `<button data-page="${key}" class="${state.page === key && (state.guild || key === 'questshop') ? 'active' : ''}" ${!state.guild && key !== 'questshop' ? 'disabled' : ''}><span class="icon">${icons[key] || ''}</span><span class="label-text">${labels[key]}</span></button>`).join('')}</nav></div>`).join('')}</div><div class="side-bottom"><div class="bot-status"><span class="dot"></span><span>${state.session.ready ? 'Bot đã kết nối' : 'Bot đang kết nối'}</span></div><p class="subtle">VietNam Legacy Dashboard • v1.0</p></div></aside><div class="workspace"><header class="topbar"><div class="crumb"><span class="crumb-root">Dashboard</span><span class="crumb-sep">/</span><b class="crumb-current">${state.page === 'questshop' ? 'Auto Quest Shop (Chủ Bot)' : state.guild ? h(labels[state.page] || state.page) : 'Chọn server'}</b></div><div class="account"><span class="avatar">${h(state.session.user.name.slice(0, 1))}</span><span class="account-name">${h(state.session.user.name)}</span><button class="text-button" id="logout">Đăng xuất</button></div></header><main class="content" id="content">${state.loading ? '<div class="loading" role="status">Đang tải dữ liệu…</div>' : content()}</main></div></div>`;
   document.querySelector('#server-select').onchange = event => selectGuild(event.target.value);
   document.querySelectorAll('[data-page]').forEach(button => { button.onclick = () => changePage(button.dataset.page); });
   document.querySelectorAll('[data-guild]').forEach(button => { button.onclick = () => selectGuild(button.dataset.guild); });
@@ -210,9 +219,14 @@ function render() {
     };
     updateNoticePreview();
   }
+  attachQuestShopEvents();
 }
 function heading(eyebrow, title, subtitle, right = '') { return `<div class="heading"><div><span class="eyebrow">${eyebrow}</span><h1>${title}</h1><p>${subtitle}</p></div>${right}</div>`; }
 function content() {
+  if (state.page === 'questshop') {
+    if (!state.session?.isOwner) return '<div class="card empty"><h2>Quyền truy cập bị từ chối</h2><p>Chỉ người sở hữu bot mới có quyền truy cập trang này.</p></div>';
+    return questShopPage();
+  }
   if (!state.guild) return heading('KHÔNG GIAN QUẢN LÝ', 'Chọn server của bạn', 'Các server mà bạn sở hữu hoặc có quyền Administrator.') + (state.guilds.length ? `<div class="server-grid">${state.guilds.map(guild => `<article class="server-card">${guild.icon ? `<img class="server-avatar" src="${h(guild.icon)}" alt="">` : `<div class="server-avatar">${h(guild.name.slice(0, 1))}</div>`}<h2>${h(guild.name)}</h2><p>${guild.installed ? 'VietNam Legacy đã sẵn sàng.' : 'Thêm VietNam Legacy để bắt đầu.'}</p>${guild.installed ? `<button class="primary" data-guild="${h(guild.id)}">Quản lý server →</button>` : `<a class="secondary" href="${h(guild.invite)}" target="_blank" rel="noopener noreferrer">Mời bot vào server ↗</a>`}</article>`).join('')}</div>` : '<div class="card empty"><h2>Chưa có server để quản lý</h2><p>Bạn cần là chủ server hoặc có quyền Administrator.</p><a class="secondary" href="/">Tải lại trang để kiểm tra</a></div>');
   if (!state.data) return '<div class="card empty"><h2>Chưa tải được dữ liệu</h2><p>Chọn lại server để thử lại.</p></div>';
   if (state.page === 'reactionroles') return rrPage();
@@ -389,7 +403,27 @@ async function selectGuild(id) {
 }
 async function changePage(page) {
   if (!canLeave()) return;
-  state.dirty = false; state.page = page; state.loading = ['giveaway','reactionroles','ticket'].includes(page); render();
+  state.dirty = false; state.page = page; state.loading = ['giveaway','reactionroles','ticket','questshop'].includes(page); render();
+  if (page === 'questshop') {
+    if (!state.session?.isOwner) {
+      state.loading = false;
+      notify('Chỉ chủ sở hữu bot mới có quyền truy cập trang này.');
+      state.page = state.guild ? 'overview' : '';
+      return render();
+    }
+    const requestId = state.requestId;
+    try {
+      const qData = await api('/api/quest-shop/data');
+      if (state.requestId === requestId) {
+        state.questShopData = qData;
+        if (state.page === page) { state.loading = false; render(); }
+      }
+    } catch (err) {
+      if (state.requestId === requestId && state.page === page) { state.loading = false; render(); }
+      notify(err.message);
+    }
+    return;
+  }
   if (page === 'ticket' && state.data) {
     const id = state.guild.id, requestId = state.requestId;
     try {
@@ -796,5 +830,432 @@ async function sendTicketPanelDashboard() {
     notify(err.message);
   } finally {
     button.disabled = false; button.textContent = '🚀 Đăng / Cập nhật bảng Ticket vào Discord';
+  }
+}
+
+function questShopPage() {
+  const data = state.questShopData;
+  if (!data) return '<div class="loading">Đang tải cấu hình Auto Quest Shop…</div>';
+
+  const cfg = data.config || {};
+  const stats = data.stats || {};
+  const banks = data.banks || {};
+  const channels = data.channels || [];
+  const orders = data.orders || [];
+  const subscribers = data.subscribers || [];
+  const permissions = data.permissions || [];
+
+  const bankOptions = Object.entries(banks).map(([code, name]) =>
+    `<option value="${h(code)}" ${cfg.bankId === code ? 'selected' : ''}>${h(code)} — ${h(name)}</option>`
+  ).join('');
+
+  const channelOptions = channels.map(c =>
+    `<option value="${h(c.id)}" ${cfg.channelId === c.id ? 'selected' : ''}># ${h(c.name)} (${h(c.guildName)})</option>`
+  ).join('');
+
+  const currentChannelName = channels.find(c => c.id === cfg.channelId);
+
+  const statusBadges = {
+    pending: '<span class="badge amber">Chờ thanh toán</span>',
+    running: '<span class="badge purple">Đang chạy</span>',
+    completed: '<span class="badge">Hoàn thành</span>',
+    rejected: '<span class="badge red">Đã hủy</span>',
+    failed: '<span class="badge red">Thất bại</span>',
+  };
+
+  const permBadges = {
+    pending: '<span class="badge amber">Chờ duyệt</span>',
+    approved: '<span class="badge">Đã duyệt</span>',
+    rejected: '<span class="badge red">Từ chối</span>',
+  };
+
+  return heading(
+    '👑 QUẢN TRỊ VIÊN TỐI CAO',
+    'Dịch Vụ Auto Quest Discord',
+    'Cấu hình thông tin ngân hàng, giá cước, duyệt đơn hàng và thành viên tự động 24/7.',
+    '<button class="secondary" id="qshop-refresh-btn">🔄 Làm mới</button>'
+  ) +
+  `<div class="stats">
+    <div class="stat">
+      <div class="stat-top"><span>Tổng đơn hàng</span><span>📦</span></div>
+      <strong>${number(stats.totalOrders)}</strong>
+      <small>Tất cả lượt mua từ trước tới nay</small>
+    </div>
+    <div class="stat">
+      <div class="stat-top"><span>Đơn chờ thanh toán</span><span style="color:var(--amber)">⏳</span></div>
+      <strong style="color:${stats.pendingOrders > 0 ? 'var(--amber)' : 'inherit'}">${number(stats.pendingOrders)}</strong>
+      <small>${stats.pendingOrders > 0 ? 'Cần kiểm tra hoặc duyệt' : 'Hiện không có đơn tồn'}</small>
+    </div>
+    <div class="stat">
+      <div class="stat-top"><span>Khách Gói Tháng</span><span>👑</span></div>
+      <strong style="color:var(--green)">${number(stats.activeSubscribers)}</strong>
+      <small>Đang bật cày nền 24/7</small>
+    </div>
+    <div class="stat">
+      <div class="stat-top"><span>Người dùng được duyệt</span><span>✅</span></div>
+      <strong>${number(stats.totalApproved)}</strong>
+      <small>Thành viên trong Whitelist</small>
+    </div>
+  </div>` +
+  `<section class="card">
+    <div class="card-head">
+      <div>
+        <h2>⚙️ Cài Đặt Ngân Hàng, SePay & Bảng Cửa Hàng</h2>
+        <p>Thông tin thanh toán hiển thị trên mã QR và giá cước các gói nhiệm vụ.</p>
+      </div>
+      <button type="button" class="primary" id="qshop-publish-btn" style="background:#10b981; border:0;">🚀 Đăng / Cập nhật Bảng Shop lên Discord</button>
+    </div>
+    <div class="card-body">
+      <form id="qshop-config-form">
+        <div class="form-grid">
+          <div class="field">
+            <label for="qshop-bank-select">Ngân hàng nhận tiền</label>
+            <select id="qshop-bank-select" name="bankId">
+              ${bankOptions}
+            </select>
+          </div>
+          <div class="field">
+            <label for="qshop-account-input">Số tài khoản nhận tiền</label>
+            <input id="qshop-account-input" name="bankAccount" type="text" value="${h(cfg.bankAccount)}" placeholder="Ví dụ: 0987654321..." required>
+          </div>
+          <div class="field">
+            <label for="qshop-name-input">Tên chủ tài khoản (In hoa không dấu)</label>
+            <input id="qshop-name-input" name="bankName" type="text" value="${h(cfg.bankName)}" placeholder="Ví dụ: NGUYEN VAN A" required>
+          </div>
+          <div class="field">
+            <label for="qshop-sepay-input">SePay API Token (Tự động xác nhận giao dịch)</label>
+            <input id="qshop-sepay-input" name="sepayApiKey" type="password" value="${h(cfg.sepayApiKey)}" placeholder="Dán API Token lấy tại my.sepay.vn...">
+            <small>Nếu có SePay Token, bot tự khớp mã đơn và cày ngay trong 3 giây. Nếu không, bạn duyệt bằng nút bên dưới.</small>
+          </div>
+          <div class="field">
+            <label for="qshop-single-price">Giá Quest Lẻ (VNĐ / quest)</label>
+            <input id="qshop-single-price" name="singleQuestPrice" type="number" min="0" step="500" value="${h(cfg.singleQuestPrice)}" required>
+          </div>
+          <div class="field">
+            <label for="qshop-monthly-price">Giá Gói Tháng (VNĐ / tháng 30 ngày)</label>
+            <input id="qshop-monthly-price" name="monthlyPackagePrice" type="number" min="0" step="1000" value="${h(cfg.monthlyPackagePrice)}" required>
+          </div>
+          <div class="field" style="grid-column: 1 / -1;">
+            <label for="qshop-channel-select">Kênh đặt Bảng Cửa Hàng Discord</label>
+            <select id="qshop-channel-select" name="channelId">
+              ${channelOptions}
+              ${!channels.some(c => c.id === cfg.channelId) ? `<option value="${h(cfg.channelId)}" selected>Kênh hiện tại (ID: ${h(cfg.channelId)})</option>` : ''}
+            </select>
+            <small>Kênh Discord nơi bot gửi bảng dịch vụ mua quest kèm các nút bấm (Hiện tại: #${h(currentChannelName?.name || cfg.channelId)}).</small>
+          </div>
+        </div>
+        <div class="savebar">
+          <span id="qshop-config-status">Thay đổi thông tin sẽ áp dụng ngay vào mã QR và giá cước.</span>
+          <button type="submit" class="primary">💾 Lưu Cài Đặt Quest Shop</button>
+        </div>
+      </form>
+    </div>
+  </section>` +
+  `<section class="card" style="margin-top:24px;">
+    <div class="card-head">
+      <div>
+        <h2>📦 Danh Sách Đơn Hàng Gần Đây (${orders.length})</h2>
+        <p>Bấm Duyệt Tiền để lập tức kích hoạt đơn và cho bot cày quest ngay cho khách.</p>
+      </div>
+    </div>
+    <div class="card-body">
+      ${!orders.length ? '<p class="subtle">Chưa có đơn hàng nào.</p>' : `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Mã Đơn</th>
+              <th>Khách Hàng</th>
+              <th>Gói</th>
+              <th>Số Tiền</th>
+              <th>Trạng Thái</th>
+              <th>Thời Gian</th>
+              <th style="text-align:right;">Thao Tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${orders.map(o => `
+            <tr>
+              <td><code>${h(o.order_id)}</code></td>
+              <td><b>${h(o.username || o.user_id)}</b><br><small class="subtle">${h(o.user_id)}</small></td>
+              <td>${o.package_type === 'monthly' ? '<span class="badge purple">👑 Gói Tháng</span>' : `<span class="badge">🎯 Quest Lẻ (${o.quest_count} nv)</span>`}</td>
+              <td><b>${formatVnd(o.amount)}</b></td>
+              <td>${statusBadges[o.status] || h(o.status)}</td>
+              <td><small>${new Date(o.created_at).toLocaleString('vi-VN')}</small></td>
+              <td style="text-align:right;">
+                ${o.status === 'pending' ? `
+                  <button type="button" class="primary" style="min-height:30px; padding:3px 10px; font-size:12px; background:#10b981;" data-qorder-action="approve" data-qorder-id="${h(o.order_id)}">✓ Duyệt Tiền</button>
+                  <button type="button" class="text-button danger" style="min-height:30px; padding:3px 8px; font-size:12px;" data-qorder-action="reject" data-qorder-id="${h(o.order_id)}">✕ Hủy</button>
+                ` : o.status === 'completed' ? '<span style="color:var(--green); font-size:12px;">Đã xong</span>' : '<span class="subtle">—</span>'}
+              </td>
+            </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`}
+    </div>
+  </section>` +
+  `<section class="card" style="margin-top:24px;">
+    <div class="card-head">
+      <div>
+        <h2>👥 Thành Viên Đang Đăng Ký Gói Tự Động (${subscribers.length})</h2>
+        <p>Bot tự động quét và làm nhiệm vụ mỗi 60 phút cho các tài khoản đang hoạt động.</p>
+      </div>
+    </div>
+    <div class="card-body">
+      ${!subscribers.length ? '<p class="subtle">Chưa có thành viên nào đăng ký.</p>' : `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Thành Viên</th>
+              <th>Gói</th>
+              <th>Hạn Sử Dụng</th>
+              <th>Tự Động 24/7</th>
+              <th>Lần Quét Cuối</th>
+              <th style="text-align:right;">Hành Động</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${subscribers.map(s => {
+              const isExpired = s.expires_at && s.expires_at < Date.now();
+              return `
+              <tr>
+                <td><b>${h(s.username || s.user_id)}</b><br><small class="subtle">ID: ${h(s.user_id)} · Token: ${h(s.token)}</small></td>
+                <td><span class="badge purple">${s.package_type === 'monthly' ? 'Gói Tháng' : 'Quest Lẻ'}</span></td>
+                <td>${s.expires_at ? `<span style="color:${isExpired ? 'var(--red)' : 'var(--green)'}">${new Date(s.expires_at).toLocaleDateString('vi-VN')} ${isExpired ? '(Hết hạn)' : ''}</span>` : 'Vô thời hạn'}</td>
+                <td>${s.enabled ? '<span class="badge">Đang Bật</span>' : '<span class="badge amber">Đã Tắt</span>'}</td>
+                <td><small>${s.last_checked_at ? new Date(s.last_checked_at).toLocaleString('vi-VN') : 'Chưa quét'}</small></td>
+                <td style="text-align:right;">
+                  <button type="button" class="secondary" style="min-height:30px; padding:3px 8px; font-size:12px;" data-qsub-action="extend" data-qsub-id="${h(s.user_id)}">+30 Ngày</button>
+                  <button type="button" class="secondary" style="min-height:30px; padding:3px 8px; font-size:12px;" data-qsub-action="toggle" data-qsub-id="${h(s.user_id)}">${s.enabled ? 'Tạm Dừng' : 'Bật Lại'}</button>
+                  <button type="button" class="text-button danger" style="min-height:30px; padding:3px 8px; font-size:12px;" data-qsub-action="delete" data-qsub-id="${h(s.user_id)}">Xóa</button>
+                </td>
+              </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`}
+    </div>
+  </section>` +
+  `<section class="card" style="margin-top:24px;">
+    <div class="card-head">
+      <div>
+        <h2>🛡️ Danh Sách Kiểm Duyệt & Phê Duyệt Quyền (${permissions.length})</h2>
+        <p>Chỉ những ai được phê duyệt mới được phép sử dụng tính năng Auto Quest.</p>
+      </div>
+    </div>
+    <div class="card-body">
+      <form id="qshop-perm-add-form" style="display:flex; gap:12px; margin-bottom:16px; align-items:flex-end;">
+        <div class="field" style="margin:0; flex:1;">
+          <label for="qshop-new-userid">Thêm nhanh User ID Discord</label>
+          <input id="qshop-new-userid" name="userId" type="text" placeholder="Nhập 17-20 số User ID của người dùng..." required pattern="\\d{17,20}">
+        </div>
+        <div class="field" style="margin:0; flex:1;">
+          <label for="qshop-new-username">Tên gợi nhớ (Tùy chọn)</label>
+          <input id="qshop-new-username" name="username" type="text" placeholder="Ví dụ: Tên hiển thị...">
+        </div>
+        <button type="submit" class="primary" style="white-space:nowrap;">+ Cấp Quyền Phê Duyệt</button>
+      </form>
+      ${!permissions.length ? '<p class="subtle">Chưa có ai trong danh sách kiểm duyệt.</p>' : `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>User ID</th>
+              <th>Tên Tài Khoản</th>
+              <th>Trạng Thái</th>
+              <th>Thời Gian Xin</th>
+              <th style="text-align:right;">Thao Tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${permissions.map(p => `
+            <tr>
+              <td><code>${h(p.user_id)}</code></td>
+              <td><b>${h(p.username || '—')}</b></td>
+              <td>${permBadges[p.status] || h(p.status)}</td>
+              <td><small>${p.requested_at ? new Date(p.requested_at).toLocaleString('vi-VN') : '—'}</small></td>
+              <td style="text-align:right;">
+                ${p.status !== 'approved' ? `
+                  <button type="button" class="primary" style="min-height:30px; padding:3px 10px; font-size:12px; background:#10b981;" data-qperm-action="approve" data-qperm-id="${h(p.user_id)}">Phê Duyệt</button>
+                ` : ''}
+                ${p.status !== 'rejected' ? `
+                  <button type="button" class="secondary" style="min-height:30px; padding:3px 8px; font-size:12px;" data-qperm-action="reject" data-qperm-id="${h(p.user_id)}">Từ Chối</button>
+                ` : ''}
+                <button type="button" class="text-button danger" style="min-height:30px; padding:3px 8px; font-size:12px;" data-qperm-action="delete" data-qperm-id="${h(p.user_id)}">Xóa</button>
+              </td>
+            </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`}
+    </div>
+  </section>`;
+}
+
+function attachQuestShopEvents() {
+  if (state.page !== 'questshop') return;
+
+  const refreshBtn = document.querySelector('#qshop-refresh-btn');
+  if (refreshBtn) refreshBtn.onclick = () => changePage('questshop');
+
+  const configForm = document.querySelector('#qshop-config-form');
+  if (configForm) {
+    configForm.onsubmit = async (e) => {
+      e.preventDefault();
+      if (state.saving) return;
+      state.saving = true;
+      const submitBtn = configForm.querySelector('button[type="submit"]');
+      const statusSpan = configForm.querySelector('#qshop-config-status');
+      if (submitBtn) submitBtn.disabled = true;
+      if (statusSpan) statusSpan.textContent = 'Đang lưu cài đặt…';
+      try {
+        const formData = new FormData(configForm);
+        const payload = {
+          bankId: formData.get('bankId'),
+          bankAccount: formData.get('bankAccount'),
+          bankName: formData.get('bankName'),
+          sepayApiKey: formData.get('sepayApiKey'),
+          singleQuestPrice: Number(formData.get('singleQuestPrice')),
+          monthlyPackagePrice: Number(formData.get('monthlyPackagePrice')),
+          channelId: formData.get('channelId'),
+        };
+        const res = await api('/api/quest-shop/config', payload);
+        if (state.questShopData) state.questShopData.config = res.config;
+        if (statusSpan) statusSpan.textContent = '✅ Đã lưu cài đặt thành công!';
+        notify('Đã lưu cấu hình Quest Shop thành công!');
+      } catch (err) {
+        if (statusSpan) statusSpan.textContent = '❌ Lỗi: ' + err.message;
+        notify(err.message);
+      } finally {
+        state.saving = false;
+        if (submitBtn) submitBtn.disabled = false;
+      }
+    };
+  }
+
+  const publishBtn = document.querySelector('#qshop-publish-btn');
+  if (publishBtn) {
+    publishBtn.onclick = async () => {
+      if (state.saving) return;
+      if (!confirm('Đăng hoặc cập nhật Bảng Quest Shop vào kênh Discord đã cấu hình?')) return;
+      state.saving = true;
+      publishBtn.disabled = true;
+      publishBtn.textContent = 'Đang đăng lên Discord…';
+      try {
+        const channelSelect = document.querySelector('#qshop-channel-select');
+        const channelId = channelSelect ? channelSelect.value : '';
+        await api('/api/quest-shop/publish-panel', { channelId });
+        notify('Đã đăng / cập nhật bảng Quest Shop lên Discord thành công!');
+      } catch (err) {
+        notify(err.message);
+      } finally {
+        state.saving = false;
+        publishBtn.disabled = false;
+        publishBtn.textContent = '🚀 Đăng / Cập nhật Bảng Shop lên Discord';
+      }
+    };
+  }
+
+  // Orders actions
+  document.querySelectorAll('[data-qorder-action]').forEach(btn => {
+    btn.onclick = async () => {
+      const orderId = btn.dataset.qorderId;
+      const action = btn.dataset.qorderAction;
+      const confirmText = action === 'approve'
+        ? `Xác nhận ĐÃ NHẬN TIỀN cho đơn hàng #${orderId} và kích hoạt bot cày quest ngay?`
+        : `Hủy đơn hàng #${orderId}?`;
+      if (!confirm(confirmText)) return;
+
+      btn.disabled = true;
+      try {
+        const res = await api('/api/quest-shop/order-action', { orderId, action });
+        notify(res.message || 'Thao tác thành công.');
+        const updated = await api('/api/quest-shop/data');
+        state.questShopData = updated;
+        render();
+      } catch (err) {
+        notify(err.message);
+        btn.disabled = false;
+      }
+    };
+  });
+
+  // Subscribers actions
+  document.querySelectorAll('[data-qsub-action]').forEach(btn => {
+    btn.onclick = async () => {
+      const userId = btn.dataset.qsubId;
+      const action = btn.dataset.qsubAction;
+      const confirmText = action === 'extend'
+        ? `Gia hạn thêm 30 ngày cho thành viên ${userId}?`
+        : action === 'delete'
+        ? `Xóa thành viên ${userId} khỏi danh sách tự động cày quest?`
+        : `Đổi trạng thái bật/tắt cho thành viên ${userId}?`;
+      if (!confirm(confirmText)) return;
+
+      btn.disabled = true;
+      try {
+        const res = await api('/api/quest-shop/subscriber-action', { userId, action });
+        notify(res.message || 'Thao tác thành công.');
+        const updated = await api('/api/quest-shop/data');
+        state.questShopData = updated;
+        render();
+      } catch (err) {
+        notify(err.message);
+        btn.disabled = false;
+      }
+    };
+  });
+
+  // Permission actions
+  document.querySelectorAll('[data-qperm-action]').forEach(btn => {
+    btn.onclick = async () => {
+      const userId = btn.dataset.qpermId;
+      const action = btn.dataset.qpermAction;
+      const confirmText = action === 'approve'
+        ? `Phê duyệt quyền Auto Quest cho người dùng ${userId}?`
+        : action === 'reject'
+        ? `Từ chối quyền Auto Quest cho người dùng ${userId}?`
+        : `Xóa người dùng ${userId} khỏi danh sách kiểm duyệt?`;
+      if (!confirm(confirmText)) return;
+
+      btn.disabled = true;
+      try {
+        const res = await api('/api/quest-shop/permission-action', { userId, action });
+        notify(res.message || 'Thao tác thành công.');
+        const updated = await api('/api/quest-shop/data');
+        state.questShopData = updated;
+        render();
+      } catch (err) {
+        notify(err.message);
+        btn.disabled = false;
+      }
+    };
+  });
+
+  // Add permission
+  const permAddForm = document.querySelector('#qshop-perm-add-form');
+  if (permAddForm) {
+    permAddForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(permAddForm);
+      const userId = fd.get('userId')?.trim();
+      const username = fd.get('username')?.trim();
+      if (!userId || !/^\d{17,20}$/.test(userId)) {
+        return notify('User ID Discord phải là dãy 17-20 chữ số.');
+      }
+      try {
+        const res = await api('/api/quest-shop/permission-action', { userId, action: 'approve', username });
+        notify(res.message || 'Đã cấp quyền thành công!');
+        permAddForm.reset();
+        const updated = await api('/api/quest-shop/data');
+        state.questShopData = updated;
+        render();
+      } catch (err) {
+        notify(err.message);
+      }
+    };
   }
 }

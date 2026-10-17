@@ -462,6 +462,18 @@ h3 {
   color: #a5b4fc;
 }
 
+.badge.amber {
+  background: var(--amber-bg);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: var(--amber);
+}
+
+.badge.red {
+  background: var(--red-bg);
+  border-color: rgba(244, 63, 94, 0.3);
+  color: var(--red);
+}
+
 /* Nút bấm. */
 
 .primary, .secondary {

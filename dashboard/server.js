@@ -82,6 +82,7 @@ function createDashboard(client, options = {}) {
     }
     return result.filter(canManage);
   }
+  const isBotOwner = id => Boolean(id && String(id) === String(env.BOT_OWNER_ID || process.env.BOT_OWNER_ID || '604729446649298963'));
   function session(req) {
     const value = sessions.get(hash(cookie(req, 'vnl_session')));
     if (!value || value.expires <= Date.now()) fail(401, 'Hãy đăng nhập bằng Discord.');
@@ -151,7 +152,8 @@ function createDashboard(client, options = {}) {
       if (req.method === 'GET' && route === '/api/session') {
         let value;
         try { value = session(req); } catch { /* Chưa đăng nhập. */ }
-        return json(res, 200, { user: value?.user || null, csrf: value?.csrf, configured, ready: client.isReady(), invite: invite() });
+        const isOwner = isBotOwner(value?.user?.id);
+        return json(res, 200, { user: value?.user || null, csrf: value?.csrf, configured, ready: client.isReady(), invite: invite(), isOwner });
       }
       if (req.method === 'POST' && route === '/api/sepay/webhook') {
         try {
@@ -181,6 +183,152 @@ function createDashboard(client, options = {}) {
           return json(res, 200, { ok: true });
         }
         if (!client.isReady()) fail(503, 'Bot đang kết nối. Vui lòng thử lại sau.');
+        if (route.startsWith('/api/quest-shop')) {
+          if (!isBotOwner(value.user.id)) fail(403, 'Chỉ người sở hữu bot mới có quyền truy cập tính năng này.');
+          const questShop = require('../utils/questShop');
+          const questAuth = require('../utils/questAuth');
+          const db = getDb();
+
+          if (route === '/api/quest-shop/data' && req.method === 'GET') {
+            const config = questShop.getBankConfig();
+            const orders = db.prepare('SELECT * FROM quest_orders ORDER BY created_at DESC LIMIT 50').all();
+            const subscribers = db.prepare('SELECT * FROM quest_subscribers ORDER BY created_at DESC').all();
+            const permissions = db.prepare('SELECT * FROM quest_permissions ORDER BY requested_at DESC').all();
+
+            const channels = [];
+            for (const g of client.guilds.cache.values()) {
+              if (g.channels?.cache) {
+                for (const ch of g.channels.cache.values()) {
+                  if (ch && [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(ch.type)) {
+                    channels.push({ id: ch.id, name: ch.name, guildName: g.name, guildId: g.id });
+                  }
+                }
+              }
+            }
+
+            const stats = {
+              totalOrders: db.prepare('SELECT COUNT(*) AS c FROM quest_orders').get()?.c || 0,
+              pendingOrders: db.prepare("SELECT COUNT(*) AS c FROM quest_orders WHERE status = 'pending'").get()?.c || 0,
+              activeSubscribers: db.prepare("SELECT COUNT(*) AS c FROM quest_subscribers WHERE enabled = 1 AND (expires_at = 0 OR expires_at > ?)").get(Date.now())?.c || 0,
+              totalApproved: db.prepare("SELECT COUNT(*) AS c FROM quest_permissions WHERE status = 'approved'").get()?.c || 0,
+            };
+
+            return json(res, 200, {
+              config,
+              banks: questShop.BANK_NAMES,
+              channels,
+              stats,
+              orders: orders.map(o => ({
+                ...o,
+                token: o.token ? `••••••••${o.token.slice(-4)}` : '',
+                quest_ids: o.quest_ids_json ? JSON.parse(o.quest_ids_json) : [],
+                quest_names: o.quest_names_json ? JSON.parse(o.quest_names_json) : [],
+              })),
+              subscribers: subscribers.map(s => ({
+                ...s,
+                token: s.token ? `••••••••${s.token.slice(-4)}` : '',
+              })),
+              permissions,
+            });
+          }
+
+          if (route === '/api/quest-shop/config' && req.method === 'POST') {
+            const input = await body(req);
+            if (!input || typeof input !== 'object') fail(400, 'Dữ liệu không hợp lệ.');
+
+            if (input.bankId) questShop.setBankConfig('bank_id', String(input.bankId).trim().toUpperCase());
+            if (input.bankAccount !== undefined) questShop.setBankConfig('bank_account', String(input.bankAccount).trim());
+            if (input.bankName !== undefined) questShop.setBankConfig('bank_name', String(input.bankName).trim().toUpperCase());
+            if (input.sepayApiKey !== undefined) questShop.setBankConfig('sepay_api_key', String(input.sepayApiKey).trim());
+            if (input.channelId !== undefined) questShop.setBankConfig('channel_id', String(input.channelId).trim());
+            if (input.singleQuestPrice !== undefined) {
+              const p = Math.max(0, parseInt(input.singleQuestPrice, 10) || 0);
+              questShop.setBankConfig('single_quest_price', p);
+            }
+            if (input.monthlyPackagePrice !== undefined) {
+              const p = Math.max(0, parseInt(input.monthlyPackagePrice, 10) || 0);
+              questShop.setBankConfig('monthly_package_price', p);
+            }
+
+            return json(res, 200, { ok: true, config: questShop.getBankConfig() });
+          }
+
+          if (route === '/api/quest-shop/publish-panel' && req.method === 'POST') {
+            const input = await body(req).catch(() => ({}));
+            if (input.channelId) {
+              questShop.setBankConfig('channel_id', String(input.channelId).trim());
+            }
+            const msg = await questShop.ensureShopPanel(client);
+            if (!msg) fail(400, 'Không thể gửi bảng cửa hàng. Hãy kiểm tra lại kênh và quyền bot.');
+            return json(res, 200, { ok: true, messageId: msg.id, channelId: msg.channelId });
+          }
+
+          if (route === '/api/quest-shop/order-action' && req.method === 'POST') {
+            const input = await body(req);
+            const { orderId, action } = input || {};
+            if (!orderId || !action) fail(400, 'Thiếu thông tin đơn hàng hoặc thao tác.');
+
+            const order = questShop.getOrder(orderId);
+            if (!order) fail(404, 'Không tìm thấy đơn hàng.');
+
+            if (action === 'approve') {
+              const resApprove = await questShop.processPaidOrder(orderId, client);
+              if (!resApprove.success) fail(400, resApprove.error || 'Lỗi khi kích hoạt đơn hàng.');
+              return json(res, 200, { ok: true, message: `Đã xác nhận thanh toán & bắt đầu chạy đơn ${orderId}!` });
+            } else if (action === 'reject') {
+              questShop.updateOrderStatus(orderId, 'rejected', { error: 'Admin hủy đơn trên Dashboard' });
+              return json(res, 200, { ok: true, message: `Đã hủy đơn ${orderId}.` });
+            }
+            fail(400, 'Thao tác không hỗ trợ.');
+          }
+
+          if (route === '/api/quest-shop/subscriber-action' && req.method === 'POST') {
+            const input = await body(req);
+            const { userId, action } = input || {};
+            if (!userId || !action) fail(400, 'Thiếu thông tin thành viên hoặc thao tác.');
+
+            const row = db.prepare('SELECT * FROM quest_subscribers WHERE user_id = ?').get(String(userId));
+            if (!row) fail(404, 'Không tìm thấy thành viên đăng ký.');
+
+            if (action === 'extend') {
+              const currentExpiry = (row.expires_at && row.expires_at > Date.now()) ? row.expires_at : Date.now();
+              const newExpiry = currentExpiry + (30 * 24 * 60 * 60 * 1000);
+              db.prepare('UPDATE quest_subscribers SET expires_at = ?, enabled = 1 WHERE user_id = ?').run(newExpiry, String(userId));
+              return json(res, 200, { ok: true, message: `Đã gia hạn thêm 30 ngày cho user ${userId}!` });
+            } else if (action === 'toggle') {
+              const newEnabled = row.enabled ? 0 : 1;
+              db.prepare('UPDATE quest_subscribers SET enabled = ? WHERE user_id = ?').run(newEnabled, String(userId));
+              return json(res, 200, { ok: true, message: `Đã ${newEnabled ? 'kích hoạt' : 'tạm dừng'} gói của user ${userId}.` });
+            } else if (action === 'delete') {
+              db.prepare('DELETE FROM quest_subscribers WHERE user_id = ?').run(String(userId));
+              return json(res, 200, { ok: true, message: `Đã xóa user ${userId} khỏi danh sách subscribers.` });
+            }
+            fail(400, 'Thao tác không hỗ trợ.');
+          }
+
+          if (route === '/api/quest-shop/permission-action' && req.method === 'POST') {
+            const input = await body(req);
+            const { userId, action, username } = input || {};
+            if (!userId || !action) fail(400, 'Thiếu thông tin người dùng hoặc thao tác.');
+
+            if (action === 'approve') {
+              await questAuth.approveUser(userId, value.user.id, client);
+              if (username) {
+                db.prepare('UPDATE quest_permissions SET username = ? WHERE user_id = ?').run(String(username), String(userId));
+              }
+              return json(res, 200, { ok: true, message: `Đã phê duyệt quyền Auto Quest cho user ${userId}!` });
+            } else if (action === 'reject') {
+              await questAuth.rejectUser(userId, value.user.id, client);
+              return json(res, 200, { ok: true, message: `Đã từ chối quyền Auto Quest cho user ${userId}.` });
+            } else if (action === 'delete') {
+              db.prepare('DELETE FROM quest_permissions WHERE user_id = ?').run(String(userId));
+              return json(res, 200, { ok: true, message: `Đã xóa user ${userId} khỏi danh sách kiểm duyệt.` });
+            }
+            fail(400, 'Thao tác không hỗ trợ.');
+          }
+
+          fail(404, 'Không tìm thấy API Quest Shop.');
+        }
         if (req.method === 'GET' && route === '/api/guilds') {
           return json(res, 200, (await userGuilds(value.token)).map(guild => ({ id: guild.id, name: guild.name,
             icon: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128` : null,

@@ -21,7 +21,7 @@ const { getSubscriber, registerSubscriber, scanUserQuests } = require('./questSc
 const { isOwner, approveUser } = require('./questAuth');
 
 const TARGET_CHANNEL_ID = '1561060424491737118';
-const OWNER_ID = '604729446649298963';
+const OWNER_ID = process.env.BOT_OWNER_ID || '604729446649298963';
 const SINGLE_QUEST_PRICE = 4000;      // 4.000đ / quest
 const MONTHLY_PACKAGE_PRICE = 40000;  // 40.000đ / tháng (30 ngày)
 
@@ -61,6 +61,8 @@ function getBankConfig() {
     sepayApiKey: config.sepay_api_key || process.env.SEPAY_API_KEY || '',
     channelId: config.channel_id || process.env.QUEST_SHOP_CHANNEL_ID || TARGET_CHANNEL_ID,
     panelMessageId: config.panel_message_id || null,
+    singleQuestPrice: parseInt(config.single_quest_price, 10) || SINGLE_QUEST_PRICE,
+    monthlyPackagePrice: parseInt(config.monthly_package_price, 10) || MONTHLY_PACKAGE_PRICE,
   };
 }
 
@@ -292,6 +294,10 @@ async function processPaidOrder(orderId, client) {
  * Giao diện Bảng Cửa Hàng chính đặt tại kênh 1561060424491737118
  */
 function buildShopPanelPayload() {
+  const cfg = getBankConfig();
+  const singlePriceStr = formatVnd(cfg.singleQuestPrice);
+  const monthlyPriceStr = formatVnd(cfg.monthlyPackagePrice);
+
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle('🏪 DỊCH VỤ AUTO QUEST & SĂN ORBS DISCORD TỰ ĐỘNG 24/7')
@@ -299,11 +305,11 @@ function buildShopPanelPayload() {
       `Chào mừng bạn đến với hệ thống tự động hoàn thành **Discord Quests** và săn điểm **ORB / Phần quà Discord** của Lowkey Bot!\n\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `### 📦 CÁC GÓI DỊCH VỤ ĐANG CUNG CẤP\n\n` +
-      `**1️⃣ Gói Tùy Chọn Quest Lẻ — \`4.000đ / quest\`**\n` +
+      `**1️⃣ Gói Tùy Chọn Quest Lẻ — \`${singlePriceStr} / quest\`**\n` +
       `• Tự do tích chọn các nhiệm vụ bạn muốn làm trên tài khoản.\n` +
-      `• Tiền thanh toán = \`Số lượng quest × 4.000đ\`.\n` +
+      `• Tiền thanh toán = \`Số lượng quest × ${singlePriceStr}\`.\n` +
       `• Sau khi quét mã QR thanh toán, bot sẽ lập tức cày và nhận thưởng ORBs ngay.\n\n` +
-      `**2️⃣ Gói Tự Động Theo Tháng — \`40.000đ / tháng\` (30 ngày)**\n` +
+      `**2️⃣ Gói Tự Động Theo Tháng — \`${monthlyPriceStr} / tháng\` (30 ngày)**\n` +
       `• **KHÔNG GIỚI HẠN** số lượng nhiệm vụ trong suốt 1 tháng!\n` +
       `• Bot chạy nền 24/7 trên máy chủ: cứ có Quest mới là tự nhận, tự xem video / chơi game, tự nhận quà và gửi thông báo DM chúc mừng.\n` +
       `• Bạn hoàn toàn không cần bật máy tính, mở game hay treo máy.\n` +
@@ -333,11 +339,11 @@ function buildShopPanelPayload() {
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('qshop:buy_single')
-      .setLabel('🎯 Mua Quest Lẻ (4.000đ/nv)')
+      .setLabel(`🎯 Mua Quest Lẻ (${singlePriceStr}/nv)`)
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId('qshop:buy_monthly')
-      .setLabel('👑 Mua Gói Tháng (40.000đ/tháng)')
+      .setLabel(`👑 Mua Gói Tháng (${monthlyPriceStr}/tháng)`)
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
       .setCustomId('qshop:check_status')
@@ -453,13 +459,16 @@ function buildAdminConfigModal() {
  * Tạo màn hình chọn nhiệm vụ lẻ
  */
 function buildQuestSelectionPayload(orderId, pendingQuests, username) {
+  const cfg = getBankConfig();
+  const singlePriceStr = formatVnd(cfg.singleQuestPrice);
+
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle('🎯 TÙY CHỌN CÁC NHIỆM VỤ BẠN MUỐN LÀM')
     .setDescription(
       `Tài khoản: **@${username}**\n` +
       `Đã tìm thấy **${pendingQuests.length}** nhiệm vụ chưa hoàn thành. Hãy chọn từ danh sách bên dưới:\n\n` +
-      `• **Đơn giá:** \`4.000đ / quest\`\n` +
+      `• **Đơn giá:** \`${singlePriceStr} / quest\`\n` +
       `• Bạn có thể chọn **1 hoặc nhiều nhiệm vụ** cùng lúc.`
     )
     .setFooter({ text: 'Lowkey Quest Shop • Chọn xong hệ thống sẽ tạo mã QR' });
@@ -482,7 +491,7 @@ function buildQuestSelectionPayload(orderId, pendingQuests, username) {
     selectMenu.addOptions({
       label: qName.length > 95 ? qName.slice(0, 92) + '...' : qName,
       value: q.id,
-      description: isVideo ? 'Video Quest • 4.000đ' : 'Game / Stream Quest • 4.000đ',
+      description: isVideo ? `Video Quest • ${singlePriceStr}` : `Game / Stream Quest • ${singlePriceStr}`,
       emoji: isVideo ? '🎬' : '🎮',
     });
   }
@@ -723,26 +732,28 @@ async function handleShopInteraction(interaction, client) {
       }
 
       // Tạo đơn nháp
+      const cfg = getBankConfig();
       const order = createOrder({
         userId: interaction.user.id,
         username,
         token: rawToken,
         packageType: 'single',
         questCount: 1,
-        amount: SINGLE_QUEST_PRICE,
+        amount: cfg.singleQuestPrice,
       });
 
       const payload = buildQuestSelectionPayload(order.order_id, pendingQuests, username);
       return interaction.editReply(payload);
     } else {
-      // Gói Tháng: Tạo ngay đơn 40.000đ
+      // Gói Tháng: Tạo ngay đơn
+      const cfg = getBankConfig();
       const order = createOrder({
         userId: interaction.user.id,
         username,
         token: rawToken,
         packageType: 'monthly',
         questCount: 999,
-        amount: MONTHLY_PACKAGE_PRICE,
+        amount: cfg.monthlyPackagePrice,
       });
 
       const payload = buildPaymentPayload(order);
@@ -773,8 +784,9 @@ async function handleShopInteraction(interaction, client) {
       (q) => q.config?.messages?.quest_name || q.config?.messages?.game_title || q.id
     );
 
+    const cfg = getBankConfig();
     const questCount = selectedIds.length;
-    const totalAmount = questCount * SINGLE_QUEST_PRICE;
+    const totalAmount = questCount * cfg.singleQuestPrice;
 
     // Cập nhật đơn hàng
     const db = getDb();
@@ -993,6 +1005,7 @@ module.exports = {
   OWNER_ID,
   SINGLE_QUEST_PRICE,
   MONTHLY_PACKAGE_PRICE,
+  BANK_NAMES,
   getBankConfig,
   setBankConfig,
   getVietQrUrl,
