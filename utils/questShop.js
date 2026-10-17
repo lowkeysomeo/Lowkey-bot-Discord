@@ -178,8 +178,8 @@ async function checkSePayPayment(order) {
 
     const orderMemo = String(order.order_id).toUpperCase();
     const match = transactions.find((t) => {
-      const content = String(t.transaction_content || t.description || '').toUpperCase();
-      const amountIn = parseInt(t.amount_in || t.amount || 0, 10);
+      const content = String(t.transaction_content || t.description || t.content || '').toUpperCase();
+      const amountIn = parseInt(t.amount_in || t.transferAmount || t.amount || 0, 10);
       return content.includes(orderMemo) && amountIn >= order.amount;
     });
 
@@ -963,10 +963,42 @@ async function handleShopInteraction(interaction, client) {
   }
 }
 
+let orderCheckerTimer = null;
+
+function startOrderChecker(client) {
+  if (orderCheckerTimer) return;
+  orderCheckerTimer = setInterval(async () => {
+    try {
+      const { sepayApiKey } = getBankConfig();
+      if (!sepayApiKey) return;
+
+      const db = getDb();
+      const twoHoursAgo = Date.now() - 2 * 60 * 60 * 1000;
+      const pendingOrders = db.prepare(
+        "SELECT * FROM quest_orders WHERE status = 'pending' AND created_at > ?"
+      ).all(twoHoursAgo);
+
+      if (!pendingOrders || pendingOrders.length === 0) return;
+
+      for (const order of pendingOrders) {
+        const isPaid = await checkSePayPayment(order);
+        if (isPaid) {
+          console.log(`[SEPAY AUTO-POLL] Phát hiện đơn hàng #${order.order_id} đã thanh toán! Đang kích hoạt...`);
+          await processPaidOrder(order.order_id, client).catch(console.error);
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+  }, 20000);
+  if (orderCheckerTimer.unref) orderCheckerTimer.unref();
+}
+
 /**
  * Đảm bảo Bảng Cửa Hàng tồn tại ở kênh TARGET_CHANNEL_ID
  */
 async function ensureShopPanel(client) {
+  startOrderChecker(client);
   try {
     const { channelId, panelMessageId } = getBankConfig();
     const targetId = channelId || TARGET_CHANNEL_ID;
@@ -1022,4 +1054,5 @@ module.exports = {
   isShopAdmin,
   handleShopInteraction,
   ensureShopPanel,
+  startOrderChecker,
 };
