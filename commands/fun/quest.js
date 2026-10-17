@@ -21,6 +21,8 @@ module.exports.data = {
       required: false,
       choices: [
         { name: '🔮 Bảng điều khiển Quest & ORB (Mặc định)', value: 'hub' },
+        { name: '⏰ Đặt lịch Tự động quét & làm Quest mới', value: 'auto' },
+        { name: '🔄 Quét tìm nhiệm vụ mới ngay lập tức', value: 'scan' },
         { name: '🤖 Auto 100% bằng User Token (Mở Modal)', value: 'token' },
         { name: '🔑 Hướng dẫn lấy Discord User Token', value: 'token_guide' },
         { name: '⚡ Lấy Script Auto Hoàn Thành Quest (Console)', value: 'script' },
@@ -36,6 +38,35 @@ module.exports.data = {
 
 module.exports.execute = async (interaction) => {
   const action = interaction.options?.getString?.('action') || 'hub';
+
+  if (action === 'auto') {
+    const { buildAutoStatusPayload } = require('../../utils/questScheduler');
+    return interaction.reply({ flags: 64, ...buildAutoStatusPayload(interaction.user.id) });
+  }
+
+  if (action === 'scan') {
+    if (typeof interaction.deferReply === 'function') {
+      await interaction.deferReply({ flags: 64 });
+    }
+    const { getSubscriber, scanUserQuests, buildAutoStatusPayload } = require('../../utils/questScheduler');
+    const sub = getSubscriber(interaction.user.id);
+    if (!sub) {
+      return interaction.editReply({
+        content: '⚠️ Bạn chưa nạp Token vào hệ thống bot. Hãy dùng lệnh `/quest action:token` để nạp token và kích hoạt nhé!',
+      });
+    }
+    const res = await scanUserQuests(sub, interaction.client);
+    if (res.actions?.length > 0) {
+      return interaction.editReply({
+        content: `🎉 Đã quét xong: Tự động xử lý thành công **${res.actions.length}** nhiệm vụ! Kiểm tra DM để xem chi tiết.`,
+        ...buildAutoStatusPayload(interaction.user.id),
+      });
+    }
+    return interaction.editReply({
+      content: '✅ Đã quét xong: Hiện tại không có nhiệm vụ mới nào trên tài khoản của bạn.',
+      ...buildAutoStatusPayload(interaction.user.id),
+    });
+  }
 
   if (action === 'token') {
     if (typeof interaction.showModal === 'function') {

@@ -383,6 +383,11 @@ function buildMainHubPayload(guildId) {
 
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
+      .setCustomId('quest:auto_menu')
+      .setLabel('Đặt Lịch Tự Động')
+      .setEmoji('⏰')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
       .setCustomId('quest:modal')
       .setLabel('Auto Token 100%')
       .setEmoji('🤖')
@@ -391,7 +396,7 @@ function buildMainHubPayload(guildId) {
       .setCustomId('quest:script')
       .setLabel('Script Console F12')
       .setEmoji('⚡')
-      .setStyle(ButtonStyle.Primary),
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId('quest:stream')
       .setLabel('Treo Voice 15p')
@@ -558,6 +563,62 @@ async function handleButtonInteraction(interaction) {
       content: 'ℹ️ Bot hiện không ở trong phòng Voice nào để hỗ trợ quest trong server này.',
     });
   }
+
+  if (action === 'auto_menu') {
+    const { buildAutoStatusPayload } = require('./questScheduler');
+    return interaction.update(buildAutoStatusPayload(interaction.user.id));
+  }
+
+  if (action === 'auto_toggle') {
+    const { toggleSubscriber, buildAutoStatusPayload, getSubscriber } = require('./questScheduler');
+    const sub = getSubscriber(interaction.user.id);
+    if (!sub) {
+      return interaction.reply({
+        content: '⚠️ Bạn chưa nạp Token vào hệ thống bot. Hãy bấm nút **Nhập Token** để nạp và kích hoạt nhé!',
+        flags: 64,
+      });
+    }
+    toggleSubscriber(interaction.user.id);
+    return interaction.update(buildAutoStatusPayload(interaction.user.id));
+  }
+
+  if (action === 'auto_dm_toggle') {
+    const { toggleNotifyDm, buildAutoStatusPayload, getSubscriber } = require('./questScheduler');
+    const sub = getSubscriber(interaction.user.id);
+    if (!sub) {
+      return interaction.reply({
+        content: '⚠️ Bạn chưa nạp Token vào hệ thống bot. Hãy bấm nút **Nhập Token** để nạp và kích hoạt nhé!',
+        flags: 64,
+      });
+    }
+    toggleNotifyDm(interaction.user.id);
+    return interaction.update(buildAutoStatusPayload(interaction.user.id));
+  }
+
+  if (action === 'auto_scan_now') {
+    await interaction.deferUpdate();
+    const { getSubscriber, scanUserQuests, buildAutoStatusPayload } = require('./questScheduler');
+    const sub = getSubscriber(interaction.user.id);
+    if (!sub) {
+      return interaction.followUp({
+        content: '⚠️ Bạn chưa nạp Token vào hệ thống bot. Hãy bấm nút **Nhập Token** để nạp và kích hoạt nhé!',
+        flags: 64,
+      });
+    }
+    const res = await scanUserQuests(sub, interaction.client);
+    if (res.actions?.length > 0) {
+      await interaction.followUp({
+        content: `🎉 Đã quét xong: Tự động xử lý thành công **${res.actions.length}** nhiệm vụ! Hãy kiểm tra tin nhắn riêng (DM).`,
+        flags: 64,
+      });
+    } else {
+      await interaction.followUp({
+        content: '✅ Đã quét xong: Hiện tại không có nhiệm vụ mới nào trên tài khoản của bạn.',
+        flags: 64,
+      });
+    }
+    return interaction.editReply(buildAutoStatusPayload(interaction.user.id));
+  }
 }
 
 async function handleModalInteraction(interaction) {
@@ -569,6 +630,11 @@ async function handleModalInteraction(interaction) {
   if (!token) {
     return interaction.editReply({ content: '❌ Token không được để trống.' });
   }
+
+  try {
+    const { registerSubscriber } = require('./questScheduler');
+    registerSubscriber(interaction.user.id, token, interaction.user.tag, 1);
+  } catch (e) {}
 
   let lastUpdate = 0;
   const updateProgress = async (text) => {

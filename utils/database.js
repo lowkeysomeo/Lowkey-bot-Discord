@@ -87,6 +87,17 @@ function initializeDatabase() {
 
     CREATE INDEX IF NOT EXISTS idx_voice_total
       ON voice_levels (guild_id, total_xp DESC);
+
+    CREATE TABLE IF NOT EXISTS quest_subscribers (
+      user_id TEXT PRIMARY KEY,
+      token TEXT NOT NULL,
+      username TEXT,
+      notify_dm INTEGER NOT NULL DEFAULT 1,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_checked_at INTEGER NOT NULL DEFAULT 0,
+      last_quests_json TEXT,
+      created_at INTEGER NOT NULL DEFAULT 0
+    );
   `);
 
   migrateLegacyJsonIfNeeded();
