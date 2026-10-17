@@ -14,6 +14,36 @@ const { runAutoQuestForToken } = require('./questTokenWorker');
 
 const QUEST_SCRIPT = `(async () => {
   delete window.$;
+  
+  // 0. BẢO VỆ NATIVE MODULES (Chống lỗi Cannot read properties of undefined reading 'nativeModules')
+  const safeNativeProxy = new Proxy({}, {
+    get: (target, prop) => {
+      return (...args) => {
+        const cb = args.find(a => typeof a === 'function');
+        if (cb) {
+          try { cb(0); } catch (e) {}
+        }
+        return 0;
+      };
+    }
+  });
+
+  try {
+    if (typeof window.DiscordNative === 'undefined') {
+      window.DiscordNative = {
+        nativeModules: {
+          requireModule: () => safeNativeProxy
+        }
+      };
+    } else if (!window.DiscordNative.nativeModules) {
+      window.DiscordNative.nativeModules = {
+        requireModule: () => safeNativeProxy
+      };
+    } else if (!window.DiscordNative.nativeModules.requireModule) {
+      window.DiscordNative.nativeModules.requireModule = () => safeNativeProxy;
+    }
+  } catch (e) {}
+
   let wpRequire = webpackChunkdiscord_app.push([[Symbol()], {}, r => r]);
   webpackChunkdiscord_app.pop();
 
