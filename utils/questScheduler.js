@@ -47,10 +47,11 @@ function getSubscriber(userId) {
 
 function listSubscribers(onlyEnabled = true) {
   const db = getDb();
-  if (onlyEnabled) {
-    return db.prepare('SELECT * FROM quest_subscribers WHERE enabled = 1').all();
-  }
-  return db.prepare('SELECT * FROM quest_subscribers').all();
+  const rows = onlyEnabled
+    ? db.prepare('SELECT * FROM quest_subscribers WHERE enabled = 1').all()
+    : db.prepare('SELECT * FROM quest_subscribers').all();
+  const { isApproved } = require('./questAuth');
+  return rows.filter((r) => isApproved(r.user_id));
 }
 
 function registerSubscriber(userId, token, username = null, notifyDm = 1) {

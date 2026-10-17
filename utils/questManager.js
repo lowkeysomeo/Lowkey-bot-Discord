@@ -334,7 +334,7 @@ function buildTokenGuidePayload() {
   return { embeds: [embed], components: [row] };
 }
 
-function buildMainHubPayload(guildId) {
+function buildMainHubPayload(guildId, userId = null) {
   const status = guildId ? getQuestStreamStatus(guildId) : null;
 
   const embed = new EmbedBuilder()
@@ -421,6 +421,17 @@ function buildMainHubPayload(guildId) {
       .setEmoji('ℹ️')
       .setStyle(ButtonStyle.Secondary)
   );
+
+  const { isOwner } = require('./questAuth');
+  if (userId && isOwner(userId)) {
+    row2.addComponents(
+      new ButtonBuilder()
+        .setCustomId('quest:admin_list')
+        .setLabel('Duyệt Thành Viên')
+        .setEmoji('🛡️')
+        .setStyle(ButtonStyle.Primary)
+    );
+  }
 
   return { embeds: [embed], components: [row1, row2] };
 }
@@ -510,6 +521,12 @@ async function handleButtonInteraction(interaction) {
   const action = interaction.customId.replace('quest:', '');
 
   if (action === 'modal') {
+    const { isApproved, buildAccessGatePayload } = require('./questAuth');
+    if (!isApproved(interaction.user.id)) {
+      const gate = buildAccessGatePayload(interaction.user);
+      if (interaction.message?.flags?.has?.(64)) return interaction.update(gate);
+      return interaction.reply({ flags: 64, ...gate });
+    }
     return interaction.showModal(buildTokenModal());
   }
 
@@ -519,7 +536,7 @@ async function handleButtonInteraction(interaction) {
   }
 
   if (action === 'hub') {
-    const payload = buildMainHubPayload(interaction.guildId);
+    const payload = buildMainHubPayload(interaction.guildId, interaction.user.id);
     return interaction.update({ content: null, ...payload });
   }
 
@@ -565,12 +582,63 @@ async function handleButtonInteraction(interaction) {
   }
 
   if (action === 'auto_menu') {
+    const { isApproved, buildAccessGatePayload } = require('./questAuth');
+    if (!isApproved(interaction.user.id)) {
+      const gate = buildAccessGatePayload(interaction.user);
+      if (interaction.message?.flags?.has?.(64)) return interaction.update(gate);
+      return interaction.reply({ flags: 64, ...gate });
+    }
     const { buildAutoStatusPayload } = require('./questScheduler');
     const payload = buildAutoStatusPayload(interaction.user.id);
     if (interaction.message?.flags?.has?.(64)) {
       return interaction.update(payload);
     }
     return interaction.reply({ flags: 64, ...payload });
+  }
+
+  if (action === 'request_access') {
+    await interaction.deferUpdate();
+    const { requestAccess, buildAccessGatePayload } = require('./questAuth');
+    await requestAccess(interaction.user, interaction.client);
+    const gate = buildAccessGatePayload(interaction.user);
+    return interaction.editReply(gate);
+  }
+
+  if (action.startsWith('approve_')) {
+    const targetUserId = action.replace('approve_', '');
+    const { isOwner, approveUser } = require('./questAuth');
+    if (!isOwner(interaction.user.id)) {
+      return interaction.reply({ content: '❌ Chỉ Admin mới có quyền phê duyệt.', flags: 64 });
+    }
+    await approveUser(targetUserId, interaction.user.id, interaction.client);
+    return interaction.update({
+      content: `✅ **ĐÃ PHÊ DUYỆT:** Bạn đã cấp quyền sử dụng Auto Quest cho thành viên <@${targetUserId}>!`,
+      components: [],
+    });
+  }
+
+  if (action.startsWith('reject_')) {
+    const targetUserId = action.replace('reject_', '');
+    const { isOwner, rejectUser } = require('./questAuth');
+    if (!isOwner(interaction.user.id)) {
+      return interaction.reply({ content: '❌ Chỉ Admin mới có quyền từ chối.', flags: 64 });
+    }
+    await rejectUser(targetUserId, interaction.user.id, interaction.client);
+    return interaction.update({
+      content: `❌ **ĐÃ TỪ CHỐI:** Bạn đã từ chối cấp quyền cho thành viên <@${targetUserId}>.`,
+      components: [],
+    });
+  }
+
+  if (action === 'admin_list') {
+    const { isOwner, buildAdminListPayload } = require('./questAuth');
+    if (!isOwner(interaction.user.id)) {
+      return interaction.reply({ content: '❌ Chỉ Admin mới có quyền truy cập menu này.', flags: 64 });
+    }
+    if (interaction.message?.flags?.has?.(64)) {
+      return interaction.update(buildAdminListPayload());
+    }
+    return interaction.reply({ flags: 64, ...buildAdminListPayload() });
   }
 
   if (action === 'auto_toggle') {
@@ -633,6 +701,13 @@ async function handleModalInteraction(interaction) {
 
   if (!token) {
     return interaction.editReply({ content: '❌ Token không được để trống.' });
+  }
+
+  const { isApproved } = require('./questAuth');
+  if (!isApproved(interaction.user.id)) {
+    return interaction.editReply({
+      content: '❌ Bạn chưa được Admin (ID: 604729446649298963) phê duyệt sử dụng tính năng này.',
+    });
   }
 
   try {

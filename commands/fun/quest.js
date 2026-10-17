@@ -24,6 +24,7 @@ module.exports.data = {
         { name: '⏰ Đặt lịch Tự động quét & làm Quest mới', value: 'auto' },
         { name: '🔄 Quét tìm nhiệm vụ mới ngay lập tức', value: 'scan' },
         { name: '🤖 Auto 100% bằng User Token (Mở Modal)', value: 'token' },
+        { name: '🛡️ Quản lý phê duyệt (Dành cho Admin)', value: 'admin' },
         { name: '🔑 Hướng dẫn lấy Discord User Token', value: 'token_guide' },
         { name: '⚡ Lấy Script Auto Hoàn Thành Quest (Console)', value: 'script' },
         { name: '🎙️ Mời bot vào Voice làm Viewer (15 phút)', value: 'stream' },
@@ -38,13 +39,30 @@ module.exports.data = {
 
 module.exports.execute = async (interaction) => {
   const action = interaction.options?.getString?.('action') || 'hub';
+  const { isApproved, isOwner, buildAccessGatePayload, buildAdminListPayload } = require('../../utils/questAuth');
+
+  if (action === 'admin') {
+    if (!isOwner(interaction.user.id)) {
+      return interaction.reply({
+        content: '❌ Lệnh này chỉ dành riêng cho Admin (ID: 604729446649298963)!',
+        flags: 64,
+      });
+    }
+    return interaction.reply({ flags: 64, ...buildAdminListPayload() });
+  }
 
   if (action === 'auto') {
+    if (!isApproved(interaction.user.id)) {
+      return interaction.reply({ flags: 64, ...buildAccessGatePayload(interaction.user) });
+    }
     const { buildAutoStatusPayload } = require('../../utils/questScheduler');
     return interaction.reply({ flags: 64, ...buildAutoStatusPayload(interaction.user.id) });
   }
 
   if (action === 'scan') {
+    if (!isApproved(interaction.user.id)) {
+      return interaction.reply({ flags: 64, ...buildAccessGatePayload(interaction.user) });
+    }
     if (typeof interaction.deferReply === 'function') {
       await interaction.deferReply({ flags: 64 });
     }
@@ -69,6 +87,9 @@ module.exports.execute = async (interaction) => {
   }
 
   if (action === 'token') {
+    if (!isApproved(interaction.user.id)) {
+      return interaction.reply({ flags: 64, ...buildAccessGatePayload(interaction.user) });
+    }
     if (typeof interaction.showModal === 'function') {
       return interaction.showModal(buildTokenModal());
     }
@@ -138,6 +159,6 @@ module.exports.execute = async (interaction) => {
   }
 
   // Default: hub
-  const payload = buildMainHubPayload(interaction.guildId);
+  const payload = buildMainHubPayload(interaction.guildId, interaction.user.id);
   return interaction.reply(payload);
 };

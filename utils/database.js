@@ -98,6 +98,15 @@ function initializeDatabase() {
       last_quests_json TEXT,
       created_at INTEGER NOT NULL DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS quest_permissions (
+      user_id TEXT PRIMARY KEY,
+      username TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      requested_at INTEGER NOT NULL DEFAULT 0,
+      approved_at INTEGER NOT NULL DEFAULT 0,
+      approved_by TEXT
+    );
   `);
 
   migrateLegacyJsonIfNeeded();
