@@ -195,6 +195,77 @@ async function claimQuestReward(token, questId, platform = 0) {
 }
 
 /**
+ * Tự động xem video theo nhịp an toàn (bước nhảy ~7s) để Discord chấp thuận tiến độ 100%
+ */
+async function completeVideoQuest(token, quest, options = {}) {
+  const questId = quest.id;
+  const questName =
+    quest.config?.messages?.quest_name ||
+    quest.config?.messages?.game_title ||
+    quest.config?.messages?.game_name ||
+    quest.config?.application?.name ||
+    `Nhiệm vụ #${questId}`;
+
+  // Đăng ký nhận nhiệm vụ nếu chưa enroll
+  let enrolledAt = quest.user_status?.enrolled_at ? new Date(quest.user_status.enrolled_at).getTime() : null;
+  if (!enrolledAt) {
+    try {
+      await enrollQuest(token, questId);
+      enrolledAt = Date.now();
+    } catch (e) {
+      enrolledAt = Date.now();
+    }
+  }
+
+  const tasks = quest.config?.task_config?.tasks || quest.config?.task_config_v2?.tasks || {};
+  const targetSeconds = tasks.WATCH_VIDEO?.target || tasks.WATCH_VIDEO_ON_MOBILE?.target || 30;
+  const taskName = tasks.WATCH_VIDEO ? 'WATCH_VIDEO' : 'WATCH_VIDEO_ON_MOBILE';
+
+  let currentSeconds = quest.user_status?.progress?.[taskName]?.value ?? 0;
+
+  const maxLoops = Math.ceil(targetSeconds / 5) + 20;
+  let loops = 0;
+
+  while (currentSeconds < targetSeconds && loops < maxLoops) {
+    loops++;
+    const maxAllowed = Math.floor((Date.now() - enrolledAt) / 1000) + 10;
+    const speed = 7;
+    const nextTimestamp = Math.min(targetSeconds, currentSeconds + speed);
+
+    if (maxAllowed >= nextTimestamp) {
+      const jitter = Math.min(targetSeconds, nextTimestamp + (Math.random() * 0.4));
+      await sendVideoProgress(token, questId, jitter);
+      currentSeconds = nextTimestamp;
+
+      if (options.onProgress) {
+        options.onProgress({
+          questId,
+          questName,
+          currentSeconds: Math.min(currentSeconds, targetSeconds),
+          targetSeconds,
+          percent: Math.min(100, Math.round((currentSeconds / targetSeconds) * 100)),
+        });
+      }
+    }
+
+    if (currentSeconds >= targetSeconds) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+
+  // Chờ 1.2s trước khi nhận thưởng để tránh xung đột
+  await new Promise((r) => setTimeout(r, 1200));
+  const reward = await claimQuestReward(token, questId);
+
+  return {
+    questId,
+    questName,
+    completed: true,
+    claimed: true,
+    reward,
+  };
+}
+
+/**
  * Tự động hoàn thành một nhiệm vụ cụ thể
  */
 async function completeSingleQuest(token, quest, options = {}) {
@@ -226,27 +297,19 @@ async function completeSingleQuest(token, quest, options = {}) {
   }
 
   const tasks = quest.config?.task_config?.tasks || quest.config?.task_config_v2?.tasks || {};
+  const isVideo = !!(tasks.WATCH_VIDEO || tasks.WATCH_VIDEO_ON_MOBILE);
 
   // Xử lý nhiệm vụ xem video
-  if (tasks.WATCH_VIDEO) {
-    const targetSeconds = tasks.WATCH_VIDEO.target || 30;
-    if (options.onProgress) {
-      options.onProgress({
-        questId,
-        questName,
-        currentSeconds: targetSeconds,
-        targetSeconds,
-        percent: 100,
-      });
-    }
-    await sendVideoProgress(token, questId, targetSeconds);
-  } else {
-    // Nhiệm vụ chơi game hoặc stream
-    const targetSeconds =
-      tasks.PLAY_ON_DESKTOP?.target ||
-      tasks.STREAM_ON_DESKTOP?.target ||
-      tasks.PLAY_ACTIVITY?.target ||
-      (quest.config?.stream_duration_requirement_minutes ? quest.config.stream_duration_requirement_minutes * 60 : 900);
+  if (isVideo) {
+    return await completeVideoQuest(token, quest, options);
+  }
+
+  // Nhiệm vụ chơi game hoặc stream
+  const targetSeconds =
+    tasks.PLAY_ON_DESKTOP?.target ||
+    tasks.STREAM_ON_DESKTOP?.target ||
+    tasks.PLAY_ACTIVITY?.target ||
+    (quest.config?.stream_duration_requirement_minutes ? quest.config.stream_duration_requirement_minutes * 60 : 900);
 
     let currentSeconds = quest.user_status?.stream_progress_seconds || 0;
     const heartbeatDelay = options.heartbeatDelayMs ?? 2000;
@@ -308,18 +371,6 @@ async function completeSingleQuest(token, quest, options = {}) {
         message: 'Đã tự động nhận (Accept). Yêu cầu mở Discord Desktop hoặc dùng script 1-click.',
       };
     }
-  }
-
-  // Claim phần thưởng & ORB cho video quest
-  const reward = await claimQuestReward(token, questId);
-
-  return {
-    questId,
-    questName,
-    completed: true,
-    claimed: true,
-    reward,
-  };
 }
 
 /**
@@ -425,6 +476,7 @@ module.exports = {
   sendHeartbeat,
   sendVideoProgress,
   claimQuestReward,
+  completeVideoQuest,
   completeSingleQuest,
   runAutoQuestForToken,
 };

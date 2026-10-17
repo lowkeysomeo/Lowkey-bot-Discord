@@ -14,6 +14,7 @@ const {
   enrollQuest,
   sendVideoProgress,
   claimQuestReward,
+  completeVideoQuest,
   fetchUserInfo,
 } = require('./questTokenWorker');
 
@@ -165,12 +166,9 @@ async function scanUserQuests(subscriber, client) {
     const isVideo = !!(tasks.WATCH_VIDEO || tasks.WATCH_VIDEO_ON_MOBILE);
 
     if (isVideo) {
-      // 2. Video Quest: Tự động hoàn thành và nhận ORB
-      const targetSec = tasks.WATCH_VIDEO?.target || tasks.WATCH_VIDEO_ON_MOBILE?.target || 30;
+      // 2. Video Quest: Tự động hoàn thành theo nhịp an toàn và nhận ORB
       try {
-        await sendVideoProgress(token, quest.id, targetSec);
-        await new Promise((r) => setTimeout(r, 1200));
-        await claimQuestReward(token, quest.id);
+        await completeVideoQuest(token, quest);
         actions.push({
           questName,
           type: 'video',
