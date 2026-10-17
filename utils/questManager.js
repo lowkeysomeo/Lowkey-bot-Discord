@@ -135,20 +135,38 @@ const QUEST_SCRIPT = `(async () => {
 
   console.log(\`%c[Lowkey Quest]%c Tìm thấy \${videoQuests.length} nhiệm vụ Video và \${gameQuests.length} nhiệm vụ Game. Bắt đầu tự động làm và nhận thưởng!\`, "color: #5865F2; font-weight: bold", "color: #57F287");
 
-  // 2. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ VIDEO
+  // 2. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ VIDEO (chuẩn nhịp timestamp không bị 400/429)
   for (let [idx, quest] of videoQuests.entries()) {
     let questName = quest.config.messages.questName || quest.config.messages.gameTitle;
     console.log(\`%c[Video \${idx + 1}/\${videoQuests.length}]%c Đang làm: \${questName}...\`, "color: #5865F2; font-weight: bold", "color: #FAA61A");
     const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
     const taskName = ["WATCH_VIDEO", "WATCH_VIDEO_ON_MOBILE"].find(x => taskConfig?.tasks?.[x] != null);
     const secondsNeeded = taskConfig?.tasks?.[taskName]?.target || 30;
+    let secondsDone = quest.userStatus?.progress?.[taskName]?.value ?? 0;
+    const enrolledAt = quest.userStatus?.enrolledAt ? new Date(quest.userStatus.enrolledAt).getTime() : Date.now();
+    
     if (api) {
-      await api.post({ url: \`/quests/\${quest.id}/video-progress\`, body: { timestamp: secondsNeeded } }).catch(() => {});
+      while (secondsDone < secondsNeeded) {
+        const maxAllowed = Math.floor((Date.now() - enrolledAt) / 1000) + 10;
+        const speed = 7;
+        const timestamp = Math.min(secondsNeeded, secondsDone + speed);
+        if (maxAllowed >= timestamp) {
+          try {
+            await api.post({ url: \`/quests/\${quest.id}/video-progress\`, body: { timestamp: Math.min(secondsNeeded, timestamp + Math.random()) } });
+            secondsDone = timestamp;
+            console.log(\`  ↪ [Tiến độ video] \${secondsDone}/\${secondsNeeded}s\`);
+          } catch (e) {
+            break;
+          }
+        }
+        if (secondsDone >= secondsNeeded) break;
+        await new Promise(r => setTimeout(r, 1000));
+      }
       try {
         await api.post({ url: \`/quests/\${quest.id}/claim-reward\`, body: { platform: 0 } });
+        console.log(\`%c[HOÀN TẤT]%c Đã hoàn thành & nhận thưởng Video Quest: \${questName}!\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
       } catch {}
     }
-    console.log(\`%c[HOÀN TẤT]%c Đã hoàn thành & nhận thưởng Video Quest: \${questName}!\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
   }
 
   // 3. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ GAME (PLAY_ON_DESKTOP & STREAM)
