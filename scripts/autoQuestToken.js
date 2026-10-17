@@ -7,24 +7,70 @@
  * Cách dùng:
  *   node scripts/autoQuestToken.js
  *   node scripts/autoQuestToken.js --token "YOUR_USER_TOKEN"
- *   Hoặc đặt DISCORD_USER_TOKEN="YOUR_USER_TOKEN" trong file .env
+ *   Hoặc bật trực tiếp từ file shortcut trên Desktop!
  */
 
 require('dotenv').config();
+const fs = require('node:fs');
+const path = require('node:path');
 const readline = require('node:readline');
 const { runAutoQuestForToken } = require('../utils/questTokenWorker');
 
-async function promptToken() {
+const TOKEN_CACHE_PATH = path.join(__dirname, '..', 'data', 'saved_quest_token.txt');
+
+function loadSavedToken() {
+  try {
+    if (fs.existsSync(TOKEN_CACHE_PATH)) {
+      const data = fs.readFileSync(TOKEN_CACHE_PATH, 'utf8').trim();
+      if (data && data.length > 20) return data;
+    }
+  } catch {}
+  return null;
+}
+
+function saveToken(token) {
+  try {
+    const dataDir = path.dirname(TOKEN_CACHE_PATH);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(TOKEN_CACHE_PATH, token.trim(), 'utf8');
+  } catch {}
+}
+
+function maskToken(t) {
+  if (!t || t.length < 16) return '********';
+  return t.slice(0, 8) + '...' + t.slice(-4);
+}
+
+async function promptToken(saved) {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
 
   return new Promise((resolve) => {
-    rl.question('\n🔑 Nhập Discord User Token của bạn: ', (answer) => {
-      rl.close();
-      resolve(answer.trim());
-    });
+    if (saved) {
+      console.log(`\n🔑 Đã tìm thấy Token đã lưu: [ ${maskToken(saved)} ]`);
+      rl.question('👉 Nhấn [Enter] để CHẠY NGAY, hoặc dán Token mới: ', (answer) => {
+        rl.close();
+        const input = answer.trim();
+        if (!input) {
+          resolve(saved);
+        } else {
+          saveToken(input);
+          resolve(input);
+        }
+      });
+    } else {
+      console.log('\n📌 Mẹo: Mở Discord Web/Desktop -> F12 -> Network -> filter: api -> copy dòng Authorization');
+      rl.question('🔑 Hãy dán Discord User Token của bạn vào đây: ', (answer) => {
+        rl.close();
+        const input = answer.trim();
+        if (input) saveToken(input);
+        resolve(input);
+      });
+    }
   });
 }
 
@@ -41,23 +87,41 @@ function parseCliToken() {
   return null;
 }
 
+async function waitExitPrompt() {
+  if (!process.stdin.isTTY) return;
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise((resolve) => {
+    rl.question('\n👉 Nhấn phím [Enter] để đóng cửa sổ...', () => {
+      rl.close();
+      resolve();
+    });
+  });
+}
+
 (async () => {
   console.log('====================================================');
   console.log('🔮 LOWKEY DISCORD AUTO QUEST & ORB - 100% AUTOMATED');
   console.log('====================================================');
 
-  let token =
-    parseCliToken() ||
+  const cliToken = parseCliToken();
+  const envToken =
     process.env.DISCORD_USER_TOKEN ||
     process.env.QUEST_USER_TOKENS ||
     process.env.USER_TOKEN;
+  const savedToken = loadSavedToken();
+
+  let token = cliToken || envToken;
 
   if (!token) {
-    token = await promptToken();
+    token = await promptToken(savedToken);
   }
 
   if (!token) {
     console.error('❌ Lỗi: Bạn chưa cung cấp User Token Discord.');
+    await waitExitPrompt();
     process.exit(1);
   }
 
@@ -106,5 +170,7 @@ function parseCliToken() {
   } catch (err) {
     console.error(`\n❌ LỖI AUTO QUEST: ${err.message}`);
     process.exitCode = 1;
+  } finally {
+    await waitExitPrompt();
   }
 })();
