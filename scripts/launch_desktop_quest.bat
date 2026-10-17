@@ -14,4 +14,4 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-node scripts/autoQuestToken.js
+node scripts/run_quest_cdp.js

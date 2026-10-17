@@ -44,30 +44,10 @@ const QUEST_SCRIPT = `(async () => {
     }
   } catch (e) {}
 
-  let wpRequire = webpackChunkdiscord_app.push([[Symbol()], {}, r => r]);
-  webpackChunkdiscord_app.pop();
-
-  let ApplicationStreamingStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getStreamerActiveStreamMetadata)?.exports?.Z;
-  let RunningGameStore, QuestsStore, ChannelStore, GuildChannelStore, FluxDispatcher, api;
-
-  if (!ApplicationStreamingStore) {
-    ApplicationStreamingStore = Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getStreamerActiveStreamMetadata)?.exports?.A;
-    RunningGameStore = Object.values(wpRequire.c).find(x => x?.exports?.Ay?.getRunningGames)?.exports?.Ay;
-    QuestsStore = Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getQuest)?.exports?.A;
-    ChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getAllThreadsForParent)?.exports?.A;
-    GuildChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.Ay?.getSFWDefaultChannel)?.exports?.Ay;
-    FluxDispatcher = Object.values(wpRequire.c).find(x => x?.exports?.h?.__proto__?.flushWaitQueue)?.exports?.h;
-    api = Object.values(wpRequire.c).find(x => x?.exports?.Bo?.get)?.exports?.Bo;
-  } else {
-    RunningGameStore = Object.values(wpRequire.c).find(x => x?.exports?.ZP?.getRunningGames)?.exports?.ZP;
-    QuestsStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getQuest)?.exports?.Z;
-    ChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getAllThreadsForParent)?.exports?.Z;
-    GuildChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.ZP?.getSFWDefaultChannel)?.exports?.ZP;
-    FluxDispatcher = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.flushWaitQueue)?.exports?.Z;
-    api = Object.values(wpRequire.c).find(x => x?.exports?.tn?.get)?.exports?.tn;
-  }
+  let wpRequire = null, QuestsStore = null, RunningGameStore = null, ApplicationStreamingStore = null, FluxDispatcher = null, api = null;
 
   function findFallback(pred) {
+    if (!wpRequire?.c) return null;
     for (let mod of Object.values(wpRequire.c)) {
       if (!mod?.exports) continue;
       if (pred(mod.exports)) return mod.exports;
@@ -80,26 +60,51 @@ const QUEST_SCRIPT = `(async () => {
     return null;
   }
 
-  if (!FluxDispatcher) {
-    FluxDispatcher = findFallback(x => typeof x?.dispatch === 'function' && typeof x?.subscribe === 'function');
-  }
-  if (!QuestsStore) {
-    QuestsStore = findFallback(x => typeof x?.getQuest === 'function' || x?.quests instanceof Map);
-  }
-  if (!RunningGameStore) {
-    RunningGameStore = findFallback(x => typeof x?.getRunningGames === 'function');
-  }
-  if (!ApplicationStreamingStore) {
-    ApplicationStreamingStore = findFallback(x => typeof x?.getStreamerActiveStreamMetadata === 'function');
-  }
-  if (!api) {
-    api = findFallback(x => typeof x?.get === 'function' && typeof x?.post === 'function');
+  for (let attempt = 0; attempt < 20; attempt++) {
+    try {
+      if (typeof webpackChunkdiscord_app !== 'undefined') {
+        wpRequire = webpackChunkdiscord_app.push([[Symbol()], {}, r => r]);
+        webpackChunkdiscord_app.pop();
+
+        QuestsStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getQuest)?.exports?.Z
+          || Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getQuest)?.exports?.A
+          || findFallback(x => typeof x?.getQuest === 'function' || x?.quests instanceof Map);
+
+        RunningGameStore = Object.values(wpRequire.c).find(x => x?.exports?.ZP?.getRunningGames)?.exports?.ZP
+          || Object.values(wpRequire.c).find(x => x?.exports?.Ay?.getRunningGames)?.exports?.Ay
+          || findFallback(x => typeof x?.getRunningGames === 'function');
+
+        ApplicationStreamingStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getStreamerActiveStreamMetadata)?.exports?.Z
+          || Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getStreamerActiveStreamMetadata)?.exports?.A
+          || findFallback(x => typeof x?.getStreamerActiveStreamMetadata === 'function');
+
+        FluxDispatcher = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.flushWaitQueue)?.exports?.Z
+          || Object.values(wpRequire.c).find(x => x?.exports?.h?.__proto__?.flushWaitQueue)?.exports?.h
+          || findFallback(x => typeof x?.dispatch === 'function' && typeof x?.subscribe === 'function');
+
+        api = Object.values(wpRequire.c).find(x => x?.exports?.tn?.get)?.exports?.tn
+          || Object.values(wpRequire.c).find(x => x?.exports?.Bo?.get)?.exports?.Bo
+          || findFallback(x => typeof x?.get === 'function' && typeof x?.post === 'function');
+      }
+    } catch (e) {}
+
+    if (QuestsStore && FluxDispatcher) break;
+    await new Promise(r => setTimeout(r, 1000));
   }
 
   if (!QuestsStore || !FluxDispatcher) {
     console.error("%c[Lowkey Quest]%c Không thể kết nối Discord Webpack stores. Hãy đảm bảo bạn đang dùng Discord Desktop!", "color: red; font-weight: bold", "color: #ffaa00");
+    window.__LOWKEY_QUEST_FINISHED__ = true;
     return;
   }
+
+  if (api) {
+    try { await api.get({ url: "/quests/@me" }); } catch (e) {}
+  }
+  if (FluxDispatcher) {
+    try { FluxDispatcher.dispatch({ type: "QUESTS_FETCH_CURRENT_QUESTS" }); } catch (e) {}
+  }
+  await new Promise(r => setTimeout(r, 800));
 
   console.log("%c[Lowkey Quest]%c Đang tải danh sách nhiệm vụ...", "color: #5865F2; font-weight: bold", "color: #00ffff");
 
@@ -272,6 +277,7 @@ const QUEST_SCRIPT = `(async () => {
   }
 
   console.log("%c[CHÚC MỪNG]%c Đã hoàn tất 100% tất cả các nhiệm vụ Discord Quests và nhận trọn vẹn điểm ORB!", "color: #57F287; font-weight: bold; font-size: 14px", "color: #FFFFFF; font-size: 14px");
+  window.__LOWKEY_QUEST_FINISHED__ = true;
 })();
 `;
 
