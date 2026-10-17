@@ -337,6 +337,17 @@ client.on(
       return;
     }
 
+    if (interaction.isModalSubmit?.() && interaction.customId?.startsWith('quest:')) {
+      try { await require('./utils/questManager').handleModalInteraction(interaction); }
+      catch (error) {
+        console.error('[QUEST MODAL ERROR]', error);
+        const payload = { content: 'Có lỗi xảy ra khi xử lý Auto Quest bằng Token. Vui lòng thử lại.', flags: 64 };
+        if (interaction.deferred) await interaction.editReply(payload).catch(() => {});
+        else if (!interaction.replied) await interaction.reply(payload).catch(() => {});
+      }
+      return;
+    }
+
     if (interaction.isAutocomplete?.()) {
       const command = client.commands.get(interaction.commandName);
       if (command?.autocomplete) {

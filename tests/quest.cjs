@@ -8,7 +8,10 @@ const {
   buildMainHubPayload,
   buildScriptPayload,
   buildInfoPayload,
+  buildTokenModal,
+  buildTokenGuidePayload,
   handleButtonInteraction,
+  handleModalInteraction,
 } = require('../utils/questManager');
 const {
   startQuestStream,
@@ -17,6 +20,17 @@ const {
   setVoiceAdapter,
   activeSessions,
 } = require('../utils/questVoiceHelper');
+const {
+  setFetchImplementation,
+  fetchUserInfo,
+  fetchQuests,
+  enrollQuest,
+  sendHeartbeat,
+  sendVideoProgress,
+  claimQuestReward,
+  completeSingleQuest,
+  runAutoQuestForToken,
+} = require('../utils/questTokenWorker');
 
 (async () => {
   // 1. Kiểm tra load command
@@ -33,7 +47,7 @@ const {
   const hubPayload = buildMainHubPayload('test-guild');
   assert.equal(hubPayload.embeds.length, 1);
   assert.match(hubPayload.embeds[0].data.title, /TRUNG TÂM AUTO QUEST & SĂN ORB/);
-  assert.equal(hubPayload.components[0].components.length, 4);
+  assert.equal(hubPayload.components.length, 2);
 
   const scriptPayload = buildScriptPayload();
   assert.equal(scriptPayload.embeds.length, 1);
@@ -44,8 +58,16 @@ const {
   assert.equal(infoPayload.embeds.length, 1);
   assert.match(infoPayload.embeds[0].data.title, /DISCORD QUESTS & ĐIỂM ORB/);
 
+  const modal = buildTokenModal();
+  assert.equal(modal.data.custom_id, 'quest:modal_submit');
+
+  const guidePayload = buildTokenGuidePayload();
+  assert.equal(guidePayload.embeds.length, 1);
+  assert.match(guidePayload.embeds[0].data.title, /HƯỚNG DẪN LẤY DISCORD USER TOKEN/);
+
   // 3. Kiểm tra thực thi lệnh slash /quest
   let replyData = null;
+  let modalShown = null;
   const mockInteraction = (action) => ({
     guildId: 'guild-123',
     member: { id: 'user-123', guild: { id: 'guild-123', voiceAdapterCreator: {} }, voice: { channel: null } },
@@ -53,6 +75,7 @@ const {
     reply: async (data) => { replyData = data; },
     deferReply: async () => {},
     editReply: async (data) => { replyData = data; },
+    showModal: async (m) => { modalShown = m; },
   });
 
   // /quest hub
@@ -66,6 +89,16 @@ const {
   // /quest info
   await questCmd.execute(mockInteraction('info'));
   assert.match(replyData.embeds[0].data.title, /DISCORD QUESTS/);
+
+  // /quest token (mở modal)
+  modalShown = null;
+  await questCmd.execute(mockInteraction('token'));
+  assert(modalShown !== null);
+  assert.equal(modalShown.data.custom_id, 'quest:modal_submit');
+
+  // /quest token_guide
+  await questCmd.execute(mockInteraction('token_guide'));
+  assert.match(replyData.embeds[0].data.title, /HƯỚNG DẪN LẤY DISCORD USER TOKEN/);
 
   // /autoquest alias
   await autoquestCmd.execute(mockInteraction('hub'));
@@ -128,6 +161,7 @@ const {
     let updatedPayload = null;
     let deferred = false;
     let editedReply = null;
+    let buttonModalShown = null;
     const buttonInteraction = (customId) => ({
       customId,
       guildId: 'g1',
@@ -136,6 +170,7 @@ const {
       update: async (p) => { updatedPayload = p; },
       deferReply: async () => { deferred = true; },
       editReply: async (p) => { editedReply = p; },
+      showModal: async (m) => { buttonModalShown = m; },
     });
 
     await handleButtonInteraction(buttonInteraction('quest:hub'));
@@ -146,6 +181,12 @@ const {
 
     await handleButtonInteraction(buttonInteraction('quest:info'));
     assert.match(updatedPayload.embeds[0].data.title, /DISCORD QUESTS/);
+
+    await handleButtonInteraction(buttonInteraction('quest:token_guide'));
+    assert.match(updatedPayload.embeds[0].data.title, /HƯỚNG DẪN LẤY DISCORD USER TOKEN/);
+
+    await handleButtonInteraction(buttonInteraction('quest:modal'));
+    assert.equal(buttonModalShown.data.custom_id, 'quest:modal_submit');
 
     await handleButtonInteraction(buttonInteraction('quest:stream'));
     assert.match(editedReply.content, /Bot đã tham gia kênh/);
@@ -158,7 +199,152 @@ const {
     stopQuestStream('g1');
   }
 
-  console.log('PASS quest: /quest, /autoquest, Hub Embed, Auto Quest Script, Voice Stream Helper (15m timer) & Button interactions');
+  // 7. Kiểm tra Quest Token Worker Engine (Mock API Fetch)
+  let heartbeatCount = 0;
+  let videoProgressSent = false;
+  let enrollCalled = false;
+  let claimCalled = false;
+
+  const mockQuests = [
+    {
+      id: 'quest-video-1',
+      config: {
+        messages: { quest_name: 'Watch Trailer for 30 Orbs' },
+        task_config: { tasks: { WATCH_VIDEO: { target: 30 } } },
+      },
+      user_status: { enrolled_at: null, completed_at: null, claimed_at: null },
+    },
+    {
+      id: 'quest-game-2',
+      config: {
+        messages: { quest_name: 'Play Genshin Impact for 15m' },
+        task_config: { tasks: { PLAY_ON_DESKTOP: { target: 60 } } },
+      },
+      user_status: { enrolled_at: '2026-10-17T00:00:00Z', completed_at: null, claimed_at: null, stream_progress_seconds: 0 },
+    },
+    {
+      id: 'quest-done-3',
+      config: {
+        messages: { quest_name: 'Already Done Quest' },
+      },
+      user_status: { enrolled_at: '2026-10-17T00:00:00Z', completed_at: '2026-10-17T00:15:00Z', claimed_at: '2026-10-17T00:15:10Z' },
+    },
+  ];
+
+  setFetchImplementation(async (url, options = {}) => {
+    const urlStr = String(url);
+
+    // 401 Unauthorized test
+    if (options.headers?.Authorization === 'invalid_token') {
+      return { status: 401, ok: false, json: async () => ({ message: '401: Unauthorized' }), text: async () => '401' };
+    }
+
+    // GET /users/@me
+    if (urlStr.includes('/users/@me')) {
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({ id: 'user-token-123', username: 'lowkey_tester', discriminator: '0', global_name: 'Lowkey Tester' }),
+      };
+    }
+
+    // GET /quests/@me
+    if (urlStr.includes('/quests/@me')) {
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({ quests: mockQuests }),
+      };
+    }
+
+    // POST /quests/{id}/enroll
+    if (urlStr.includes('/enroll')) {
+      enrollCalled = true;
+      return { status: 200, ok: true, json: async () => ({ enrolled: true }) };
+    }
+
+    // POST /quests/{id}/video-progress
+    if (urlStr.includes('/video-progress')) {
+      videoProgressSent = true;
+      return { status: 200, ok: true, json: async () => ({ completed: true }) };
+    }
+
+    // POST /quests/{id}/heartbeat
+    if (urlStr.includes('/heartbeat')) {
+      heartbeatCount++;
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({
+          stream_progress_seconds: heartbeatCount * 30,
+          user_status: { stream_progress_seconds: heartbeatCount * 30 },
+        }),
+      };
+    }
+
+    // POST /quests/{id}/claim-reward
+    if (urlStr.includes('/claim-reward') || urlStr.includes('/claim')) {
+      claimCalled = true;
+      return { status: 200, ok: true, json: async () => ({ reward_code: 'ORB_100_COUPON', claimed: true }) };
+    }
+
+    return { status: 200, ok: true, json: async () => ({}) };
+  });
+
+  try {
+    // 7.1 Kiểm tra fetchUserInfo & bắt lỗi 401
+    await assert.rejects(
+      async () => { await fetchUserInfo('invalid_token'); },
+      /Token Discord không hợp lệ/
+    );
+
+    const userInfo = await fetchUserInfo('valid_token_xyz');
+    assert.equal(userInfo.username, 'lowkey_tester');
+
+    // 7.2 Kiểm tra fetchQuests
+    const quests = await fetchQuests('valid_token_xyz');
+    assert.equal(quests.length, 3);
+
+    // 7.3 Kiểm tra quy trình Auto 100% bằng User Token
+    const progressLogs = [];
+    const report = await runAutoQuestForToken('valid_token_xyz', {
+      heartbeatDelayMs: 10,
+      onProgress: (p) => progressLogs.push(p),
+    });
+
+    assert.equal(report.totalQuests, 3);
+    assert.equal(report.completedCount, 3); // 2 quests vừa xong + 1 quest alreadyDone
+    assert.equal(report.claimedCount, 2); // 2 quests được claim
+    assert(enrollCalled, 'Enroll phải được gọi cho quest chưa nhận');
+    assert(videoProgressSent, 'Video progress phải được gửi cho video quest');
+    assert(heartbeatCount >= 2, 'Heartbeat phải được gửi cho game quest');
+    assert(claimCalled, 'Claim reward phải được gọi');
+    assert(progressLogs.length > 0, 'Phải có callback tiến độ');
+
+    // 8. Kiểm tra Modal interaction xử lý form nhập token
+    let modalReply = null;
+    const mockModalSubmit = (tokenVal) => ({
+      customId: 'quest:modal_submit',
+      fields: { getTextInputValue: () => tokenVal },
+      deferReply: async () => {},
+      editReply: async (d) => { modalReply = d; },
+    });
+
+    // Trường hợp token rỗng
+    await handleModalInteraction(mockModalSubmit(''));
+    assert.match(modalReply.content, /Token không được để trống/);
+
+    // Trường hợp token hợp lệ chạy thành công
+    await handleModalInteraction(mockModalSubmit('valid_token_xyz'));
+    assert(modalReply.embeds && modalReply.embeds.length === 1);
+    assert.match(modalReply.embeds[0].data.title, /KẾT QUẢ AUTO QUEST DISCORD/);
+    assert.match(modalReply.embeds[0].data.description, /lowkey_tester/);
+    assert.match(modalReply.embeds[0].data.description, /Watch Trailer for 30 Orbs/);
+  } finally {
+    setFetchImplementation(null);
+  }
+
+  console.log('PASS quest: /quest, /autoquest, Hub Embed, Auto Quest Script, Voice Stream Helper (15m timer), Quest Token Worker (100% Auto), Modal & Button interactions');
 })().catch((err) => {
   console.error(err);
   process.exitCode = 1;

@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "test": "node check.js --tests",
-    "check": "node check.js"
+    "check": "node check.js",
+    "quest:token": "node scripts/autoQuestToken.js"
   },
   "dependencies": {
     "@discordjs/voice": "0.19.2",
