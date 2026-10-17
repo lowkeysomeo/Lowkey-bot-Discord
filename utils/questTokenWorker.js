@@ -16,17 +16,7 @@ const SUPER_PROPERTIES = Buffer.from(
     os: 'Windows',
     browser: 'Discord Client',
     release_channel: 'stable',
-    client_version: '1.0.9168',
-    os_version: '10.0.19045',
-    os_arch: 'x64',
-    app_arch: 'x64',
-    system_locale: 'vi-VN',
-    browser_user_agent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9168 Chrome/128.0.6613.186 Electron/32.2.0 Safari/537.36',
-    browser_version: '32.2.0',
-    client_build_number: 339485,
-    native_build_number: null,
-    client_event_source: null,
+    system_locale: 'en-US',
   })
 ).toString('base64');
 
@@ -36,10 +26,9 @@ function getHeaders(rawToken) {
     Authorization: token,
     'Content-Type': 'application/json',
     'User-Agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9168 Chrome/128.0.6613.186 Electron/32.2.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
     'X-Super-Properties': SUPER_PROPERTIES,
     Accept: '*/*',
-    'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
   };
 }
 
@@ -109,7 +98,13 @@ async function fetchQuests(token) {
   }
 
   const data = await res.json();
-  return Array.isArray(data?.quests) ? data.quests : [];
+  const allQuests = Array.isArray(data?.quests) ? data.quests : [];
+  const now = Date.now();
+  const activeQuests = allQuests.filter((q) => {
+    if (!q.config?.expires_at) return true;
+    return new Date(q.config.expires_at).getTime() > now;
+  });
+  return activeQuests.length > 0 ? activeQuests : allQuests;
 }
 
 /**
@@ -119,7 +114,7 @@ async function enrollQuest(token, questId) {
   const res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/enroll`, {
     method: 'POST',
     headers: getHeaders(token),
-    body: JSON.stringify({}),
+    body: JSON.stringify({ location: 1 }),
   });
 
   if (!res.ok && res.status !== 400) {
@@ -258,43 +253,64 @@ async function completeSingleQuest(token, quest, options = {}) {
     const maxLoops = Math.ceil(targetSeconds / 30) + 3;
     let loops = 0;
 
-    while (currentSeconds < targetSeconds && loops < maxLoops) {
-      loops++;
-      const hb = await sendHeartbeat(token, questId, { terminal: false });
-
-      if (hb?.user_status?.completed_at || hb?.completed_at) {
-        currentSeconds = targetSeconds;
-        break;
-      }
-
-      if (typeof hb?.stream_progress_seconds === 'number') {
-        currentSeconds = hb.stream_progress_seconds;
-      } else if (typeof hb?.user_status?.stream_progress_seconds === 'number') {
-        currentSeconds = hb.user_status.stream_progress_seconds;
-      } else {
-        currentSeconds += 30;
-      }
-
-      if (options.onProgress) {
-        options.onProgress({
-          questId,
-          questName,
-          currentSeconds: Math.min(currentSeconds, targetSeconds),
-          targetSeconds,
-          percent: Math.min(100, Math.round((currentSeconds / targetSeconds) * 100)),
-        });
-      }
-
-      if (currentSeconds >= targetSeconds) break;
-      await new Promise((r) => setTimeout(r, heartbeatDelay));
-    }
-
     try {
-      await sendHeartbeat(token, questId, { terminal: true });
-    } catch {}
+      while (currentSeconds < targetSeconds && loops < maxLoops) {
+        loops++;
+        const hb = await sendHeartbeat(token, questId, { terminal: false });
+
+        if (hb?.user_status?.completed_at || hb?.completed_at) {
+          currentSeconds = targetSeconds;
+          break;
+        }
+
+        if (typeof hb?.stream_progress_seconds === 'number') {
+          currentSeconds = hb.stream_progress_seconds;
+        } else if (typeof hb?.user_status?.stream_progress_seconds === 'number') {
+          currentSeconds = hb.user_status.stream_progress_seconds;
+        } else {
+          currentSeconds += 30;
+        }
+
+        if (options.onProgress) {
+          options.onProgress({
+            questId,
+            questName,
+            currentSeconds: Math.min(currentSeconds, targetSeconds),
+            targetSeconds,
+            percent: Math.min(100, Math.round((currentSeconds / targetSeconds) * 100)),
+          });
+        }
+
+        if (currentSeconds >= targetSeconds) break;
+        await new Promise((r) => setTimeout(r, heartbeatDelay));
+      }
+
+      try {
+        await sendHeartbeat(token, questId, { terminal: true });
+      } catch {}
+
+      const reward = await claimQuestReward(token, questId);
+      return {
+        questId,
+        questName,
+        completed: true,
+        claimed: true,
+        reward,
+      };
+    } catch (err) {
+      return {
+        questId,
+        questName,
+        enrolled: true,
+        completed: false,
+        claimed: false,
+        requiresDesktop: true,
+        message: 'Đã tự động nhận (Accept). Yêu cầu mở Discord Desktop hoặc dùng script 1-click.',
+      };
+    }
   }
 
-  // Claim phần thưởng & ORB
+  // Claim phần thưởng & ORB cho video quest
   const reward = await claimQuestReward(token, questId);
 
   return {
@@ -344,6 +360,7 @@ async function runAutoQuestForToken(token, options = {}) {
   }
 
   const results = [];
+  let enrolledCount = 0;
   let completedCount = 0;
   let claimedCount = 0;
 
@@ -376,6 +393,7 @@ async function runAutoQuestForToken(token, options = {}) {
       });
 
       results.push({ success: true, ...res });
+      if (res.enrolled || res.completed || res.alreadyDone) enrolledCount++;
       if (res.completed || res.alreadyDone) completedCount++;
       if (res.claimed) claimedCount++;
     } catch (err) {
@@ -392,6 +410,7 @@ async function runAutoQuestForToken(token, options = {}) {
     user,
     accountTag,
     totalQuests: quests.length,
+    enrolledCount,
     completedCount,
     claimedCount,
     results,

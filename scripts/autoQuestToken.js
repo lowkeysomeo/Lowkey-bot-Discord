@@ -148,25 +148,39 @@ async function waitExitPrompt() {
     console.log('🎉 TỔNG KẾT AUTO QUEST DISCORD');
     console.log('====================================================');
     console.log(`👤 Tài khoản: ${report.accountTag} (ID: ${report.user.id})`);
-    console.log(`📋 Tổng số Quest: ${report.totalQuests}`);
-    console.log(`✅ Hoàn thành: ${report.completedCount}/${report.totalQuests}`);
+    console.log(`📋 Tổng số Quest khả dụng: ${report.totalQuests}`);
+    console.log(`🎯 Đã tự động nhận (Accept): ${report.enrolledCount || 0}/${report.totalQuests} nhiệm vụ`);
+    console.log(`✅ Hoàn thành 100%: ${report.completedCount}/${report.totalQuests} nhiệm vụ`);
     console.log(`🎁 Đã nhận thưởng: ${report.claimedCount} phần quà/ORB`);
 
     if (report.results && report.results.length > 0) {
       console.log('\nChi tiết từng nhiệm vụ:');
       report.results.forEach((r, idx) => {
         if (r.success) {
-          const statusText = r.alreadyDone
-            ? 'Đã làm trước đó'
-            : 'Đã hoàn thành và nhận thưởng';
-          console.log(`  [${idx + 1}] ${r.questName}: ✅ ${statusText}`);
+          if (r.alreadyDone) {
+            console.log(`  [${idx + 1}] ${r.questName}: ✅ Đã làm và nhận thưởng trước đó`);
+          } else if (r.completed) {
+            console.log(`  [${idx + 1}] ${r.questName}: ✅ Hoàn thành 100% & Đã Claim ORB`);
+          } else if (r.enrolled) {
+            console.log(`  [${idx + 1}] ${r.questName}: 🎯 Đã tự động nhận (Accept) trên tài khoản`);
+          }
         } else {
           console.log(`  [${idx + 1}] ${r.questName}: ❌ Thất bại (${r.error})`);
         }
       });
     }
 
-    console.log('\n✨ Đã xong! Bạn có thể kiểm tra Điểm ORB và Kho quà tặng trong Discord.');
+    const hasDesktopTasks = report.results?.some((r) => r.requiresDesktop);
+    if (hasDesktopTasks) {
+      console.log('\n----------------------------------------------------');
+      console.log('💡 HƯỚNG DẪN HOÀN THÀNH 100% CÁC NHIỆM VỤ GAME VỪA NHẬN:');
+      console.log('1. Cách 1-click Console (Hoàn thành ngay vài giây):');
+      console.log('   Mở Discord Desktop -> Bấm Ctrl+Shift+I -> Tab Console -> Dán script rồi bấm Enter.');
+      console.log('2. Cách Treo Voice (An toàn 100%):');
+      console.log('   Vào kênh Voice bất kỳ trong server, gõ lệnh /quest stream để bot vào voice treo cùng bạn 15 phút.');
+    }
+
+    console.log('\n✨ Đã xử lý xong! Kiểm tra mục Cài đặt -> Nhiệm vụ (Quests) trên Discord để xem chi tiết.');
   } catch (err) {
     console.error(`\n❌ LỖI AUTO QUEST: ${err.message}`);
     process.exitCode = 1;
