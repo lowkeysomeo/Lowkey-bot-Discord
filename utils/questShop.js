@@ -602,11 +602,31 @@ function buildQuestSelectionPayload(orderId, pendingQuests, username) {
  * Tạo màn hình thanh toán VietQR cho đơn hàng
  */
 function buildPaymentPayload(order) {
+  const ORDER_EXPIRE_MS = 10 * 60 * 1000; // 10 phút
+  const createdAt = order.created_at || Date.now();
+  const expiresAt = createdAt + ORDER_EXPIRE_MS;
+  const now = Date.now();
+
+  // Đơn hàng quá 10 phút hoặc đã bị hủy
+  if (now > expiresAt || order.status === 'cancelled') {
+    const expiredEmbed = new EmbedBuilder()
+      .setColor(0xed4245)
+      .setTitle(`❌ ĐƠN HÀNG #${order.order_id} ĐÃ HẾT HẠN`)
+      .setDescription(
+        `Đơn hàng này đã quá thời gian thanh toán (10 phút) và đã được hệ thống tự động hủy.\n\n` +
+        `• Bạn vui lòng quay lại **Bảng Dịch Vụ Quest Shop** để tạo lại đơn hàng mới nhé!`
+      )
+      .setFooter({ text: 'Lowkey Quest Shop • Tự động hủy sau 10 phút' });
+    return { embeds: [expiredEmbed], components: [] };
+  }
+
   const bank = getBankConfig();
   const bankNameFull = BANK_NAMES[bank.bankId] || bank.bankId;
   const qrUrl = getVietQrUrl(bank.bankId, bank.bankAccount, order.amount, order.order_id, bank.bankName);
 
   const isMonthly = order.package_type === 'monthly';
+  const isChecking = (order.check_count || 0) > 0;
+
   const embed = new EmbedBuilder()
     .setColor(0xfee75c)
     .setTitle(`💳 THANH TOÁN ĐƠN HÀNG #${order.order_id}`)
@@ -619,24 +639,31 @@ function buildPaymentPayload(order) {
       `• **Số tài khoản:** \`${bank.bankAccount || '(Chưa cấu hình)'}\`\n` +
       `• **Chủ tài khoản:** **${bank.bankName || '(Chưa cấu hình)'}**\n` +
       `• **Nội dung chuyển khoản (BẮT BUỘC):** \`${order.order_id}\`\n` +
+      `• ⏳ **Hạn thanh toán (10 phút):** Hết hạn <t:${Math.floor(expiresAt / 1000)}:R> lúc <t:${Math.floor(expiresAt / 1000)}:T>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `⚠️ **Lưu ý quan trọng:** Hãy ghi đúng nội dung chuyển khoản là \`${order.order_id}\` để bot tự động nhận diện và làm nhiệm vụ ngay lập tức!`
+      `⚠️ **Lưu ý quan trọng:** Ghi đúng nội dung \`${order.order_id}\`. Sau 10 phút chưa thanh toán, đơn sẽ tự động hủy!` +
+      (isChecking ? `\n\n⏳ *Hệ thống đang tự động kiểm tra SePay mỗi 15 giây... Vui lòng không bấm liên tục.*` : '')
     )
     .setImage(qrUrl)
-    .setFooter({ text: 'Chuyển xong hãy bấm nút "Đã Chuyển Tiền" bên dưới!' })
+    .setFooter({
+      text: isChecking
+        ? 'Đã ghi nhận yêu cầu! Đang đợi SePay duyệt tự động...'
+        : 'Chuyển xong hãy bấm nút "Đã Chuyển Tiền" (chỉ cần bấm 1 lần)!'
+    })
     .setTimestamp();
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`qshop:check_pay:${order.order_id}`)
-      .setLabel('🔄 Đã Chuyển Tiền / Kiểm Tra')
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId(`qshop:cancel_order:${order.order_id}`)
-      .setLabel('❌ Hủy Đơn')
-      .setStyle(ButtonStyle.Danger)
-  );
+  const checkBtn = new ButtonBuilder()
+    .setCustomId(`qshop:check_pay:${order.order_id}`)
+    .setLabel(isChecking ? '⏳ Đang Đợi SePay Xác Nhận...' : '🔄 Đã Chuyển Tiền / Kiểm Tra')
+    .setStyle(isChecking ? ButtonStyle.Secondary : ButtonStyle.Success)
+    .setDisabled(isChecking);
 
+  const cancelBtn = new ButtonBuilder()
+    .setCustomId(`qshop:cancel_order:${order.order_id}`)
+    .setLabel('❌ Hủy Đơn')
+    .setStyle(ButtonStyle.Danger);
+
+  const row = new ActionRowBuilder().addComponents(checkBtn, cancelBtn);
   return { embeds: [embed], components: [row] };
 }
 
@@ -919,6 +946,39 @@ async function handleShopInteraction(interaction, client) {
       return interaction.reply({ content: '✅ Đơn hàng này đã hoàn thành trước đó!', flags: 64 });
     }
 
+    const tenMinutesMs = 10 * 60 * 1000;
+    if (order.status === 'cancelled' || Date.now() - order.created_at > tenMinutesMs) {
+      if (order.status !== 'cancelled') {
+        updateOrderStatus(order.order_id, 'cancelled', { error: 'Hết hạn thanh toán (quá 10 phút)' });
+      }
+      return interaction.reply({
+        content: '❌ **Đơn hàng đã hết hạn (quá 10 phút)!**\nMã QR này đã tự động bị hủy do chưa nhận được thanh toán trong vòng 10 phút. Vui lòng bấm tạo đơn mới trên bảng cửa hàng để nhận mã QR mới nhé.',
+        flags: 64,
+      });
+    }
+
+    // CHẶN BẤM LIÊN TỤC: Chỉ cho bấm 1 lần và đợi SePay xác nhận tự động
+    if ((order.check_count || 0) > 0) {
+      return interaction.reply({
+        content:
+          `⏳ **Bạn đã gửi yêu cầu xác nhận đơn hàng #${order.order_id} rồi!**\n\n` +
+          `• Hệ thống SePay đang tự động kiểm tra tài khoản mỗi 15 giây.\n` +
+          `• **Vui lòng không bấm liên tục.** Ngay khi nhận được tiền, bot sẽ tự động duyệt tiền, làm nhiệm vụ và gửi thông báo trực tiếp (DM) cho bạn!\n` +
+          `• Thời gian còn lại của mã QR: <t:${Math.floor((order.created_at + tenMinutesMs) / 1000)}:R>.`,
+        flags: 64,
+      });
+    }
+
+    // Đánh dấu đã bấm 1 lần vào Database
+    const db = getDb();
+    db.prepare('UPDATE quest_orders SET check_count = 1, checked_at = ? WHERE order_id = ?').run(Date.now(), order.order_id);
+
+    // Vô hiệu hóa nút bấm trên tin nhắn hiển thị mã QR
+    if (interaction.message && interaction.message.editable) {
+      const updatedPayload = buildPaymentPayload({ ...order, check_count: 1 });
+      await interaction.message.edit({ components: updatedPayload.components }).catch(() => {});
+    }
+
     await interaction.deferReply({ flags: 64 });
 
     // Bước A: Kiểm tra tự động qua SePay
@@ -941,7 +1001,7 @@ async function handleShopInteraction(interaction, client) {
       }
     }
 
-    // Bước B: Nếu SePay chưa nhận được hoặc không có key, gửi yêu cầu duyệt nhanh tới Admin (1-Click)
+    // Bước B: Nếu SePay chưa nhận được hoặc chưa thấy giao dịch, gửi yêu cầu duyệt nhanh tới Admin
     const adminUser = await client.users.fetch(OWNER_ID).catch(() => null);
     if (adminUser) {
       const adminEmbed = new EmbedBuilder()
@@ -953,7 +1013,7 @@ async function handleShopInteraction(interaction, client) {
           `• **Loại gói:** ${order.package_type === 'monthly' ? '👑 **Gói Tháng (40.000đ)**' : `🎯 **Quest Lẻ (${order.quest_count} nv - ${formatVnd(order.amount)})**`}\n` +
           `• **Số tiền:** **${formatVnd(order.amount)}**\n` +
           `• **Nội dung CK:** \`${order.order_id}\`\n\n` +
-          `*Nếu bạn đã thấy tiền vào tài khoản ngân hàng, hãy bấm nút xanh bên dưới để bot lập tức làm cho khách!*`
+          `*Hệ thống đang tự động quét SePay. Nếu bạn đã thấy tiền vào tài khoản ngân hàng, có thể bấm nút xanh bên dưới để duyệt ngay!*`
         )
         .setTimestamp();
 
@@ -973,10 +1033,10 @@ async function handleShopInteraction(interaction, client) {
 
     return interaction.editReply({
       content:
-        `⏳ **Hệ thống đang xác nhận giao dịch của bạn...**\n` +
-        `• Nếu bạn vừa chuyển tiền, hệ thống ngân hàng có thể mất 15-30 giây.\n` +
-        `• Thông báo đã được gửi đồng thời tới Admin để duyệt tức thì.\n` +
-        `• Vui lòng đợi trong giây lát hoặc bấm lại **🔄 Đã Chuyển Tiền / Kiểm Tra** sau 10 giây nhé!`,
+        `⏳ **ĐÃ GHI NHẬN YÊU CẦU XÁC NHẬN ĐƠN #${order.order_id}!**\n\n` +
+        `• Bạn đã bấm xác nhận **1 lần**, hệ thống đã ghi nhận và SePay đang tự động quét đối soát.\n` +
+        `• **Bạn không cần bấm lại nữa**, bot sẽ tự động quét mỗi 15 giây và gửi tin nhắn DM ngay khi nhận được tiền.\n` +
+        `• Hạn thanh toán của mã QR: **10 phút** kể từ lúc tạo đơn (còn <t:${Math.floor((order.created_at + tenMinutesMs) / 1000)}:R>).`,
     });
   }
 
@@ -1071,14 +1131,24 @@ function startOrderChecker(client) {
   if (orderCheckerTimer) return;
   orderCheckerTimer = setInterval(async () => {
     try {
+      const db = getDb();
+      const tenMinutesMs = 10 * 60 * 1000;
+      const tenMinutesAgo = Date.now() - tenMinutesMs;
+
+      // 1. Tự động hủy các đơn hàng tạo quá 10 phút chưa thanh toán
+      db.prepare(`
+        UPDATE quest_orders
+        SET status = 'cancelled', error_message = 'Hết hạn thanh toán (quá 10 phút)'
+        WHERE status = 'pending' AND created_at < ?
+      `).run(tenMinutesAgo);
+
       const { sepayApiKey } = getBankConfig();
       if (!sepayApiKey) return;
 
-      const db = getDb();
-      const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+      // 2. Chỉ kiểm tra các đơn hàng pending còn trong thời hạn 10 phút
       const pendingOrders = db.prepare(
-        "SELECT * FROM quest_orders WHERE status = 'pending' AND created_at > ? ORDER BY created_at DESC LIMIT 20"
-      ).all(twentyFourHoursAgo);
+        "SELECT * FROM quest_orders WHERE status = 'pending' AND created_at >= ? ORDER BY created_at DESC LIMIT 20"
+      ).all(tenMinutesAgo);
 
       if (!pendingOrders || pendingOrders.length === 0) return;
 

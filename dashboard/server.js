@@ -177,10 +177,16 @@ function createDashboard(client, options = {}) {
           ));
 
           const db = getDb();
-          const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+          const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+          db.prepare(`
+            UPDATE quest_orders
+            SET status = 'cancelled', error_message = 'Hết hạn thanh toán (quá 10 phút)'
+            WHERE status = 'pending' AND created_at < ?
+          `).run(tenMinutesAgo);
+
           const pendingOrders = db.prepare(
-            "SELECT * FROM quest_orders WHERE status = 'pending' AND created_at > ?"
-          ).all(twentyFourHoursAgo);
+            "SELECT * FROM quest_orders WHERE status = 'pending' AND created_at >= ?"
+          ).all(tenMinutesAgo);
 
           const matched = pendingOrders.find(o => {
             const oId = String(o.order_id).toUpperCase();

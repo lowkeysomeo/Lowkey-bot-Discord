@@ -133,6 +133,8 @@ function initializeDatabase() {
 
   try { db.prepare("ALTER TABLE quest_subscribers ADD COLUMN package_type TEXT NOT NULL DEFAULT 'monthly'").run(); } catch {}
   try { db.prepare("ALTER TABLE quest_subscribers ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0").run(); } catch {}
+  try { db.prepare("ALTER TABLE quest_orders ADD COLUMN check_count INTEGER NOT NULL DEFAULT 0").run(); } catch {}
+  try { db.prepare("ALTER TABLE quest_orders ADD COLUMN checked_at INTEGER NOT NULL DEFAULT 0").run(); } catch {}
 
   migrateLegacyJsonIfNeeded();
   repairLegacyUserIds(db);

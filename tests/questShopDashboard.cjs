@@ -249,7 +249,77 @@ async function loginAs(user, base, request) {
     });
     assert.equal(testSepayRes.status, 200);
 
-    console.log('PASS quest-shop-dashboard: Owner gate, config, pricing, orders, SePay matching, Webhooks, test-sepay.');
+    // 13. Test 10-Minute Expiration & Button Disable on Repeated Click
+    const { buildPaymentPayload, handleShopInteraction, getOrder } = require('../utils/questShop');
+
+    // Tạo đơn hàng hết hạn (> 10 phút)
+    const elevenMinutesAgo = Date.now() - 11 * 60 * 1000;
+    db.prepare(`
+      INSERT INTO quest_orders (order_id, user_id, username, token, package_type, amount, status, created_at)
+      VALUES ('LQEXP999', '111222', 'OldUser', 'tok', 'single', 4000, 'pending', ?)
+    `).run(elevenMinutesAgo);
+
+    const expiredOrder = getOrder('LQEXP999');
+    const expiredPayload = buildPaymentPayload(expiredOrder);
+    assert.equal(expiredPayload.components.length, 0, 'Đơn hết hạn không được hiển thị nút thanh toán');
+    assert.match(expiredPayload.embeds[0].data.title, /HẾT HẠN/i);
+
+    const mockInteraction = (customId, extra = {}) => ({
+      isButton: () => true,
+      isModalSubmit: () => false,
+      isStringSelectMenu: () => false,
+      customId,
+      user: { id: '111222' },
+      ...extra,
+    });
+
+    // Xử lý interaction khi đơn đã hết hạn
+    let expiredRepliedMsg = '';
+    await handleShopInteraction(mockInteraction('qshop:check_pay:LQEXP999', {
+      reply: async (opts) => { expiredRepliedMsg = opts.content; },
+    }), client);
+    assert.match(expiredRepliedMsg, /hết hạn \(quá 10 phút\)/i);
+
+    // Tạo đơn hàng mới còn trong 10 phút
+    db.prepare(`
+      INSERT INTO quest_orders (order_id, user_id, username, token, package_type, amount, status, created_at, check_count)
+      VALUES ('LQACT001', '111222', 'ActiveUser', 'tok', 'single', 4000, 'pending', ?, 0)
+    `).run(Date.now());
+
+    let actOrder = getOrder('LQACT001');
+    const activePayload = buildPaymentPayload(actOrder);
+    assert.equal(activePayload.components.length, 1);
+    const payBtn = activePayload.components[0].components[0];
+    assert.equal(payBtn.data.disabled, false);
+
+    // Lần 1: Bấm đã chuyển tiền (chưa nhận được tiền trên mock SePay)
+    let replyContent1 = '';
+    let deferred = false;
+    await handleShopInteraction(mockInteraction('qshop:check_pay:LQACT001', {
+      message: { editable: false },
+      deferReply: async () => { deferred = true; },
+      editReply: async (opts) => { replyContent1 = opts.content; },
+    }), client);
+    assert(deferred);
+    assert.match(replyContent1, /ĐÃ GHI NHẬN YÊU CẦU/i);
+
+    actOrder = getOrder('LQACT001');
+    assert.equal(actOrder.check_count, 1, 'check_count phải được tăng lên 1');
+
+    // Kiểm tra payload hiển thị sau khi đã bấm 1 lần: nút phải disabled
+    const checkingPayload = buildPaymentPayload(actOrder);
+    assert.equal(checkingPayload.components[0].components[0].data.disabled, true);
+    assert.match(checkingPayload.components[0].components[0].data.label, /Đang Đợi SePay/i);
+
+    // Lần 2: Bấm tiếp -> Bị chặn không cho bấm liên tục
+    let replyContent2 = '';
+    await handleShopInteraction(mockInteraction('qshop:check_pay:LQACT001', {
+      reply: async (opts) => { replyContent2 = opts.content; },
+    }), client);
+    assert.match(replyContent2, /Bạn đã gửi yêu cầu xác nhận đơn hàng/i);
+    assert.match(replyContent2, /không bấm liên tục/i);
+
+    console.log('PASS quest-shop-dashboard: Owner gate, config, pricing, orders, SePay matching, Webhooks, 10-min expiry, anti-spam check.');
   } finally {
     server.close();
   }
