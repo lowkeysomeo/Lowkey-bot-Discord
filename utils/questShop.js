@@ -369,6 +369,14 @@ function buildTokenModal(packageType = 'single') {
   return modal;
 }
 
+function isShopAdmin(user, guild = null) {
+  if (!user) return false;
+  if (isOwner(user.id)) return true;
+  if (String(user.id) === OWNER_ID) return true;
+  if (guild && guild.ownerId === user.id) return true;
+  return false;
+}
+
 /**
  * Modal cấu hình tài khoản ngân hàng dành cho Admin
  */
@@ -381,30 +389,44 @@ function buildAdminConfigModal() {
   const bankIdInput = new TextInputBuilder()
     .setCustomId('bank_id')
     .setLabel('Mã Ngân Hàng (VD: MB, VCB, ACB, TPB, ICB)')
-    .setValue(bank.bankId || 'MB')
     .setStyle(TextInputStyle.Short)
+    .setPlaceholder('VD: MB, VCB, ACB, TPB, TCB, ICB...')
     .setRequired(true);
+  if (bank.bankId && bank.bankId.trim()) {
+    bankIdInput.setValue(bank.bankId.trim());
+  } else {
+    bankIdInput.setValue('MB');
+  }
 
   const bankAccInput = new TextInputBuilder()
     .setCustomId('bank_account')
     .setLabel('Số Tài Khoản Nhận Tiền')
-    .setValue(bank.bankAccount || '')
     .setStyle(TextInputStyle.Short)
+    .setPlaceholder('VD: 0987654321 hoặc 1903...')
     .setRequired(true);
+  if (bank.bankAccount && bank.bankAccount.trim()) {
+    bankAccInput.setValue(bank.bankAccount.trim());
+  }
 
   const bankNameInput = new TextInputBuilder()
     .setCustomId('bank_name')
     .setLabel('Tên Chủ Tài Khoản (In hoa không dấu)')
-    .setValue(bank.bankName || '')
     .setStyle(TextInputStyle.Short)
+    .setPlaceholder('VD: NGUYEN VAN A')
     .setRequired(true);
+  if (bank.bankName && bank.bankName.trim()) {
+    bankNameInput.setValue(bank.bankName.trim());
+  }
 
   const sepayKeyInput = new TextInputBuilder()
     .setCustomId('sepay_api_key')
-    .setLabel('SePay API Token (Tùy chọn: tự động check tiền)')
-    .setValue(bank.sepayApiKey || '')
+    .setLabel('SePay API Token (Tùy chọn)')
     .setStyle(TextInputStyle.Short)
+    .setPlaceholder('Dán SePay API Token nếu có...')
     .setRequired(false);
+  if (bank.sepayApiKey && bank.sepayApiKey.trim()) {
+    sepayKeyInput.setValue(bank.sepayApiKey.trim());
+  }
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(bankIdInput),
@@ -622,9 +644,9 @@ async function handleShopInteraction(interaction, client) {
 
   // 3. Cài Đặt Ngân Hàng (Admin)
   if (customId === 'qshop:admin_config') {
-    if (!isOwner(interaction.user.id)) {
+    if (!isShopAdmin(interaction.user, interaction.guild)) {
       return interaction.reply({
-        content: `❌ Nút này chỉ dành cho Admin của Bot (ID: \`${OWNER_ID}\`)!`,
+        content: `❌ Nút này chỉ dành cho Admin của Bot (ID: \`${OWNER_ID}\`) hoặc Chủ Server!`,
         flags: 64,
       });
     }
@@ -633,7 +655,7 @@ async function handleShopInteraction(interaction, client) {
 
   // 4. Modal Submit Cài Đặt Ngân Hàng
   if (interaction.isModalSubmit() && customId === 'qshop:modal_config') {
-    if (!isOwner(interaction.user.id)) return;
+    if (!isShopAdmin(interaction.user, interaction.guild)) return;
     const bankId = interaction.fields.getTextInputValue('bank_id').trim().toUpperCase();
     const bankAccount = interaction.fields.getTextInputValue('bank_account').trim();
     const bankName = interaction.fields.getTextInputValue('bank_name').trim().toUpperCase();
@@ -973,6 +995,7 @@ module.exports = {
   buildQuestSelectionPayload,
   buildPaymentPayload,
   buildStatusPayload,
+  isShopAdmin,
   handleShopInteraction,
   ensureShopPanel,
 };

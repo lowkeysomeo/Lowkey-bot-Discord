@@ -7,10 +7,10 @@ const {
   ensureShopPanel,
   setBankConfig,
   getBankConfig,
+  isShopAdmin,
   TARGET_CHANNEL_ID,
   OWNER_ID,
 } = require('../../utils/questShop');
-const { isOwner } = require('../../utils/questAuth');
 const { getDb } = require('../../utils/database');
 const { EmbedBuilder } = require('discord.js');
 
@@ -31,6 +31,30 @@ module.exports.data = {
         { name: '⚙️ Cài đặt Ngân Hàng & SePay (Admin)', value: 'config' },
         { name: '📊 Thống kê Đơn Hàng & Doanh Thu (Admin)', value: 'orders' },
       ],
+    },
+    {
+      name: 'bank_id',
+      description: 'Mã ngân hàng nhận tiền (VD: MB, VCB, ACB, TPB, TCB, ICB...)',
+      type: 3,
+      required: false,
+    },
+    {
+      name: 'bank_account',
+      description: 'Số tài khoản nhận tiền',
+      type: 3,
+      required: false,
+    },
+    {
+      name: 'bank_name',
+      description: 'Tên chủ tài khoản (In hoa không dấu, VD: NGUYEN VAN A)',
+      type: 3,
+      required: false,
+    },
+    {
+      name: 'sepay_key',
+      description: 'SePay API Token (Tùy chọn: tự động check tiền)',
+      type: 3,
+      required: false,
     },
     {
       name: 'channel',
@@ -57,9 +81,9 @@ module.exports.execute = async (interaction) => {
   }
 
   if (action === 'setup') {
-    if (!isOwner(interaction.user.id)) {
+    if (!isShopAdmin(interaction.user, interaction.guild)) {
       return interaction.reply({
-        content: `❌ Lệnh này chỉ dành riêng cho Admin (ID: \`${OWNER_ID}\`)!`,
+        content: `❌ Lệnh này chỉ dành riêng cho Admin (ID: \`${OWNER_ID}\`) hoặc Chủ Server!`,
         flags: 64,
       });
     }
@@ -83,19 +107,45 @@ module.exports.execute = async (interaction) => {
   }
 
   if (action === 'config') {
-    if (!isOwner(interaction.user.id)) {
+    if (!isShopAdmin(interaction.user, interaction.guild)) {
       return interaction.reply({
-        content: `❌ Lệnh này chỉ dành riêng cho Admin (ID: \`${OWNER_ID}\`)!`,
+        content: `❌ Lệnh này chỉ dành riêng cho Admin (ID: \`${OWNER_ID}\`) hoặc Chủ Server!`,
         flags: 64,
       });
     }
+
+    const bankId = interaction.options?.getString?.('bank_id');
+    const bankAccount = interaction.options?.getString?.('bank_account');
+    const bankName = interaction.options?.getString?.('bank_name');
+    const sepayKey = interaction.options?.getString?.('sepay_key');
+
+    // Nếu người dùng nhập trực tiếp tham số qua lệnh
+    if (bankId || bankAccount || bankName || sepayKey) {
+      if (bankId) setBankConfig('bank_id', bankId.toUpperCase().trim());
+      if (bankAccount) setBankConfig('bank_account', bankAccount.trim());
+      if (bankName) setBankConfig('bank_name', bankName.toUpperCase().trim());
+      if (sepayKey) setBankConfig('sepay_api_key', sepayKey.trim());
+
+      const current = getBankConfig();
+      return interaction.reply({
+        content:
+          `✅ **Đã cập nhật thông tin ngân hàng thành công!**\n` +
+          `• Ngân hàng: **${current.bankId}**\n` +
+          `• Số tài khoản: \`${current.bankAccount || '(Chưa nhập)'}\`\n` +
+          `• Chủ tài khoản: **${current.bankName || '(Chưa nhập)'}**\n` +
+          `• SePay Token: ${current.sepayApiKey ? 'Đã kích hoạt' : 'Chưa nhập'}`,
+        flags: 64,
+      });
+    }
+
+    // Nếu không có tham số, mở Modal để điền
     return interaction.showModal(buildAdminConfigModal());
   }
 
   if (action === 'orders') {
-    if (!isOwner(interaction.user.id)) {
+    if (!isShopAdmin(interaction.user, interaction.guild)) {
       return interaction.reply({
-        content: `❌ Lệnh này chỉ dành riêng cho Admin (ID: \`${OWNER_ID}\`)!`,
+        content: `❌ Lệnh này chỉ dành riêng cho Admin (ID: \`${OWNER_ID}\`) hoặc Chủ Server!`,
         flags: 64,
       });
     }
