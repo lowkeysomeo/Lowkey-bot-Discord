@@ -566,7 +566,11 @@ async function handleButtonInteraction(interaction) {
 
   if (action === 'auto_menu') {
     const { buildAutoStatusPayload } = require('./questScheduler');
-    return interaction.update(buildAutoStatusPayload(interaction.user.id));
+    const payload = buildAutoStatusPayload(interaction.user.id);
+    if (interaction.message?.flags?.has?.(64)) {
+      return interaction.update(payload);
+    }
+    return interaction.reply({ flags: 64, ...payload });
   }
 
   if (action === 'auto_toggle') {
