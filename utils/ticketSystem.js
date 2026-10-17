@@ -702,11 +702,11 @@ async function generateTranscriptAttachment(channel, ticket, guild, extra = {}) 
   text += `Staff tiếp nhận: ${ticket.claimed_by || 'Chưa tiếp nhận'}\n`;
   if (extra.closedBy) text += `Người đóng: ${extra.closedBy}\n`;
   if (extra.reason) text += `Lý do đóng: ${extra.reason}\n`;
-  text += `Thời gian xuất: ${new Date().toLocaleString('vi-VN')}\n`;
+  text += `Thời gian xuất: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour12: false })}\n`;
   text += `========================================================\n\n`;
 
   for (const m of sorted) {
-    const time = new Date(m.createdTimestamp).toLocaleString('vi-VN');
+    const time = new Date(m.createdTimestamp).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour12: false });
     text += `[${time}] ${m.author?.tag || m.author?.username || 'User'} (${m.author?.id}):\n`;
     if (m.content) text += `  ${m.content}\n`;
     if (m.attachments?.size) {
@@ -761,7 +761,7 @@ async function executeCloseTicket(interaction, channel, ticket, guild, config, r
             `🛡️ **Người tiếp nhận:** ${ticket.claimed_by ? `<@${ticket.claimed_by}>` : 'Chưa có'}\n` +
             `🔒 **Người đóng:** <@${interaction.user.id}>\n` +
             `📝 **Lý do đóng:** **${closeReasonText}**\n` +
-            `⏰ **Thời gian:** ${new Date().toLocaleString('vi-VN')}`
+            `⏰ **Thời gian:** ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour12: false })}`
           )
           .setFooter({ text: `${guild.name} • Ticket System Log` })
           .setTimestamp();
@@ -957,7 +957,7 @@ async function handleButtonAction(interaction) {
         `👤 **Khách hàng:** <@${ticket.user_id}>\n` +
         `🛡️ **Người tiếp nhận:** <@${interaction.user.id}>\n` +
         `📋 **Danh mục:** **${ticket.category_label}**\n` +
-        `⏰ **Thời gian nhận:** ${new Date(now).toLocaleString('vi-VN')}\n\n` +
+        `⏰ **Thời gian nhận:** ${new Date(now).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour12: false })} (UTC+7)\n\n` +
         `💬 *Khách hàng vui lòng trao đổi trực tiếp với nhân viên hỗ trợ tại đây.*`
       )
       .setFooter({ text: `${guild.name} • Ticket System` })

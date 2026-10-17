@@ -368,14 +368,25 @@ async function run() {
     isModalSubmit: () => false,
     reply: async (p) => { claimReply = p; },
   };
-  await ticketSystem.handleInteraction(staffClaimInteraction);
+  const originalNow = Date.now;
+  const originalTZ = process.env.TZ;
+  const claimTime = Date.parse('2026-10-17T14:45:38.000Z');
+  try {
+    process.env.TZ = 'UTC';
+    Date.now = () => claimTime;
+    await ticketSystem.handleInteraction(staffClaimInteraction);
+  } finally {
+    Date.now = originalNow;
+    if (originalTZ === undefined) delete process.env.TZ; else process.env.TZ = originalTZ;
+  }
+  assert.ok(claimReply.embeds[0].data.description.includes('21:45:38 17/10/2026 (UTC+7)'), 'Giờ nhận phải là giờ Việt Nam kể cả khi máy chủ chạy UTC');
   assert.ok(claimReply.content.includes('ticket của bạn đã được tiếp nhận bởi **<@staff-007>**'), 'Phải ping thông báo khách hàng ai đã nhận xử lý');
   assert.ok(claimReply.embeds[0].data.title.includes('TICKET ĐÃ ĐƯỢC TIẾP NHẬN XỬ LÝ'));
 
   // Kiểm tra database đã lưu claimed_by
   const claimedTicketRow = db.prepare('SELECT * FROM tickets WHERE channel_id = ?').get(targetClaimChannel.id);
   assert.equal(claimedTicketRow.claimed_by, 'staff-007');
-  assert.ok(claimedTicketRow.claimed_at > 0);
+  assert.equal(claimedTicketRow.claimed_at, claimTime, 'Giữ nguyên timestamp UTC trong database, chỉ đổi múi giờ hiển thị');
 
   // Kiểm tra message chào mừng được cập nhật với nút Nhận bị disabled
   assert.ok(originalMessageEdited, 'Message ban đầu phải được cập nhật');
