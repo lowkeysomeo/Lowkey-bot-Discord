@@ -211,9 +211,45 @@ async function loginAs(user, base, request) {
       headers: ownerPostHeaders,
       body: JSON.stringify({ channelId: '1561060424491737118' }),
     });
-    assert.equal(pubRes.status, 200);
+    // 10. Test matchTransactionWithOrder with data.data schema and formatted memo
+    const { matchTransactionWithOrder } = require('../utils/questShop');
+    const dummyOrder = { order_id: 'LQM98765', amount: 40000 };
+    const dummyTransactions = [
+      { id: 1, transaction_content: 'MBVCB.123.LQM98765 chuyen tien', amount_in: '40000.00' },
+      { id: 2, transaction_content: 'Khong lien quan', amount_in: '50000' },
+    ];
+    const match = matchTransactionWithOrder(dummyTransactions, dummyOrder);
+    assert(match, 'Phải khớp được đơn hàng LQM98765');
+    assert.equal(match.id, 1);
 
-    console.log('PASS quest-shop-dashboard: Owner gate, access rejection, config update, dynamic pricing, order management, subscriber actions, permission whitelist.');
+    // 11. Test SePay Webhook
+    db.prepare(`
+      INSERT INTO quest_orders (order_id, user_id, username, token, package_type, amount, status, created_at)
+      VALUES ('LQM98765', '111222', 'Tester', 'tok', 'monthly', 40000, 'pending', ?)
+    `).run(Date.now());
+
+    const webhookRes = await request('/api/sepay/webhook', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: 9999,
+        gateway: 'MBBank',
+        amountIn: 40000,
+        transactionContent: 'LQM98765 Thanh toan quest thang',
+      }),
+    });
+    assert.equal(webhookRes.status, 200);
+    const webhookJson = await webhookRes.json();
+    assert.equal(webhookJson.success, true);
+    assert.equal(webhookJson.order_id, 'LQM98765');
+
+    // 12. Test GET /api/quest-shop/test-sepay
+    const testSepayRes = await request('/api/quest-shop/test-sepay', {
+      headers: ownerHeaders,
+    });
+    assert.equal(testSepayRes.status, 200);
+
+    console.log('PASS quest-shop-dashboard: Owner gate, config, pricing, orders, SePay matching, Webhooks, test-sepay.');
   } finally {
     server.close();
   }

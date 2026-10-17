@@ -158,18 +158,45 @@ function createDashboard(client, options = {}) {
       if (req.method === 'POST' && route === '/api/sepay/webhook') {
         try {
           const payload = await body(req);
-          const content = String(payload.content || payload.description || '').toUpperCase();
-          const amount = parseInt(payload.transferAmount || payload.amountIn || payload.amount || 0, 10);
+          console.log('[SEPAY WEBHOOK RECEIVED]', JSON.stringify(payload));
+          const content = String(
+            payload.transactionContent ||
+            payload.transaction_content ||
+            payload.content ||
+            payload.description ||
+            payload.order_code ||
+            ''
+          ).toUpperCase();
+          const cleanContent = content.replace(/[^A-Z0-9]/g, '');
+          const amount = Math.round(parseFloat(
+            payload.amountIn ||
+            payload.amount_in ||
+            payload.transferAmount ||
+            payload.amount ||
+            0
+          ));
+
           const db = getDb();
-          const pendingOrders = db.prepare("SELECT * FROM quest_orders WHERE status = 'pending'").all();
-          const matched = pendingOrders.find(o => content.includes(o.order_id) && amount >= o.amount);
+          const twentyFourHoursAgo = Date.now() - 24 * 60 * 60 * 1000;
+          const pendingOrders = db.prepare(
+            "SELECT * FROM quest_orders WHERE status = 'pending' AND created_at > ?"
+          ).all(twentyFourHoursAgo);
+
+          const matched = pendingOrders.find(o => {
+            const oId = String(o.order_id).toUpperCase();
+            const cleanOId = oId.replace(/[^A-Z0-9]/g, '');
+            return (content.includes(oId) || cleanContent.includes(cleanOId)) && amount >= o.amount;
+          });
+
           if (matched) {
+            console.log(`[SEPAY WEBHOOK] ✅ Khớp đơn hàng #${matched.order_id}! Đang xử lý...`);
             const { processPaidOrder } = require('../utils/questShop');
             processPaidOrder(matched.order_id, client).catch(console.error);
             return json(res, 200, { success: true, order_id: matched.order_id });
           }
           return json(res, 200, { success: false, message: 'No matching order' });
         } catch (err) {
+          console.error('[SEPAY WEBHOOK ERROR]', err);
           return json(res, 400, { success: false, error: err.message });
         }
       }
@@ -251,6 +278,37 @@ function createDashboard(client, options = {}) {
             }
 
             return json(res, 200, { ok: true, config: questShop.getBankConfig() });
+          }
+
+          if (route === '/api/quest-shop/test-sepay' && req.method === 'GET') {
+            rateLimit(`questshop_test:${value.user.id}`, 10);
+            const cfg = questShop.getBankConfig();
+            if (!cfg.sepayApiKey) {
+              return json(res, 200, { success: false, error: 'Chưa cài đặt API Token SePay!' });
+            }
+            const result = await questShop.fetchSePayTransactions(cfg.sepayApiKey);
+            if (!result.success) {
+              return json(res, 200, {
+                success: false,
+                error: `Không thể kết nối SePay: ${result.error || `HTTP ${result.status}`}`,
+                status: result.status,
+              });
+            }
+            const preview = (result.transactions || []).slice(0, 5).map(t => ({
+              id: t.id,
+              date: t.transaction_date || t.transactionDate,
+              amount_in: t.amount_in || t.amountIn || t.transferAmount || t.amount,
+              content: t.transaction_content || t.description || t.content,
+              account: t.account_number ? String(t.account_number).slice(-4).padStart(String(t.account_number).length, '*') : null,
+            }));
+            return json(res, 200, {
+              success: true,
+              status: result.status,
+              endpoint: result.endpoint,
+              authType: result.authType,
+              totalTransactions: result.transactions.length,
+              recentTransactions: preview,
+            });
           }
 
           if (route === '/api/quest-shop/publish-panel' && req.method === 'POST') {

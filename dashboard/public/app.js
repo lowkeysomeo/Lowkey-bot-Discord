@@ -944,9 +944,13 @@ function questShopPage() {
             <small>Kênh Discord nơi bot gửi bảng dịch vụ mua quest kèm các nút bấm (Hiện tại: #${h(currentChannelName?.name || cfg.channelId)}).</small>
           </div>
         </div>
+        <div id="qshop-sepay-test-result" style="margin-top:12px;display:none;"></div>
         <div class="savebar">
           <span id="qshop-config-status">Thay đổi thông tin sẽ áp dụng ngay vào mã QR và giá cước.</span>
-          <button type="submit" class="primary">💾 Lưu Cài Đặt Quest Shop</button>
+          <div style="display:flex;gap:8px;">
+            <button type="button" id="qshop-test-sepay-btn" class="ghost">🧪 Test Kết Nối SePay</button>
+            <button type="submit" class="primary">💾 Lưu Cài Đặt Quest Shop</button>
+          </div>
         </div>
       </form>
     </div>
@@ -1132,6 +1136,51 @@ function attachQuestShopEvents() {
       } finally {
         state.saving = false;
         if (submitBtn) submitBtn.disabled = false;
+      }
+    };
+  }
+
+  const testSepayBtn = document.querySelector('#qshop-test-sepay-btn');
+  if (testSepayBtn) {
+    testSepayBtn.onclick = async () => {
+      const resultBox = document.querySelector('#qshop-sepay-test-result');
+      testSepayBtn.disabled = true;
+      testSepayBtn.textContent = 'Đang kiểm tra SePay…';
+      if (resultBox) {
+        resultBox.style.display = 'block';
+        resultBox.innerHTML = '<div style="padding:10px;background:rgba(255,255,255,0.05);border-radius:6px;font-size:13px;">⏳ Đang kết nối tới máy chủ SePay…</div>';
+      }
+      try {
+        const res = await api('/api/quest-shop/test-sepay');
+        if (res.success) {
+          const recents = res.recentTransactions || [];
+          let listHtml = recents.map(t =>
+            `<li style="margin-bottom:4px;"><b>${Number(t.amount_in || 0).toLocaleString('vi-VN')} đ</b> — <code>${h(t.content || 'Không có ND')}</code> <span style="opacity:0.6;">(${h(t.date || '')})</span></li>`
+          ).join('');
+          if (!listHtml) listHtml = '<li>Chưa có giao dịch gần đây trong tài khoản SePay.</li>';
+
+          resultBox.innerHTML = `
+            <div style="padding:12px;background:rgba(87,242,135,0.12);border:1px solid #57f287;border-radius:6px;font-size:13px;color:#57f287;">
+              <b>✅ Kết nối SePay thành công!</b> (${res.totalTransactions} giao dịch đồng bộ, Auth: <code>${h(res.authType)}</code>)
+              <ul style="margin:8px 0 0 16px;color:var(--text);font-size:12px;">${listHtml}</ul>
+            </div>`;
+          notify('Kết nối SePay thành công!');
+        } else {
+          resultBox.innerHTML = `
+            <div style="padding:12px;background:rgba(237,66,69,0.12);border:1px solid #ed4245;border-radius:6px;font-size:13px;color:#ed4245;">
+              <b>❌ Kết nối SePay thất bại:</b> ${h(res.error || 'Lỗi không xác định')}<br>
+              <small style="color:var(--text);opacity:0.8;">Hãy vào <b>my.sepay.vn -> Cấu hình công ty -> API Access</b> để copy lại đúng API Token nhé.</small>
+            </div>`;
+          notify(res.error || 'Kết nối SePay thất bại!');
+        }
+      } catch (err) {
+        if (resultBox) {
+          resultBox.innerHTML = `<div style="padding:12px;background:rgba(237,66,69,0.12);border:1px solid #ed4245;border-radius:6px;font-size:13px;color:#ed4245;">❌ Lỗi: ${h(err.message)}</div>`;
+        }
+        notify(err.message);
+      } finally {
+        testSepayBtn.disabled = false;
+        testSepayBtn.textContent = '🧪 Test Kết Nối SePay';
       }
     };
   }
