@@ -16,6 +16,7 @@ const definitions = [
   ['securityChatRoles','security','Role miễn chống spam/mention: ID hoặc none','text','none',2200],
   ['securityChatAction','security','Xử lý spam và mass mention','select','timeout',['delete','timeout']],
   ['securityTimeoutMinutes','security','Thời gian timeout vi phạm chat (phút)','number',10,1,1440],
+  ['securityRepeatTimeoutHours','security','Thời gian timeout khi tái phạm trong 24 giờ (giờ)','number',12,1,168],
   ['securityMentionEnabled','security','Chống tag hàng loạt và everyone/here','boolean',true],
 
   ['securityBotApproval','security','Cách ly bot mới và chờ chủ server xét duyệt','boolean',true],
