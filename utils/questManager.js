@@ -127,18 +127,31 @@ const QUEST_SCRIPT = `(async () => {
 
   let videoQuests = [];
   let gameQuests = [];
+  let activityQuests = [];
 
   for (let quest of allQuests) {
     const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
-    const taskName = ["WATCH_VIDEO", "WATCH_VIDEO_ON_MOBILE", "PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ACTIVITY"].find(x => taskConfig?.tasks?.[x] != null);
-    if (taskName === "WATCH_VIDEO" || taskName === "WATCH_VIDEO_ON_MOBILE") {
+    const tasks = taskConfig?.tasks || {};
+
+    if (tasks.WATCH_VIDEO != null || tasks.WATCH_VIDEO_ON_MOBILE != null) {
       videoQuests.push(quest);
+    } else if (tasks.PLAY_ON_DESKTOP != null || tasks.STREAM_ON_DESKTOP != null || tasks.PLAY_ON_PLAYSTATION != null || tasks.PLAY_ON_XBOX != null) {
+      gameQuests.push(quest);
+    } else if (tasks.ACHIEVEMENT_IN_ACTIVITY != null || tasks.PLAY_ACTIVITY != null || tasks.ACHIEVEMENT_IN_GAME != null) {
+      activityQuests.push(quest);
     } else {
       gameQuests.push(quest);
     }
   }
 
-  console.log(\`%c[Lowkey Quest]%c Tìm thấy \${videoQuests.length} nhiệm vụ Video và \${gameQuests.length} nhiệm vụ Game. Bắt đầu tự động làm và nhận thưởng!\`, "color: #5865F2; font-weight: bold", "color: #57F287");
+  console.log(\`%c[Lowkey Quest]%c Tìm thấy \${videoQuests.length} nhiệm vụ Video, \${gameQuests.length} nhiệm vụ Game PC\${activityQuests.length > 0 ? \` và \${activityQuests.length} nhiệm vụ Hoạt động\` : ''}. Bắt đầu tự động làm và nhận thưởng!\`, "color: #5865F2; font-weight: bold", "color: #57F287");
+
+  if (activityQuests.length > 0) {
+    for (let q of activityQuests) {
+      let qName = q.config.messages.questName || q.config.messages.gameTitle;
+      console.log(\`%c[HOẠT ĐỘNG DISCORD]%c Nhiệm vụ "\${qName}" là dạng mini-game Activity trong Discord (không phải game PC). Hãy mở trực tiếp trong Discord để chơi nhận thưởng!\`, "color: #FAA61A; font-weight: bold", "color: #FAA61A");
+    }
+  }
 
   // 2. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ VIDEO (chuẩn nhịp timestamp không bị 400/429)
   for (let [idx, quest] of videoQuests.entries()) {
@@ -177,11 +190,18 @@ const QUEST_SCRIPT = `(async () => {
   // 3. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ GAME (PLAY_ON_DESKTOP & STREAM)
   for (let [idx, quest] of gameQuests.entries()) {
     const questName = quest.config.messages.questName || quest.config.messages.gameTitle;
+    const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
+    const tasks = taskConfig?.tasks || {};
+
+    const taskName = ["PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ON_PLAYSTATION", "PLAY_ON_XBOX"].find(x => tasks[x] != null) || Object.keys(tasks)[0];
+    if (taskName === "ACHIEVEMENT_IN_ACTIVITY" || taskName === "PLAY_ACTIVITY" || taskName === "ACHIEVEMENT_IN_GAME") {
+      console.log(\`\\n%c[BỎ QUA TỰ ĐỘNG]%c Nhiệm vụ "\${questName}" là dạng Hoạt động Discord, tự động chuyển sang game khác.\`, "color: #FAA61A", "color: #FFFFFF");
+      continue;
+    }
+
     console.log(\`\\n%c[Game \${idx + 1}/\${gameQuests.length}]%c Bắt đầu làm nhiệm vụ: \${questName}...\`, "color: #5865F2; font-weight: bold", "color: #57F287");
 
-    const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
-    const taskName = ["PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ACTIVITY"].find(x => taskConfig?.tasks?.[x] != null) || "PLAY_ON_DESKTOP";
-    const taskData = taskConfig?.tasks?.[taskName] || {};
+    const taskData = tasks[taskName] || {};
     const applicationId = quest.config.application?.id ?? taskData.applications?.[0]?.id ?? quest.config.applicationId;
     const applicationName = quest.config.application?.name ?? taskData.applications?.[0]?.name ?? quest.config.messages.gameTitle ?? "Target Game";
     const secondsNeeded = taskData.target || (quest.config.streamDurationRequirementMinutes ? quest.config.streamDurationRequirementMinutes * 60 : 900);
@@ -240,11 +260,51 @@ const QUEST_SCRIPT = `(async () => {
     console.log(\`%c[Giả lập]%c Đang chạy game \${applicationName} (\${Math.round(secondsDone / 60)}/\${Math.round(secondsNeeded / 60)} phút)...\`, "color: #5865F2; font-weight: bold", "color: #FAA61A");
 
     await new Promise((resolve) => {
+      let resolved = false;
+      let lastHeartbeatTime = Date.now();
+      let heartbeatCount = 0;
+
+      const safeResolve = () => {
+        if (resolved) return;
+        resolved = true;
+        clearInterval(interval);
+        clearInterval(watchdogTimer);
+        FluxDispatcher.unsubscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", fn);
+        FluxDispatcher.unsubscribe("QUESTS_SEND_HEARTBEAT_FAILURE", failFn);
+        cleanup();
+        resolve();
+      };
+
+      const watchdogTimer = setInterval(() => {
+        if (resolved) return;
+        const elapsedSinceBeat = Date.now() - lastHeartbeatTime;
+        if (heartbeatCount === 0 && elapsedSinceBeat > 60000) {
+          console.log(\`%c[CẢNH BÁO / BỎ QUA]%c Nhiệm vụ "\${questName}" không nhận được phản hồi từ Discord sau 60s. Tự động chuyển sang nhiệm vụ tiếp theo!\`, "color: #ED4245; font-weight: bold", "color: #FAA61A");
+          safeResolve();
+        } else if (heartbeatCount > 0 && elapsedSinceBeat > 120000) {
+          console.log(\`%c[CẢNH BÁO / BỎ QUA]%c Nhiệm vụ "\${questName}" bị gián đoạn tín hiệu quá 120s. Tự động chuyển sang nhiệm vụ tiếp theo!\`, "color: #ED4245; font-weight: bold", "color: #FAA61A");
+          safeResolve();
+        }
+      }, 5000);
+
       let interval = setInterval(() => {
+        if (resolved) return;
         FluxDispatcher.dispatch({ type: "RUNNING_GAMES_CHANGE", removed: [], added: [fakeGame], games: [fakeGame] });
       }, 15000);
 
+      let failFn = (errData) => {
+        if (errData?.questId === quest.id) {
+          console.log(\`%c[Lỗi Heartbeat]%c Discord báo lỗi: \${errData?.error?.message || "Tín hiệu thất bại"}\`, "color: #ED4245", "color: #FFFFFF");
+        }
+      };
+
       let fn = async (data) => {
+        if (resolved) return;
+        if (data?.questId && data.questId !== quest.id) return;
+
+        lastHeartbeatTime = Date.now();
+        heartbeatCount++;
+
         let progress = quest.config.configVersion === 1
           ? data?.userStatus?.streamProgressSeconds
           : (data?.userStatus?.progress?.[taskName]?.value ?? data?.userStatus?.streamProgressSeconds ?? (secondsDone + 30));
@@ -256,9 +316,6 @@ const QUEST_SCRIPT = `(async () => {
         console.log(\`%c[Tiến độ \${questName}]%c \${Math.min(secondsDone, secondsNeeded)}/\${secondsNeeded}s (\${pct}%)\`, "color: #5865F2", "color: #57F287; font-weight: bold");
 
         if (secondsDone >= secondsNeeded) {
-          clearInterval(interval);
-          FluxDispatcher.unsubscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", fn);
-          cleanup();
           console.log(\`%c[HOÀN TẤT 100%]%c Đã hoàn thành xong: \${questName}! Đang tự động nhận thưởng...\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
           if (api) {
             try {
@@ -268,11 +325,12 @@ const QUEST_SCRIPT = `(async () => {
               console.log(\`%c[LƯU Ý]%c Bạn có thể vào Cài đặt -> Quests để bấm Claim nếu cần.\`, "color: #FAA61A", "color: #FFFFFF");
             }
           }
-          resolve();
+          safeResolve();
         }
       };
 
       FluxDispatcher.subscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", fn);
+      FluxDispatcher.subscribe("QUESTS_SEND_HEARTBEAT_FAILURE", failFn);
     });
   }
 

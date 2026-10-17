@@ -101,7 +101,11 @@ function printFormattedLog(args) {
     text.includes('[CHÚC MỪNG]') ||
     text.includes('[LƯU Ý]') ||
     text.includes('↪') ||
-    text.includes('[Lỗi]');
+    text.includes('[Lỗi]') ||
+    text.includes('[BỎ QUA') ||
+    text.includes('[HOẠT ĐỘNG') ||
+    text.includes('[CẢNH BÁO') ||
+    text.includes('⚠️');
 
   if (!isQuestLog) return;
 
@@ -115,6 +119,8 @@ function printFormattedLog(args) {
     log(`${C.green}${C.bold}\n✨ ${text}${C.reset}`);
   } else if (text.includes('[Lỗi]') || text.includes('Không thể')) {
     log(`${C.red}${text}${C.reset}`);
+  } else if (text.includes('[BỎ QUA') || text.includes('[HOẠT ĐỘNG') || text.includes('[CẢNH BÁO') || text.includes('[LƯU Ý]')) {
+    log(`${C.yellow}${C.bold}${text}${C.reset}`);
   } else if (text.includes('[Lowkey Quest]') || text.includes('[Giả lập]')) {
     log(`${C.magenta}${text}${C.reset}`);
   } else {

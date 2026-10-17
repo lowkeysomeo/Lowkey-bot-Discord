@@ -304,6 +304,18 @@ async function completeSingleQuest(token, quest, options = {}) {
     return await completeVideoQuest(token, quest, options);
   }
 
+  // Nhiệm vụ mini-game trong Activity Discord (yêu cầu mở trực tiếp trong Discord)
+  if (tasks.ACHIEVEMENT_IN_ACTIVITY || tasks.ACHIEVEMENT_IN_GAME) {
+    return {
+      questId,
+      questName,
+      enrolled: true,
+      completed: false,
+      claimed: false,
+      message: 'Nhiệm vụ dạng Hoạt động Discord (Activity mini-game). Bạn vui lòng mở trực tiếp trên Discord để chơi và nhận quà nhé!',
+    };
+  }
+
   // Nhiệm vụ chơi game hoặc stream
   const targetSeconds =
     tasks.PLAY_ON_DESKTOP?.target ||
