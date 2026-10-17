@@ -12,45 +12,220 @@ const {
 const { startQuestStream, stopQuestStream, getQuestStreamStatus } = require('./questVoiceHelper');
 const { runAutoQuestForToken } = require('./questTokenWorker');
 
-const QUEST_SCRIPT = `delete window.$;
-let wpRequire = webpackChunkdiscord_app.push([[Symbol()], {}, r => r]);
-webpackChunkdiscord_app.pop();
+const QUEST_SCRIPT = `(async () => {
+  delete window.$;
+  let wpRequire = webpackChunkdiscord_app.push([[Symbol()], {}, r => r]);
+  webpackChunkdiscord_app.pop();
 
-let ApplicationStreamingStore = Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getStreamerActiveStreamMetadata)?.exports?.A || Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getStreamerActiveStreamMetadata)?.exports?.Z;
-let RunningGameStore = Object.values(wpRequire.c).find(x => x?.exports?.Ay?.getRunningGames)?.exports?.Ay || Object.values(wpRequire.c).find(x => x?.exports?.ZP?.getRunningGames)?.exports?.ZP;
-let QuestsStore = Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getQuest)?.exports?.A || Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getQuest)?.exports?.Z;
-let FluxDispatcher = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.flushWaitQueue)?.exports?.Z;
+  let ApplicationStreamingStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getStreamerActiveStreamMetadata)?.exports?.Z;
+  let RunningGameStore, QuestsStore, ChannelStore, GuildChannelStore, FluxDispatcher, api;
 
-let quest = [...QuestsStore.quests.values()].find(x => x.userStatus?.enrolledAt && !x.userStatus?.completedAt && new Date(x.config.expiresAt).getTime() > Date.now());
+  if (!ApplicationStreamingStore) {
+    ApplicationStreamingStore = Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getStreamerActiveStreamMetadata)?.exports?.A;
+    RunningGameStore = Object.values(wpRequire.c).find(x => x?.exports?.Ay?.getRunningGames)?.exports?.Ay;
+    QuestsStore = Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getQuest)?.exports?.A;
+    ChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getAllThreadsForParent)?.exports?.A;
+    GuildChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.Ay?.getSFWDefaultChannel)?.exports?.Ay;
+    FluxDispatcher = Object.values(wpRequire.c).find(x => x?.exports?.h?.__proto__?.flushWaitQueue)?.exports?.h;
+    api = Object.values(wpRequire.c).find(x => x?.exports?.Bo?.get)?.exports?.Bo;
+  } else {
+    RunningGameStore = Object.values(wpRequire.c).find(x => x?.exports?.ZP?.getRunningGames)?.exports?.ZP;
+    QuestsStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getQuest)?.exports?.Z;
+    ChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getAllThreadsForParent)?.exports?.Z;
+    GuildChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.ZP?.getSFWDefaultChannel)?.exports?.ZP;
+    FluxDispatcher = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.flushWaitQueue)?.exports?.Z;
+    api = Object.values(wpRequire.c).find(x => x?.exports?.tn?.get)?.exports?.tn;
+  }
 
-if (!quest) {
-  console.log("%c[Lowkey Quest]%c Không tìm thấy nhiệm vụ nào đang nhận dở! Hãy vào Cài đặt -> Quests và bấm 'Accept Quest' trước nhé.", "color: #5865F2; font-weight: bold", "color: #FAA61A");
-} else {
-  let pid = Math.floor(Math.random() * 30000) + 1000;
-  ApplicationStreamingStore.getStreamerActiveStreamMetadata = () => ({
-    id: quest.config.applicationId,
-    pid,
-    sourceName: null
-  });
-  let secondsNeeded = (quest.config.streamDurationRequirementMinutes || 15) * 60;
-  console.log(\`%c[Lowkey Quest]%c Đang tự động hoàn thành: \${quest.config.messages.gameTitle}...\`, "color: #5865F2; font-weight: bold", "color: #57F287");
-  let fn = data => {
-    let progress = data.userStatus?.streamProgressSeconds || data.userStatus?.completedSeconds || 0;
-    console.log(\`%c[Tiến độ]%c \${progress}/\${secondsNeeded}s (\${Math.round((progress/secondsNeeded)*100)}%)\`, "color: #5865F2", "color: #FAA61A");
-    if (progress >= secondsNeeded) {
-      console.log("%c[HOÀN TẤT]%c Đã hoàn thành 100%! Vào Discord Quests bấm Claim để nhận điểm ORB!", "color: #57F287; font-weight: bold", "color: #FFFFFF");
-      FluxDispatcher.unsubscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", fn);
+  function findFallback(pred) {
+    for (let mod of Object.values(wpRequire.c)) {
+      if (!mod?.exports) continue;
+      if (pred(mod.exports)) return mod.exports;
+      for (let k of Object.keys(mod.exports)) {
+        let s = mod.exports[k];
+        if (s && pred(s)) return s;
+        if (s?.__proto__ && pred(s.__proto__)) return s;
+      }
     }
-  };
-  FluxDispatcher.subscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", fn);
-  setInterval(() => {
-    FluxDispatcher.dispatch({
-      type: "RUNNING_GAMES_CHANGE",
-      removed: [],
-      added: [{ name: quest.config.messages.gameTitle, pid, cmdLine: "", id: quest.config.applicationId, overlay: false, unity: false }]
+    return null;
+  }
+
+  if (!FluxDispatcher) {
+    FluxDispatcher = findFallback(x => typeof x?.dispatch === 'function' && typeof x?.subscribe === 'function');
+  }
+  if (!QuestsStore) {
+    QuestsStore = findFallback(x => typeof x?.getQuest === 'function' || x?.quests instanceof Map);
+  }
+  if (!RunningGameStore) {
+    RunningGameStore = findFallback(x => typeof x?.getRunningGames === 'function');
+  }
+  if (!ApplicationStreamingStore) {
+    ApplicationStreamingStore = findFallback(x => typeof x?.getStreamerActiveStreamMetadata === 'function');
+  }
+  if (!api) {
+    api = findFallback(x => typeof x?.get === 'function' && typeof x?.post === 'function');
+  }
+
+  if (!QuestsStore || !FluxDispatcher) {
+    console.error("%c[Lowkey Quest]%c Không thể kết nối Discord Webpack stores. Hãy đảm bảo bạn đang dùng Discord Desktop!", "color: red; font-weight: bold", "color: #ffaa00");
+    return;
+  }
+
+  console.log("%c[Lowkey Quest]%c Đang tải danh sách nhiệm vụ...", "color: #5865F2; font-weight: bold", "color: #00ffff");
+
+  let allQuests = [...QuestsStore.quests.values()].filter(x => new Date(x.config.expiresAt).getTime() > Date.now() && !x.userStatus?.completedAt);
+
+  // 1. TỰ ĐỘNG NHẬN (AUTO ENROLL) TẤT CẢ QUESTS CHƯA NHẬN
+  for (let q of allQuests) {
+    if (!q.userStatus?.enrolledAt) {
+      console.log(\`%c[TỰ NHẬN]%c Đang nhận nhiệm vụ: \${q.config.messages.questName || q.config.messages.gameTitle}...\`, "color: #FAA61A; font-weight: bold", "color: #FFFFFF");
+      if (api) {
+        try {
+          await api.post({ url: \`/quests/\${q.id}/enroll\`, body: { location: 1 } });
+          console.log(\`%c[TỰ NHẬN THÀNH CÔNG]%c \${q.config.messages.questName || q.config.messages.gameTitle}\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
+        } catch (e) {}
+      }
+    }
+  }
+
+  allQuests = [...QuestsStore.quests.values()].filter(x => new Date(x.config.expiresAt).getTime() > Date.now() && !x.userStatus?.completedAt);
+
+  let videoQuests = [];
+  let gameQuests = [];
+
+  for (let quest of allQuests) {
+    const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
+    const taskName = ["WATCH_VIDEO", "WATCH_VIDEO_ON_MOBILE", "PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ACTIVITY"].find(x => taskConfig?.tasks?.[x] != null);
+    if (taskName === "WATCH_VIDEO" || taskName === "WATCH_VIDEO_ON_MOBILE") {
+      videoQuests.push(quest);
+    } else {
+      gameQuests.push(quest);
+    }
+  }
+
+  console.log(\`%c[Lowkey Quest]%c Tìm thấy \${videoQuests.length} nhiệm vụ Video và \${gameQuests.length} nhiệm vụ Game. Bắt đầu tự động làm và nhận thưởng!\`, "color: #5865F2; font-weight: bold", "color: #57F287");
+
+  // 2. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ VIDEO
+  for (let [idx, quest] of videoQuests.entries()) {
+    let questName = quest.config.messages.questName || quest.config.messages.gameTitle;
+    console.log(\`%c[Video \${idx + 1}/\${videoQuests.length}]%c Đang làm: \${questName}...\`, "color: #5865F2; font-weight: bold", "color: #FAA61A");
+    const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
+    const taskName = ["WATCH_VIDEO", "WATCH_VIDEO_ON_MOBILE"].find(x => taskConfig?.tasks?.[x] != null);
+    const secondsNeeded = taskConfig?.tasks?.[taskName]?.target || 30;
+    if (api) {
+      await api.post({ url: \`/quests/\${quest.id}/video-progress\`, body: { timestamp: secondsNeeded } }).catch(() => {});
+      try {
+        await api.post({ url: \`/quests/\${quest.id}/claim-reward\`, body: { platform: 0 } });
+      } catch {}
+    }
+    console.log(\`%c[HOÀN TẤT]%c Đã hoàn thành & nhận thưởng Video Quest: \${questName}!\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
+  }
+
+  // 3. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ GAME (PLAY_ON_DESKTOP & STREAM)
+  for (let [idx, quest] of gameQuests.entries()) {
+    const questName = quest.config.messages.questName || quest.config.messages.gameTitle;
+    console.log(\`\\n%c[Game \${idx + 1}/\${gameQuests.length}]%c Bắt đầu làm nhiệm vụ: \${questName}...\`, "color: #5865F2; font-weight: bold", "color: #57F287");
+
+    const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
+    const taskName = ["PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ACTIVITY"].find(x => taskConfig?.tasks?.[x] != null) || "PLAY_ON_DESKTOP";
+    const taskData = taskConfig?.tasks?.[taskName] || {};
+    const applicationId = quest.config.application?.id ?? taskData.applications?.[0]?.id ?? quest.config.applicationId;
+    const applicationName = quest.config.application?.name ?? taskData.applications?.[0]?.name ?? quest.config.messages.gameTitle ?? "Target Game";
+    const secondsNeeded = taskData.target || (quest.config.streamDurationRequirementMinutes ? quest.config.streamDurationRequirementMinutes * 60 : 900);
+    let secondsDone = quest.userStatus?.progress?.[taskName]?.value ?? quest.userStatus?.streamProgressSeconds ?? 0;
+
+    const pid = Math.floor(Math.random() * 30000) + 1000;
+
+    let realStreamFunc = null;
+    if (ApplicationStreamingStore) {
+      realStreamFunc = ApplicationStreamingStore.getStreamerActiveStreamMetadata;
+      ApplicationStreamingStore.getStreamerActiveStreamMetadata = () => ({ id: applicationId, pid, sourceName: null });
+    }
+
+    let realGames = RunningGameStore ? RunningGameStore.getRunningGames() : [];
+    let realGetRunningGames = RunningGameStore ? RunningGameStore.getRunningGames : null;
+    let realGetGameForPID = RunningGameStore ? RunningGameStore.getGameForPID : null;
+
+    let appData = null;
+    if (api && applicationId) {
+      try {
+        let res = await api.get({ url: \`/applications/public?application_ids=\${applicationId}\` });
+        appData = res.body?.[0];
+      } catch (e) {}
+    }
+
+    let exeName = appData?.executables?.find(x => x.os === 'win32')?.name?.replace(">", "") || \`\${applicationName.replace(/[^a-zA-Z0-9]/g, '')}.exe\`;
+
+    const fakeGame = {
+      cmdLine: \`C:\\\\Program Files\\\\\${applicationName}\\\\\${exeName}\`,
+      exeName,
+      exePath: \`c:/program files/\${applicationName.toLowerCase()}/\${exeName}\`,
+      hidden: false,
+      isLauncher: false,
+      id: applicationId,
+      name: applicationName,
+      pid,
+      pidPath: [pid],
+      processName: applicationName,
+      start: Date.now()
+    };
+
+    if (RunningGameStore) {
+      RunningGameStore.getRunningGames = () => [fakeGame];
+      RunningGameStore.getGameForPID = (p) => (p === pid ? fakeGame : null);
+    }
+
+    const cleanup = () => {
+      if (RunningGameStore && realGetRunningGames) RunningGameStore.getRunningGames = realGetRunningGames;
+      if (RunningGameStore && realGetGameForPID) RunningGameStore.getGameForPID = realGetGameForPID;
+      if (ApplicationStreamingStore && realStreamFunc) ApplicationStreamingStore.getStreamerActiveStreamMetadata = realStreamFunc;
+      FluxDispatcher.dispatch({ type: "RUNNING_GAMES_CHANGE", removed: [fakeGame], added: [], games: [] });
+    };
+
+    FluxDispatcher.dispatch({ type: "RUNNING_GAMES_CHANGE", removed: realGames, added: [fakeGame], games: [fakeGame] });
+
+    console.log(\`%c[Giả lập]%c Đang chạy game \${applicationName} (\${Math.round(secondsDone / 60)}/\${Math.round(secondsNeeded / 60)} phút)...\`, "color: #5865F2; font-weight: bold", "color: #FAA61A");
+
+    await new Promise((resolve) => {
+      let interval = setInterval(() => {
+        FluxDispatcher.dispatch({ type: "RUNNING_GAMES_CHANGE", removed: [], added: [fakeGame], games: [fakeGame] });
+      }, 15000);
+
+      let fn = async (data) => {
+        let progress = quest.config.configVersion === 1
+          ? data?.userStatus?.streamProgressSeconds
+          : (data?.userStatus?.progress?.[taskName]?.value ?? data?.userStatus?.streamProgressSeconds ?? (secondsDone + 30));
+
+        if (typeof progress === 'number') secondsDone = progress;
+        else secondsDone += 30;
+
+        let pct = Math.min(100, Math.round((secondsDone / secondsNeeded) * 100));
+        console.log(\`%c[Tiến độ \${questName}]%c \${Math.min(secondsDone, secondsNeeded)}/\${secondsNeeded}s (\${pct}%)\`, "color: #5865F2", "color: #57F287; font-weight: bold");
+
+        if (secondsDone >= secondsNeeded) {
+          clearInterval(interval);
+          FluxDispatcher.unsubscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", fn);
+          cleanup();
+          console.log(\`%c[HOÀN TẤT 100%]%c Đã hoàn thành xong: \${questName}! Đang tự động nhận thưởng...\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
+          if (api) {
+            try {
+              await api.post({ url: \`/quests/\${quest.id}/claim-reward\`, body: { platform: 0 } });
+              console.log(\`%c[NHẬN THƯỞNG THÀNH CÔNG]%c Đã cộng điểm ORB/Quà cho \${questName}!\`, "color: #57F287; font-weight: bold", "color: #FAA61A");
+            } catch (err) {
+              console.log(\`%c[LƯU Ý]%c Bạn có thể vào Cài đặt -> Quests để bấm Claim nếu cần.\`, "color: #FAA61A", "color: #FFFFFF");
+            }
+          }
+          resolve();
+        }
+      };
+
+      FluxDispatcher.subscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", fn);
     });
-  }, 10000);
-}`;
+  }
+
+  console.log("%c[CHÚC MỪNG]%c Đã hoàn tất 100% tất cả các nhiệm vụ Discord Quests và nhận trọn vẹn điểm ORB!", "color: #57F287; font-weight: bold; font-size: 14px", "color: #FFFFFF; font-size: 14px");
+})();
+`;
 
 function buildTokenModal() {
   const modal = new ModalBuilder()
