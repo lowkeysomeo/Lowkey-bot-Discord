@@ -148,12 +148,23 @@ async function checkSePayPayment(order) {
   if (!sepayApiKey) return false;
 
   try {
-    const res = await fetch('https://my.sepay.vn/userapi/transactions/list?limit=25', {
+    const token = sepayApiKey.trim();
+    const authHeader = token.startsWith('Apikey ') || token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+    let res = await fetch('https://my.sepay.vn/userapi/transactions/list?limit=25', {
       headers: {
-        Authorization: `Apikey ${sepayApiKey.trim()}`,
+        Authorization: authHeader,
         'Content-Type': 'application/json',
       },
     });
+
+    if (res.status === 401 && !token.startsWith('Apikey ')) {
+      res = await fetch('https://my.sepay.vn/userapi/transactions/list?limit=25', {
+        headers: {
+          Authorization: `Apikey ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+    }
 
     if (!res.ok) return false;
     const data = await res.json();
