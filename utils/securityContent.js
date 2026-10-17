@@ -115,7 +115,24 @@ function normalize(text) {
 }
 
 function hasInvite(text) {
-  return /(?:^|[^a-z0-9_.-])(?:https?:\/\/)?(?:www\.)?(?:discord\.gg\/|(?:discord\.com|discordapp\.com)\/invite\/)[a-z0-9-]+/i.test(normalize(text));
+  const norm = normalize(text);
+  const discordRegex = /(?:^|[^a-z0-9_.-])(?:https?:\/\/)?(?:www\.)?(?:discord\.gg\/|(?:discord\.com|discordapp\.com)\/invite\/|dsc\.gg\/|discord\.me\/|discord\.io\/|discord\.link\/|invite\.gg\/)[a-z0-9-_]+/i;
+  const otherPlatformRegex = /(?:^|[^a-z0-9_.-])(?:https?:\/\/)?(?:www\.)?(?:t\.me\/|telegram\.me\/|guilded\.gg\/|revolt\.chat\/)[a-z0-9-_]+/i;
+  return discordRegex.test(norm) || otherPlatformRegex.test(norm);
+}
+
+function hasSuspiciousAd(text) {
+  const norm = normalize(text);
+  const SHORTENERS = /(?:^|[^a-z0-9_.-])(?:https?:\/\/)?(?:www\.)?(?:bit\.ly|tinyurl\.com|t\.co|cutt\.ly|shorturl\.at|is\.gd|buff\.ly|ow\.ly|linkvertise\.com|adf\.ly|bc\.vc|tiny\.cc|shorte\.st|bitly\.com)\/[a-z0-9-_]+/i;
+  if (SHORTENERS.test(norm)) return true;
+
+  const PHISHING_OR_SCAM = /(?:https?:\/\/)?(?:www\.)?[a-z0-9-]*?(?:dlscord|discorcl|discocl|discord-gift|discord-nitro|free-nitro|nitro-discord|discordapp-gift|steamcommunity-[a-z0-9-]+|steam-nitro|steam-trade-gift)[a-z0-9-]*\.[a-z]{2,}[^\s]*/i;
+  if (PHISHING_OR_SCAM.test(norm)) return true;
+
+  const HAS_ANY_URL = /(?:https?:\/\/|www\.)[^\s]+|[a-z0-9-]+\.(?:com|net|org|vn|xyz|top|store|shop|me|site|info|online|vip|pro)(?:\/[^\s]*)?/i;
+  const AD_KEYWORDS = /(?:qu[aả]ng\s*c[aá]o|mua\s*b[aá]n|b[aá]n\s*(?:acc|nick|bot|code|clone|mail)|shop\s*(?:acc|uy\s*t[ií]n|gi[aá]\s*r[eẻ]|bot)|d[iị]ch\s*v[uụ]\s*(?:c[aà]y|t[aă]ng|fb|discord)|tuy[eể]n\s*ref|ki[eế]m\s*ti[eề]n|nh[aậ]n\s*(?:qu[aà]|nitro|th[uư][oở]ng)|free\s*nitro|tham\s*gia\s*server|join\s*server|server\s*m[oớ]i|v[aà]o\s*server|link\s*server|gh[eé]\s*th[aă]m\s*server|v[aà]o\s*nh[oó]m|link\s*nh[oó]m|c[oộ]ng\s*[đd][oồ]ng\s*m[oớ]i|group\s*zalo|nh[oó]m\s*zalo|k[eê]nh\s*telegram|inbox\s*mua|li[eê]n\s*h[eệ]\s*shop|mua\s*ngay\s*t[aạ]i|gi[aá]\s*si[eê]u\s*r[eẻ]|website\s*b[aá]n|web\s*b[aá]n)/i;
+
+  return HAS_ANY_URL.test(norm) && AD_KEYWORDS.test(norm);
 }
 
 async function inspect(msg, tools) {
@@ -126,9 +143,11 @@ async function inspect(msg, tools) {
   const now = (typeof tools.now === 'function' ? tools.now() : (Number(tools.now) || msg._now || msg.createdTimestamp || Date.now()));
   let violation = '', action = o.securityChatAction, violationCategory = '';
 
-  if (o.securityInvites && !exempt(msg, o.securityInviteChannels, o.securityInviteRoles) && hasInvite(msg.content)) {
-    violation = 'link mời Discord ngoài khu vực cho phép';
-    action = o.securityInviteAction;
+  const isInvite = hasInvite(msg.content);
+  const isSuspiciousAd = hasSuspiciousAd(msg.content);
+  if (o.securityInvites && !exempt(msg, o.securityInviteChannels, o.securityInviteRoles) && (isInvite || isSuspiciousAd)) {
+    violation = isInvite ? 'quảng cáo server khác (link mời)' : 'nghi ngờ quảng cáo web hoặc liên kết lạ';
+    action = o.securityInviteAction || 'timeout';
     violationCategory = 'invite';
   }
 
@@ -188,9 +207,9 @@ async function inspect(msg, tools) {
   let timeoutMs = (Number(o.securityTimeoutMinutes) || 10) * 60000;
   let durationText = `${Number(o.securityTimeoutMinutes) || 10} phút`;
 
-  if (violationCategory === 'mention') {
+  if (violationCategory === 'mention' || violationCategory === 'invite') {
     const window24h = 24 * 60 * 60 * 1000;
-    const prevViolations = countRecentViolations(msg.guild.id, msg.author.id, 'mention', window24h, now);
+    const prevViolations = countRecentViolations(msg.guild.id, msg.author.id, violationCategory, window24h, now);
     if (prevViolations >= 1) {
       const repeatHours = Number(o.securityRepeatTimeoutHours) || 12;
       timeoutMs = repeatHours * 60 * 60 * 1000;
@@ -200,8 +219,8 @@ async function inspect(msg, tools) {
       timeoutMs = baseMinutes * 60 * 1000;
       durationText = `${baseMinutes} phút`;
     }
-    recordViolation(msg.guild.id, msg.author.id, 'mention', timeoutMs, now);
-    resetRecentMentions(msg.guild.id, msg.author.id);
+    recordViolation(msg.guild.id, msg.author.id, violationCategory, timeoutMs, now);
+    if (violationCategory === 'mention') resetRecentMentions(msg.guild.id, msg.author.id);
   }
 
   try {
@@ -219,6 +238,7 @@ async function inspect(msg, tools) {
 module.exports = {
   inspect,
   hasInvite,
+  hasSuspiciousAd,
   exempt,
   normalize,
   extractUserMentions,
