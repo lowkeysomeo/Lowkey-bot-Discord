@@ -673,6 +673,61 @@ setWebSocketImplementation(MockWebSocket);
     await questCmd.execute(mockQuestScanInteraction);
     assert(questScanReply && questScanReply.embeds && questScanReply.embeds.length === 1, '/quest action:scan phải trả về kết quả');
     assert.match(questScanReply.embeds[0].data.title, /KẾT QUẢ AUTO QUEST DISCORD/);
+
+    // 9.10 Kiểm tra nhận diện nhiệm vụ Video săn ORBs (camelCase questName, type: 4 ORB reward)
+    const orbVideoQuest = {
+      id: 'quest-orb-video-test',
+      config: {
+        messages: { questName: 'Watch the Trailer & Earn 100 Orbs' },
+        rewards_config: {
+          rewards: [
+            { type: 4, orb_quantity: 100, messages: { name: '100 Discord Orbs' } }
+          ],
+        },
+        task_config_v2: {
+          tasks: {
+            WATCH_VIDEO: { target: 30 },
+          },
+        },
+      },
+      user_status: { enrolled_at: null, completed_at: null, claimed_at: null },
+    };
+
+    assert.equal(isVideoQuest(orbVideoQuest), true, 'Nhiệm vụ xem trailer nhận ORB phải được nhận diện là Video Quest');
+    const orbVidRes = await completeSingleQuest('valid_token_xyz', orbVideoQuest, {
+      autoClaim: true,
+      heartbeatDelayMs: 10,
+    });
+    assert.equal(orbVidRes.completed, true, 'Video quest ORB phải hoàn thành 100%');
+    assert.equal(orbVidRes.type, 'video');
+    assert.equal(orbVidRes.claimed, true, 'Video quest với autoClaim: true phải nhận thưởng thành công');
+    assert(orbVidRes.reward !== null, 'Phải có object reward trả về');
+
+    // 9.11 Kiểm tra completeSingleQuest tự động nhận thưởng ngay nếu quest đã đạt 100% tiến độ trước đó
+    const alreadyCompletedQuest = {
+      id: 'quest-unclaimed-orb',
+      config: {
+        messages: { quest_name: 'Unclaimed Orbs Quest' },
+        rewards_config: { rewards: [{ type: 4, orbQuantity: 50 }] },
+        task_config: { tasks: { WATCH_VIDEO: { target: 30 } } },
+      },
+      user_status: {
+        enrolled_at: '2026-10-18T00:00:00Z',
+        completed_at: '2026-10-18T00:01:00Z',
+        claimed_at: null,
+      },
+    };
+    const unclaimedRes = await completeSingleQuest('valid_token_xyz', alreadyCompletedQuest, {
+      autoClaim: true,
+    });
+    assert.equal(unclaimedRes.completed, true);
+    assert.equal(unclaimedRes.claimed, true, 'Quest đã đạt 100% nhưng chưa claim phải được tự động claim ngay lập tức');
+
+    // 9.12 Kiểm tra questScheduler scanUserQuests tự động quét và làm nhiệm vụ cho subscriber
+    const { scanUserQuests } = require('../utils/questScheduler');
+    const schedulerScanRes = await scanUserQuests('user-scan-btn', { heartbeatDelayMs: 10 });
+    assert.equal(schedulerScanRes.success, true);
+    assert(schedulerScanRes.totalQuests >= 1);
   } finally {
     setFetchImplementation(null);
   }

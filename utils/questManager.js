@@ -630,6 +630,7 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
 
   try {
     const report = await runAutoQuestForToken(token, {
+      autoClaim: true,
       heartbeatDelayMs: 1200,
       onProgress: (p) => {
         if (p.step === 'auth' || p.step === 'fetch') {

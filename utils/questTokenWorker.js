@@ -135,9 +135,19 @@ async function fetchQuests(token) {
 
   const data = await res.json();
   let allQuests = [];
-  if (Array.isArray(data?.quests)) allQuests = allQuests.concat(data.quests);
-  if (Array.isArray(data?.open_quests)) allQuests = allQuests.concat(data.open_quests);
-  if (Array.isArray(data)) allQuests = allQuests.concat(data);
+  if (Array.isArray(data?.quests)) {
+    allQuests = allQuests.concat(data.quests);
+  } else if (data?.quests && typeof data.quests === 'object') {
+    allQuests = allQuests.concat(Object.values(data.quests));
+  }
+  if (Array.isArray(data?.open_quests)) {
+    allQuests = allQuests.concat(data.open_quests);
+  } else if (data?.open_quests && typeof data.open_quests === 'object') {
+    allQuests = allQuests.concat(Object.values(data.open_quests));
+  }
+  if (Array.isArray(data)) {
+    allQuests = allQuests.concat(data);
+  }
 
   const seen = new Set();
   const dedupedQuests = allQuests.filter((q) => {
@@ -325,29 +335,50 @@ async function sendVideoProgress(token, questId, timestamp = 30, retries = 3) {
  * Nhận thưởng (Claim Reward / ORBs)
  */
 async function claimQuestReward(token, questId, platform = 0) {
-  let res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/claim-reward`, {
-    method: 'POST',
-    headers: getHeaders(token),
-    body: JSON.stringify({ platform }),
-  });
+  const bodies = [
+    { platform, location: 11, is_targeted: false },
+    { platform },
+    { location: 11, is_targeted: false },
+    {},
+  ];
 
-  if (res.status === 404) {
-    res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/claim`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify({}),
-    });
-  }
+  let lastRes = null;
+  let lastErr = null;
 
-  if (!res.ok) {
-    const errData = await res.json().catch(() => ({}));
-    if (errData?.message && String(errData.message).toLowerCase().includes('already')) {
-      return { alreadyClaimed: true };
+  for (const b of bodies) {
+    let res;
+    try {
+      res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/claim-reward`, {
+        method: 'POST',
+        headers: getHeaders(token),
+        body: JSON.stringify(b),
+      });
+
+      if (res.status === 404) {
+        res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/claim`, {
+          method: 'POST',
+          headers: getHeaders(token),
+          body: JSON.stringify(b),
+        });
+      }
+
+      if (res.ok) {
+        return await res.json().catch(() => ({ success: true }));
+      }
+
+      const errData = await res.json().catch(() => ({}));
+      if (errData?.message && String(errData.message).toLowerCase().includes('already')) {
+        return { alreadyClaimed: true };
+      }
+      lastRes = res;
+      lastErr = errData;
+      if (res.status !== 400 && res.status !== 404) break;
+    } catch (e) {
+      lastErr = e;
     }
-    throw new Error(`Lỗi khi nhận thưởng (${questId}): HTTP ${res.status} ${JSON.stringify(errData)}`);
   }
 
-  return await res.json().catch(() => ({ success: true }));
+  throw new Error(`Lỗi khi nhận thưởng (${questId}): HTTP ${lastRes ? lastRes.status : 0} ${JSON.stringify(lastErr)}`);
 }
 
 /**
@@ -400,7 +431,9 @@ async function completeVideoQuest(token, quest, options = {}) {
       try {
         reward = await claimQuestReward(token, questId);
         claimed = true;
-      } catch (e) {}
+      } catch (e) {
+        console.warn(`[QUEST WORKER] Không thể auto-claim quest (${questId}):`, e.message);
+      }
     }
     return {
       questId,
@@ -414,7 +447,7 @@ async function completeVideoQuest(token, quest, options = {}) {
       progressPercent: 100,
       reward,
       message: claimed
-        ? 'Đã hoàn thành 100% video & Nhận thưởng thành công!'
+        ? 'Đã hoàn thành 100% video & Nhận thưởng ORB thành công!'
         : 'Đã hoàn thành 100%! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
     };
   }
@@ -723,34 +756,125 @@ class DiscordUserGateway {
 
 function extractQuestTasks(quest) {
   const c = quest?.config || {};
-  const v1 = c.task_config?.tasks || c.taskConfig?.tasks || {};
-  const v2 = c.task_config_v2?.tasks || c.taskConfigV2?.tasks || {};
-  return { ...v1, ...v2 };
+  const v2 = c.task_config_v2?.tasks || c.taskConfigV2?.tasks;
+  const v1 = c.task_config?.tasks || c.taskConfig?.tasks;
+  const rawTasks = v2 || v1 || {};
+
+  const result = {};
+  if (rawTasks instanceof Map) {
+    for (const [k, v] of rawTasks.entries()) {
+      result[k] = v;
+    }
+  } else if (Array.isArray(rawTasks)) {
+    for (const t of rawTasks) {
+      if (t?.name || t?.key) result[t.name || t.key] = t;
+    }
+  } else if (typeof rawTasks === 'object' && rawTasks !== null) {
+    Object.assign(result, rawTasks);
+  }
+
+  if (v1 && v1 !== rawTasks) {
+    if (v1 instanceof Map) {
+      for (const [k, v] of v1.entries()) {
+        if (!result[k]) result[k] = v;
+      }
+    } else if (typeof v1 === 'object' && v1 !== null) {
+      for (const [k, v] of Object.entries(v1)) {
+        if (!result[k]) result[k] = v;
+      }
+    }
+  }
+  return result;
+}
+
+function hasOrbReward(quest) {
+  if (!quest?.config) return false;
+  const cfg = quest.config;
+  const rewards = cfg.rewards_config?.rewards || cfg.rewardsConfig?.rewards;
+  if (Array.isArray(rewards)) {
+    for (const r of rewards) {
+      if (r?.type === 4) return true; // Type 4 là phần thưởng ORB trong Discord Quests
+      if ((r?.orbQuantity || r?.orb_quantity || r?.premiumOrbQuantity || r?.premium_orb_quantity) > 0) return true;
+      const rName = (r?.messages?.name || r?.name || '').toLowerCase();
+      if (rName.includes('orb')) return true;
+    }
+  }
+  const title = (
+    cfg.messages?.quest_name ||
+    cfg.messages?.questName ||
+    cfg.messages?.game_title ||
+    cfg.messages?.gameTitle ||
+    cfg.messages?.game_name ||
+    cfg.messages?.gameName ||
+    cfg.application?.name ||
+    ''
+  ).toLowerCase();
+  return title.includes('orb');
 }
 
 function isVideoQuest(quest) {
   if (!quest) return false;
-  if (quest.config?.video_metadata || quest.config?.videoMetadata) return true;
-  if (quest.config?.quest_type === 1 || quest.config?.quest_type === 'video') return true;
+  const cfg = quest.config || {};
 
+  // 1. Kiểm tra video metadata
+  if (cfg.video_metadata || cfg.videoMetadata || cfg.video_metadata_v2 || cfg.videoMetadataV2) return true;
+
+  // 2. Kiểm tra quest_type
+  if (cfg.quest_type === 1 || cfg.questType === 1 || cfg.quest_type === 'video' || cfg.questType === 'video') return true;
+
+  // 3. Kiểm tra các task trong cấu hình
   const tasks = extractQuestTasks(quest);
   for (const k of Object.keys(tasks)) {
     const upper = k.toUpperCase();
-    if (upper.includes('VIDEO') || upper.startsWith('WATCH_')) {
+    if (
+      upper.includes('VIDEO') ||
+      upper.startsWith('WATCH_') ||
+      upper.includes('WATCH') ||
+      upper.includes('TRAILER')
+    ) {
       return true;
     }
   }
 
-  // Nhận diện theo tên/tiêu đề nhiệm vụ (trailer, video, xem)
+  // 4. Kiểm tra user_status progress keys
+  if (quest.user_status?.progress && typeof quest.user_status.progress === 'object') {
+    for (const k of Object.keys(quest.user_status.progress)) {
+      const upper = k.toUpperCase();
+      if (upper.includes('VIDEO') || upper.startsWith('WATCH_') || upper.includes('WATCH') || upper.includes('TRAILER')) {
+        return true;
+      }
+    }
+  }
+
+  // 5. Kiểm tra tiêu đề / tên nhiệm vụ (cả snake_case và camelCase)
   const title = (
-    quest.config?.messages?.quest_name ||
-    quest.config?.messages?.game_title ||
-    quest.config?.messages?.game_name ||
-    quest.config?.application?.name ||
+    cfg.messages?.quest_name ||
+    cfg.messages?.questName ||
+    cfg.messages?.game_title ||
+    cfg.messages?.gameTitle ||
+    cfg.messages?.game_name ||
+    cfg.messages?.gameName ||
+    cfg.application?.name ||
     ''
   ).toLowerCase();
-  if (title.includes('video') || title.includes('xem') || title.includes('watch') || title.includes('trailer')) {
+
+  if (
+    title.includes('video') ||
+    title.includes('xem') ||
+    title.includes('watch') ||
+    title.includes('trailer') ||
+    title.includes('clip')
+  ) {
     return true;
+  }
+
+  // 6. Nhiệm vụ thưởng điểm ORB không có yêu cầu chơi game PC bắt buộc
+  if (hasOrbReward(quest)) {
+    const taskKeys = Object.keys(tasks).map(k => k.toUpperCase());
+    const hasGameTask = taskKeys.some(k => k.startsWith('PLAY_') && !k.includes('VIDEO'));
+    if (!hasGameTask) {
+      return true;
+    }
   }
 
   return false;
@@ -762,7 +886,7 @@ function getVideoTaskInfo(quest) {
   let targetSeconds = 30;
 
   // Đọc duration từ video_metadata nếu có
-  const meta = quest?.config?.video_metadata || quest?.config?.videoMetadata;
+  const meta = quest?.config?.video_metadata || quest?.config?.videoMetadata || quest?.config?.video_metadata_v2 || quest?.config?.videoMetadataV2;
   if (meta) {
     if (typeof meta.duration_seconds === 'number' && meta.duration_seconds > 0) {
       targetSeconds = meta.duration_seconds;
@@ -781,7 +905,7 @@ function getVideoTaskInfo(quest) {
   } else {
     for (const [k, v] of Object.entries(tasks)) {
       const upper = k.toUpperCase();
-      if (upper.includes('VIDEO') || upper.startsWith('WATCH_')) {
+      if (upper.includes('VIDEO') || upper.startsWith('WATCH_') || upper.includes('WATCH') || upper.includes('TRAILER')) {
         taskKey = k;
         if (typeof v?.target === 'number' && v.target > 0) {
           targetSeconds = v.target;
@@ -804,7 +928,7 @@ function getVideoTaskInfo(quest) {
   }
 
   let currentSeconds = 0;
-  if (quest?.user_status?.progress) {
+  if (quest?.user_status?.progress && typeof quest.user_status.progress === 'object') {
     const p = quest.user_status.progress;
     if (typeof p[taskKey]?.value === 'number') {
       currentSeconds = p[taskKey].value;
@@ -819,7 +943,7 @@ function getVideoTaskInfo(quest) {
     }
   }
 
-  return { taskKey, targetSeconds, currentSeconds };
+  return { taskKey, targetSeconds: Math.max(targetSeconds, 15), currentSeconds };
 }
 
 function getQuestProgressSeconds(quest) {
@@ -1359,7 +1483,7 @@ async function runAutoQuestForToken(token, options = {}) {
 
     try {
       const res = await completeSingleQuest(token, quest, {
-        autoClaim: options.autoClaim,
+        autoClaim: options.autoClaim === true,
         heartbeatDelayMs: options.heartbeatDelayMs,
         onProgress: (p) =>
           onProgress({

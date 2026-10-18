@@ -23,7 +23,7 @@ const {
 } = require('./questTokenWorker');
 
 const TOKEN_CACHE_PATH = path.join(__dirname, '..', 'data', 'saved_quest_token.txt');
-const DEFAULT_INTERVAL_MINUTES = 60;
+const DEFAULT_INTERVAL_MINUTES = 20;
 
 let schedulerTimer = null;
 let discordClient = null;
@@ -217,8 +217,8 @@ async function scanUserQuests(subscriber, client, options = {}) {
   const now = Date.now();
   const activeQuests = allQuests.filter(isQuestActive);
 
-  // Một nhiệm vụ chỉ coi là cần làm khi chưa hoàn thành và chưa claim:
-  const pendingQuests = activeQuests.filter((q) => !q.user_status?.completed_at && !q.user_status?.claimed_at);
+  // Một nhiệm vụ cần làm hoặc cần nhận thưởng (chưa claim):
+  const pendingQuests = activeQuests.filter((q) => !q.user_status?.claimed_at);
 
   if (pendingQuests.length === 0) {
     getDb()
@@ -271,7 +271,7 @@ async function scanUserQuests(subscriber, client, options = {}) {
             const staggerDelay = options.heartbeatDelayMs && options.heartbeatDelayMs < 1000 ? 5 : 2500;
             await new Promise((r) => setTimeout(r, idx * staggerDelay));
           }
-          return completeSingleQuest(token, quest, options);
+          return completeSingleQuest(token, quest, { autoClaim: true, ...options });
         })();
       })
     );
