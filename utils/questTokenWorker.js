@@ -323,58 +323,52 @@ async function completeSingleQuest(token, quest, options = {}) {
     return await completeVideoQuest(token, quest, options);
   }
 
-  // Nhiệm vụ mini-game trong Activity Discord (yêu cầu mở trực tiếp trong Discord)
-  if (tasks.ACHIEVEMENT_IN_ACTIVITY || tasks.ACHIEVEMENT_IN_GAME) {
-    return {
-      questId,
-      questName,
-      enrolled: true,
-      completed: false,
-      claimed: false,
-      message: 'Nhiệm vụ dạng Hoạt động Discord (Activity mini-game). Bạn vui lòng mở trực tiếp trên Discord để chơi và nhận quà nhé!',
-    };
-  }
+  // Xử lý nhiệm vụ Discord Activity hoặc Mini-game (Valorant Aces, v.v.)
+  const isActivity = !!(tasks.PLAY_ACTIVITY || tasks.ACHIEVEMENT_IN_ACTIVITY || tasks.ACHIEVEMENT_IN_GAME);
+  if (isActivity) {
+    const actTaskName = ['PLAY_ACTIVITY', 'ACHIEVEMENT_IN_ACTIVITY', 'ACHIEVEMENT_IN_GAME'].find((k) => tasks[k] != null) || Object.keys(tasks)[0];
+    const actTaskData = tasks[actTaskName] || {};
+    const actAppId = actTaskData.applications?.[0]?.id || quest.config?.application?.id || quest.config?.application_id;
+    const targetSeconds = actTaskData.target || 900;
+    let currentSeconds = quest.user_status?.progress?.[actTaskName]?.value ?? quest.user_status?.stream_progress_seconds ?? 0;
 
-  // Nhiệm vụ chơi game hoặc stream
-  const taskData =
-    tasks.PLAY_ON_DESKTOP ||
-    tasks.STREAM_ON_DESKTOP ||
-    tasks.PLAY_ON_PLAYSTATION ||
-    tasks.PLAY_ON_XBOX ||
-    tasks.PLAY_ACTIVITY ||
-    {};
-  const applicationId =
-    quest.config?.application?.id ||
-    taskData?.applications?.[0]?.id ||
-    quest.config?.application_id;
+    // Tìm DM channel của user để mô phỏng stream_key
+    let channelId = null;
+    try {
+      const dmRes = await requestDiscord('https://discord.com/api/v9/users/@me/channels', {
+        method: 'GET',
+        headers: getHeaders(token),
+      });
+      if (dmRes.ok) {
+        const dms = await dmRes.json();
+        if (Array.isArray(dms) && dms.length > 0) channelId = dms[0].id;
+      }
+    } catch {}
+    if (!channelId) channelId = '1000000000000000000';
+    const streamKey = `call:${channelId}:${Math.floor(Math.random() * 9000) + 1000}`;
 
-  const targetSeconds =
-    tasks.PLAY_ON_DESKTOP?.target ||
-    tasks.STREAM_ON_DESKTOP?.target ||
-    tasks.PLAY_ACTIVITY?.target ||
-    (quest.config?.stream_duration_requirement_minutes ? quest.config.stream_duration_requirement_minutes * 60 : 900);
-
-    let currentSeconds = quest.user_status?.stream_progress_seconds || 0;
-    const heartbeatDelay = options.heartbeatDelayMs ?? 2000;
-    const maxLoops = Math.ceil(targetSeconds / 30) + 3;
+    const maxLoops = Math.ceil(targetSeconds / 20) + 10;
     let loops = 0;
 
     try {
       while (currentSeconds < targetSeconds && loops < maxLoops) {
         loops++;
-        const hb = await sendHeartbeat(token, questId, { terminal: false, applicationId });
-
+        const hb = await sendHeartbeat(token, questId, { streamKey, terminal: false, applicationId: actAppId });
         if (hb?.user_status?.completed_at || hb?.completed_at) {
           currentSeconds = targetSeconds;
           break;
         }
 
-        if (typeof hb?.stream_progress_seconds === 'number') {
-          currentSeconds = hb.stream_progress_seconds;
-        } else if (typeof hb?.user_status?.stream_progress_seconds === 'number') {
-          currentSeconds = hb.user_status.stream_progress_seconds;
+        const prog =
+          hb?.user_status?.progress?.[actTaskName]?.value ??
+          hb?.progress?.[actTaskName]?.value ??
+          hb?.user_status?.stream_progress_seconds ??
+          hb?.stream_progress_seconds;
+
+        if (typeof prog === 'number' && prog > currentSeconds) {
+          currentSeconds = prog;
         } else {
-          currentSeconds += 30;
+          currentSeconds += 20;
         }
 
         if (options.onProgress) {
@@ -388,11 +382,11 @@ async function completeSingleQuest(token, quest, options = {}) {
         }
 
         if (currentSeconds >= targetSeconds) break;
-        await new Promise((r) => setTimeout(r, heartbeatDelay));
+        await new Promise((r) => setTimeout(r, options.heartbeatDelayMs ?? 20000));
       }
 
       try {
-        await sendHeartbeat(token, questId, { terminal: true, applicationId });
+        await sendHeartbeat(token, questId, { streamKey, terminal: true, applicationId: actAppId });
       } catch {}
 
       const reward = await claimQuestReward(token, questId);
@@ -411,9 +405,94 @@ async function completeSingleQuest(token, quest, options = {}) {
         completed: false,
         claimed: false,
         requiresDesktop: true,
-        message: 'Đã tự động nhận (Accept). Yêu cầu mở Discord Desktop hoặc dùng script 1-click.',
+        message: 'Đã tự động nhận (Accept). Nhiệm vụ Hoạt động yêu cầu mở Discord Desktop hoặc chạy Script F12.',
       };
     }
+  }
+
+  // Nhiệm vụ chơi game hoặc stream (Where Winds Meet, Clean Crew Roblox, v.v.)
+  const taskName =
+    ['PLAY_ON_DESKTOP', 'STREAM_ON_DESKTOP', 'PLAY_ON_PLAYSTATION', 'PLAY_ON_XBOX']
+      .find((k) => tasks[k] != null) || Object.keys(tasks)[0];
+  const taskData = tasks[taskName] || {};
+  // Ưu tiên application ID từ taskConfigV2 (cho phép nhận đúng app Roblox thay vì Clean Crew)
+  const applicationId =
+    taskData?.applications?.[0]?.id ||
+    quest.config?.application?.id ||
+    quest.config?.application_id;
+
+  const targetSeconds =
+    taskData.target ||
+    (quest.config?.stream_duration_requirement_minutes ? quest.config.stream_duration_requirement_minutes * 60 : 900);
+
+  let currentSeconds =
+    quest.user_status?.progress?.[taskName]?.value ??
+    quest.user_status?.stream_progress_seconds ??
+    0;
+
+  const heartbeatDelay = options.heartbeatDelayMs ?? 20000;
+  const maxLoops = Math.ceil(targetSeconds / 20) + 10;
+  let loops = 0;
+
+  try {
+    while (currentSeconds < targetSeconds && loops < maxLoops) {
+      loops++;
+      const hb = await sendHeartbeat(token, questId, { terminal: false, applicationId });
+
+      if (hb?.user_status?.completed_at || hb?.completed_at) {
+        currentSeconds = targetSeconds;
+        break;
+      }
+
+      const serverProgress =
+        hb?.user_status?.progress?.[taskName]?.value ??
+        hb?.progress?.[taskName]?.value ??
+        hb?.user_status?.stream_progress_seconds ??
+        hb?.stream_progress_seconds;
+
+      if (typeof serverProgress === 'number' && serverProgress > currentSeconds) {
+        currentSeconds = serverProgress;
+      } else {
+        currentSeconds += 30;
+      }
+
+      if (options.onProgress) {
+        options.onProgress({
+          questId,
+          questName,
+          currentSeconds: Math.min(currentSeconds, targetSeconds),
+          targetSeconds,
+          percent: Math.min(100, Math.round((currentSeconds / targetSeconds) * 100)),
+        });
+      }
+
+      if (currentSeconds >= targetSeconds) break;
+      await new Promise((r) => setTimeout(r, heartbeatDelay));
+    }
+
+    try {
+      await sendHeartbeat(token, questId, { terminal: true, applicationId });
+    } catch {}
+
+    const reward = await claimQuestReward(token, questId);
+    return {
+      questId,
+      questName,
+      completed: true,
+      claimed: true,
+      reward,
+    };
+  } catch (err) {
+    return {
+      questId,
+      questName,
+      enrolled: true,
+      completed: false,
+      claimed: false,
+      requiresDesktop: true,
+      message: 'Đã tự động nhận (Accept). Nhiệm vụ game PC bảo mật cao yêu cầu mở Discord Desktop hoặc chạy Script F12.',
+    };
+  }
 }
 
 /**

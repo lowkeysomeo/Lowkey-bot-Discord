@@ -167,9 +167,7 @@ async function scanUserQuests(subscriber, client) {
     const isVideo = !!(tasks.WATCH_VIDEO || tasks.WATCH_VIDEO_ON_MOBILE);
 
     try {
-      const res = await completeSingleQuest(token, quest, {
-        heartbeatDelayMs: 1500,
-      });
+      const res = await completeSingleQuest(token, quest);
 
       if (res.completed) {
         actions.push({

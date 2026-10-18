@@ -573,7 +573,7 @@ function createDashboard(client, options = {}) {
         })();
         return json(res, 200, { ok: true });
       }
-      const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/favicon.svg': ['favicon.svg', 'image/svg+xml'] };
+      const assets = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/favicon.svg': ['favicon.svg', 'image/svg+xml'], '/quest.js': ['quest.js', 'text/javascript'] };
       if (req.method === 'GET' && Object.hasOwn(assets, route)) {
         const [file, type] = assets[route];
         res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8` });

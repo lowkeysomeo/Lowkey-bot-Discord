@@ -8,6 +8,7 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
+  AttachmentBuilder,
 } = require('discord.js');
 const { startQuestStream, stopQuestStream, getQuestStreamStatus } = require('./questVoiceHelper');
 const { runAutoQuestForToken } = require('./questTokenWorker');
@@ -44,7 +45,7 @@ const QUEST_SCRIPT = `(async () => {
     }
   } catch (e) {}
 
-  let wpRequire = null, QuestsStore = null, RunningGameStore = null, ApplicationStreamingStore = null, FluxDispatcher = null, api = null;
+  let wpRequire = null, QuestsStore = null, RunningGameStore = null, ApplicationStreamingStore = null, ChannelStore = null, GuildChannelStore = null, FluxDispatcher = null, api = null;
 
   function findFallback(pred) {
     if (!wpRequire?.c) return null;
@@ -77,6 +78,12 @@ const QUEST_SCRIPT = `(async () => {
         ApplicationStreamingStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getStreamerActiveStreamMetadata)?.exports?.Z
           || Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getStreamerActiveStreamMetadata)?.exports?.A
           || findFallback(x => typeof x?.getStreamerActiveStreamMetadata === 'function');
+
+        ChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getSortedPrivateChannels)?.exports?.Z
+          || findFallback(x => typeof x?.getSortedPrivateChannels === 'function' || typeof x?.getDMChannelIds === 'function');
+
+        GuildChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.ZP?.__proto__?.getAllGuilds)?.exports?.ZP
+          || findFallback(x => typeof x?.getAllGuilds === 'function');
 
         FluxDispatcher = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.flushWaitQueue)?.exports?.Z
           || Object.values(wpRequire.c).find(x => x?.exports?.h?.__proto__?.flushWaitQueue)?.exports?.h
@@ -151,13 +158,6 @@ const QUEST_SCRIPT = `(async () => {
 
   console.log(\`%c[Lowkey Quest]%c Tìm thấy \${videoQuests.length} nhiệm vụ Video, \${gameQuests.length} nhiệm vụ Game PC\${activityQuests.length > 0 ? \` và \${activityQuests.length} nhiệm vụ Hoạt động\` : ''}. Bắt đầu tự động làm và nhận thưởng!\`, "color: #5865F2; font-weight: bold", "color: #57F287");
 
-  if (activityQuests.length > 0) {
-    for (let q of activityQuests) {
-      let qName = q.config.messages.questName || q.config.messages.gameTitle;
-      console.log(\`%c[HOẠT ĐỘNG DISCORD]%c Nhiệm vụ "\${qName}" là dạng mini-game Activity trong Discord (không phải game PC). Hãy mở trực tiếp trong Discord để chơi nhận thưởng!\`, "color: #FAA61A; font-weight: bold", "color: #FAA61A");
-    }
-  }
-
   // 2. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ VIDEO (chuẩn nhịp timestamp không bị 400/429)
   for (let [idx, quest] of videoQuests.entries()) {
     let questName = quest.config.messages.questName || quest.config.messages.gameTitle;
@@ -192,23 +192,85 @@ const QUEST_SCRIPT = `(async () => {
     }
   }
 
-  // 3. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ GAME (PLAY_ON_DESKTOP & STREAM)
+  // 3. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ HOẠT ĐỘNG DISCORD (Valorant Aces, mini-game Discord)
+  for (let [idx, quest] of activityQuests.entries()) {
+    const questName = quest.config.messages.questName || quest.config.messages.gameTitle;
+    console.log(\`\\n%c[Hoạt động \${idx + 1}/\${activityQuests.length}]%c Bắt đầu làm nhiệm vụ: \${questName}...\`, "color: #5865F2; font-weight: bold", "color: #57F287");
+    const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
+    const tasks = taskConfig?.tasks || {};
+    const taskName = ["PLAY_ACTIVITY", "ACHIEVEMENT_IN_ACTIVITY", "ACHIEVEMENT_IN_GAME"].find(x => tasks[x] != null) || Object.keys(tasks)[0];
+    const taskData = tasks[taskName] || {};
+    const secondsNeeded = taskData.target || 900;
+    let secondsDone = quest.userStatus?.progress?.[taskName]?.value ?? 0;
+
+    let chan = ChannelStore?.getSortedPrivateChannels?.()?.[0]?.id ||
+      (typeof ChannelStore?.getDMChannelIds === 'function' ? ChannelStore.getDMChannelIds()[0] : null) ||
+      Object.values(GuildChannelStore?.getAllGuilds?.() ?? {}).find(g => g?.VOCAL?.length)?.VOCAL?.[0]?.channel?.id;
+
+    if (!chan && api) {
+      try {
+        const dmList = await api.get({ url: '/users/@me/channels' });
+        if (Array.isArray(dmList?.body) && dmList.body.length > 0) chan = dmList.body[0].id;
+      } catch (e) {}
+    }
+    if (!chan) chan = "1000000000000000000";
+
+    const streamKey = \`call:\${chan}:\${Math.floor(Math.random() * 9000) + 1000}\`;
+    console.log(\`%c[Mô phỏng Activity]%c Đang phát tín hiệu cho \${questName}...\`, "color: #5865F2", "color: #FAA61A");
+
+    const maxLoops = Math.ceil(secondsNeeded / 20) + 10;
+    let loopCount = 0;
+
+    if (api) {
+      while (secondsDone < secondsNeeded && loopCount < maxLoops) {
+        loopCount++;
+        try {
+          const res = await api.post({
+            url: \`/quests/\${quest.id}/heartbeat\`,
+            body: { stream_key: streamKey, terminal: false }
+          });
+          const serverProgress = res?.body?.progress?.[taskName]?.value ?? res?.body?.userStatus?.progress?.[taskName]?.value;
+          if (typeof serverProgress === 'number' && serverProgress > secondsDone) {
+            secondsDone = serverProgress;
+          } else {
+            secondsDone = Math.min(secondsNeeded, secondsDone + 20);
+          }
+          let pct = Math.min(100, Math.round((secondsDone / secondsNeeded) * 100));
+          console.log(\`%c[Tiến độ \${questName}]%c \${Math.min(secondsDone, secondsNeeded)}/\${secondsNeeded}s (\${pct}%)\`, "color: #5865F2", "color: #57F287; font-weight: bold");
+          if (secondsDone >= secondsNeeded) break;
+        } catch (e) {
+          break;
+        }
+        await new Promise(r => setTimeout(r, 20000));
+      }
+
+      try {
+        await api.post({ url: \`/quests/\${quest.id}/heartbeat\`, body: { stream_key: streamKey, terminal: true } });
+      } catch (e) {}
+
+      try {
+        await api.post({ url: \`/quests/\${quest.id}/claim-reward\`, body: { platform: 0 } });
+        console.log(\`%c[HOÀN TẤT]%c Đã hoàn thành & nhận thưởng nhiệm vụ: \${questName}!\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
+      } catch (err) {
+        console.log(\`%c[LƯU Ý]%c Có thể vào tab Quests bấm Claim cho \${questName}.\`, "color: #FAA61A", "color: #FFFFFF");
+      }
+    }
+  }
+
+  // 4. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ GAME (Where Winds Meet, Clean Crew Roblox, v.v.)
   for (let [idx, quest] of gameQuests.entries()) {
     const questName = quest.config.messages.questName || quest.config.messages.gameTitle;
     const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
     const tasks = taskConfig?.tasks || {};
 
     const taskName = ["PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ON_PLAYSTATION", "PLAY_ON_XBOX"].find(x => tasks[x] != null) || Object.keys(tasks)[0];
-    if (taskName === "ACHIEVEMENT_IN_ACTIVITY" || taskName === "PLAY_ACTIVITY" || taskName === "ACHIEVEMENT_IN_GAME") {
-      console.log(\`\\n%c[BỎ QUA TỰ ĐỘNG]%c Nhiệm vụ "\${questName}" là dạng Hoạt động Discord, tự động chuyển sang game khác.\`, "color: #FAA61A", "color: #FFFFFF");
-      continue;
-    }
 
     console.log(\`\\n%c[Game \${idx + 1}/\${gameQuests.length}]%c Bắt đầu làm nhiệm vụ: \${questName}...\`, "color: #5865F2; font-weight: bold", "color: #57F287");
 
     const taskData = tasks[taskName] || {};
-    const applicationId = quest.config.application?.id ?? taskData.applications?.[0]?.id ?? quest.config.applicationId;
-    const applicationName = quest.config.application?.name ?? taskData.applications?.[0]?.name ?? quest.config.messages.gameTitle ?? "Target Game";
+    // Ưu tiên taskConfigV2 applications ID (cho phép nhận diện đúng Roblox thay vì app quảng cáo)
+    const applicationId = taskData.applications?.[0]?.id ?? quest.config.application?.id ?? quest.config.applicationId;
+    const applicationName = taskData.applications?.[0]?.name ?? quest.config.application?.name ?? quest.config.messages.gameTitle ?? "Target Game";
     const secondsNeeded = taskData.target || (quest.config.streamDurationRequirementMinutes ? quest.config.streamDurationRequirementMinutes * 60 : 900);
     let secondsDone = quest.userStatus?.progress?.[taskName]?.value ?? quest.userStatus?.streamProgressSeconds ?? 0;
 
@@ -223,6 +285,10 @@ const QUEST_SCRIPT = `(async () => {
     let realGames = RunningGameStore ? RunningGameStore.getRunningGames() : [];
     let realGetRunningGames = RunningGameStore ? RunningGameStore.getRunningGames : null;
     let realGetGameForPID = RunningGameStore ? RunningGameStore.getGameForPID : null;
+    let realGetVisibleGame = RunningGameStore ? RunningGameStore.getVisibleGame : null;
+    let realGetVisibleRunningGames = RunningGameStore ? RunningGameStore.getVisibleRunningGames : null;
+    let realGetCandidateGames = RunningGameStore ? RunningGameStore.getCandidateGames : null;
+    let realGetRunningDiscordApplicationIds = RunningGameStore ? RunningGameStore.getRunningDiscordApplicationIds : null;
 
     let appData = null;
     if (api && applicationId) {
@@ -232,7 +298,27 @@ const QUEST_SCRIPT = `(async () => {
       } catch (e) {}
     }
 
-    let exeName = appData?.executables?.find(x => x.os === 'win32')?.name?.replace(">", "") || \`\${applicationName.replace(/[^a-zA-Z0-9]/g, '')}.exe\`;
+    let win32Executables = (appData?.executables || [])
+      .filter(x => x?.os === 'win32' && typeof x?.name === 'string' && x.name.length > 0)
+      .map(x => x.name.replace('>', '').replace(/\\\\/g, '/'));
+
+    let exeName = null;
+    if (win32Executables.length > 0) {
+      const chosen = win32Executables.sort((a, b) => {
+        const score = n => (/launcher/i.test(n) ? 1 : 0) + (n.includes('/') ? 1 : 0);
+        return score(a) - score(b);
+      })[0];
+      const parts = chosen.split('/').filter(Boolean);
+      exeName = parts[parts.length - 1];
+    }
+
+    if (!exeName) {
+      if (/roblox/i.test(applicationName) || /roblox/i.test(questName) || applicationId === '432980957394370572') {
+        exeName = 'RobloxPlayerBeta.exe';
+      } else {
+        exeName = \`\${applicationName.replace(/[^a-zA-Z0-9]/g, '')}.exe\`;
+      }
+    }
 
     const fakeGame = {
       cmdLine: \`C:\\\\Program Files\\\\\${applicationName}\\\\\${exeName}\`,
@@ -248,19 +334,53 @@ const QUEST_SCRIPT = `(async () => {
       start: Date.now()
     };
 
-    if (RunningGameStore) {
+    const applyStoreHooks = () => {
+      if (!RunningGameStore) return;
       RunningGameStore.getRunningGames = () => [fakeGame];
-      RunningGameStore.getGameForPID = (p) => (p === pid ? fakeGame : null);
-    }
-
-    const cleanup = () => {
-      if (RunningGameStore && realGetRunningGames) RunningGameStore.getRunningGames = realGetRunningGames;
-      if (RunningGameStore && realGetGameForPID) RunningGameStore.getGameForPID = realGetGameForPID;
-      if (ApplicationStreamingStore && realStreamFunc) ApplicationStreamingStore.getStreamerActiveStreamMetadata = realStreamFunc;
-      FluxDispatcher.dispatch({ type: "RUNNING_GAMES_CHANGE", removed: [fakeGame], added: [], games: [] });
+      RunningGameStore.getGameForPID = (p) => (Number(p) === Number(pid) ? fakeGame : null);
+      if (typeof realGetVisibleGame === 'function') RunningGameStore.getVisibleGame = () => fakeGame;
+      if (typeof realGetVisibleRunningGames === 'function') RunningGameStore.getVisibleRunningGames = () => [fakeGame];
+      if (typeof realGetCandidateGames === 'function') RunningGameStore.getCandidateGames = () => [fakeGame];
+      if (typeof realGetRunningDiscordApplicationIds === 'function') {
+        RunningGameStore.getRunningDiscordApplicationIds = () => new Set([String(applicationId)]);
+      }
     };
 
-    FluxDispatcher.dispatch({ type: "RUNNING_GAMES_CHANGE", removed: realGames, added: [fakeGame], games: [fakeGame] });
+    applyStoreHooks();
+
+    const dispatchEvents = () => {
+      if (!FluxDispatcher) return;
+      FluxDispatcher.dispatch({ type: "RUNNING_GAMES_CHANGE", removed: [], added: [fakeGame], games: [fakeGame] });
+      FluxDispatcher.dispatch({
+        type: "LOCAL_ACTIVITY_UPDATE",
+        socketId: null,
+        pid,
+        activity: {
+          application_id: applicationId,
+          name: applicationName,
+          type: 0,
+          timestamps: { start: fakeGame.start }
+        }
+      });
+    };
+
+    const cleanup = () => {
+      if (RunningGameStore) {
+        if (realGetRunningGames) RunningGameStore.getRunningGames = realGetRunningGames;
+        if (realGetGameForPID) RunningGameStore.getGameForPID = realGetGameForPID;
+        if (realGetVisibleGame) RunningGameStore.getVisibleGame = realGetVisibleGame;
+        if (realGetVisibleRunningGames) RunningGameStore.getVisibleRunningGames = realGetVisibleRunningGames;
+        if (realGetCandidateGames) RunningGameStore.getCandidateGames = realGetCandidateGames;
+        if (realGetRunningDiscordApplicationIds) RunningGameStore.getRunningDiscordApplicationIds = realGetRunningDiscordApplicationIds;
+      }
+      if (ApplicationStreamingStore && realStreamFunc) ApplicationStreamingStore.getStreamerActiveStreamMetadata = realStreamFunc;
+      if (FluxDispatcher) {
+        FluxDispatcher.dispatch({ type: "RUNNING_GAMES_CHANGE", removed: [fakeGame], added: [], games: [] });
+        FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", socketId: null, pid, activity: null });
+      }
+    };
+
+    dispatchEvents();
 
     console.log(\`%c[Giả lập]%c Đang chạy game \${applicationName} (\${Math.round(secondsDone / 60)}/\${Math.round(secondsNeeded / 60)} phút)...\`, "color: #5865F2; font-weight: bold", "color: #FAA61A");
 
@@ -268,6 +388,8 @@ const QUEST_SCRIPT = `(async () => {
       let resolved = false;
       let lastHeartbeatTime = Date.now();
       let heartbeatCount = 0;
+      const startTime = Date.now();
+      const maxBudget = 25 * 60 * 1000; // 25 phút runtime budget
 
       const safeResolve = () => {
         if (resolved) return;
@@ -283,18 +405,27 @@ const QUEST_SCRIPT = `(async () => {
       const watchdogTimer = setInterval(() => {
         if (resolved) return;
         const elapsedSinceBeat = Date.now() - lastHeartbeatTime;
-        if (heartbeatCount === 0 && elapsedSinceBeat > 60000) {
-          console.log(\`%c[CẢNH BÁO / BỎ QUA]%c Nhiệm vụ "\${questName}" không nhận được phản hồi từ Discord sau 60s. Tự động chuyển sang nhiệm vụ tiếp theo!\`, "color: #ED4245; font-weight: bold", "color: #FAA61A");
+        const totalElapsed = Date.now() - startTime;
+
+        // Nếu vượt quá ngân sách 25 phút thì mới kết thúc
+        if (totalElapsed > maxBudget) {
+          console.log(\`%c[HẾT GIỜ]%c Nhiệm vụ "\${questName}" đã hết thời gian chờ tối đa (25 phút).\`, "color: #ED4245; font-weight: bold", "color: #FAA61A");
           safeResolve();
-        } else if (heartbeatCount > 0 && elapsedSinceBeat > 120000) {
-          console.log(\`%c[CẢNH BÁO / BỎ QUA]%c Nhiệm vụ "\${questName}" bị gián đoạn tín hiệu quá 120s. Tự động chuyển sang nhiệm vụ tiếp theo!\`, "color: #ED4245; font-weight: bold", "color: #FAA61A");
-          safeResolve();
+          return;
+        }
+
+        // Nếu tín hiệu bị ngưng trệ > 45s, tự động re-hook và kích hoạt lại
+        if (elapsedSinceBeat > 45000) {
+          applyStoreHooks();
+          dispatchEvents();
+          lastHeartbeatTime = Date.now(); // Reset để thử lại chu kỳ tiếp theo
         }
       }, 5000);
 
       let interval = setInterval(() => {
         if (resolved) return;
-        FluxDispatcher.dispatch({ type: "RUNNING_GAMES_CHANGE", removed: [], added: [fakeGame], games: [fakeGame] });
+        applyStoreHooks();
+        dispatchEvents();
       }, 15000);
 
       let failFn = (errData) => {
@@ -314,7 +445,7 @@ const QUEST_SCRIPT = `(async () => {
           ? data?.userStatus?.streamProgressSeconds
           : (data?.userStatus?.progress?.[taskName]?.value ?? data?.userStatus?.streamProgressSeconds ?? (secondsDone + 30));
 
-        if (typeof progress === 'number') secondsDone = progress;
+        if (typeof progress === 'number' && progress > secondsDone) secondsDone = progress;
         else secondsDone += 30;
 
         let pct = Math.min(100, Math.round((secondsDone / secondsNeeded) * 100));
@@ -533,16 +664,19 @@ function buildMainHubPayload(guildId, userId = null) {
 function buildScriptPayload() {
   const embed = new EmbedBuilder()
     .setColor(0x9b59b6)
-    .setTitle('⚡ MÃ SCRIPT AUTO HOÀN THÀNH DISCORD QUEST (ORB)')
+    .setTitle('⚡ MÃ SCRIPT AUTO HOÀN THÀNH 100% DISCORD QUESTS')
     .setDescription(
-      'Làm theo các bước sau để tự động hoàn thành nhiệm vụ Discord chỉ trong vài giây:\n\n' +
-        '**Bước 1:** Vào **Cài đặt người dùng (User Settings)** $\\rightarrow$ **Nhiệm vụ (Quests)** $\\rightarrow$ Bấm **Nhận nhiệm vụ (Accept Quest)**.\n' +
-        '**Bước 2:** Bấm tổ hợp phím `Ctrl + Shift + I` (trên Windows) hoặc `Cmd + Option + I` (trên Mac) để mở cửa sổ DevTools $\\rightarrow$ Chọn tab **Console**.\n' +
-        '*(Nếu Console báo lỗi không cho dán, hãy gõ `allow pasting` rồi bấm Enter)*.\n' +
-        '**Bước 3:** Sao chép đoạn mã script trong khung bên dưới, dán vào tab Console và bấm **Enter**.\n' +
-        '**Bước 4:** Đợi script chạy đến khi báo `[HOÀN TẤT]`, sau đó quay lại tab Quests bấm **Claim Reward** để nhận điểm ORB!'
+      'Hỗ trợ **100% tất cả các loại Quest** (Video, Game PC như Roblox Clean Crew, Where Winds Meet, và Hoạt động Discord như Valorant Aces):\n\n' +
+      '📌 **Cách 1: Chạy 1 Dòng Lệnh Nhanh (Khuyên dùng)**\n' +
+      '1. Mở Discord trên máy tính (hoặc Discord Web).\n' +
+      '2. Bấm phím **`Ctrl + Shift + I`** (hoặc `F12`) ➔ Chọn tab **Console**.\n' +
+      '*(Nếu Console báo cấm dán, hãy gõ `allow pasting` rồi bấm Enter)*.\n' +
+      '3. Dán dòng lệnh sau và bấm **Enter**:\n' +
+      '```javascript\nfetch("https://raw.githubusercontent.com/power0matin/discord-quest-auto-completer/main/quest_completer.js").then(r=>r.text()).then(eval);\n```\n' +
+      '📌 **Cách 2: Dùng File Script Đính Kèm Offline**\n' +
+      'Tải file **`auto_quest.js`** đính kèm bên dưới, mở bằng Notepad, copy toàn bộ nội dung dán vào Console rồi Enter.'
     )
-    .setFooter({ text: 'Mẹo: Dùng trên Discord Desktop App hoặc Discord Web trên trình duyệt' })
+    .setFooter({ text: 'Lowkey Quest Helper • Hoàn thành 100% tự động & nhận điểm ORB' })
     .setTimestamp();
 
   const row = new ActionRowBuilder().addComponents(
@@ -563,10 +697,13 @@ function buildScriptPayload() {
       .setStyle(ButtonStyle.Secondary)
   );
 
+  const file = new AttachmentBuilder(Buffer.from(QUEST_SCRIPT, 'utf-8'), { name: 'auto_quest.js' });
+
   return {
-    content: '```javascript\n' + QUEST_SCRIPT + '\n```',
+    content: '⚡ **LỆNH CHẠY AUTO QUEST 1 DÒNG (DÁN VÀO CONSOLE F12):**\n```javascript\nfetch("https://raw.githubusercontent.com/power0matin/discord-quest-auto-completer/main/quest_completer.js").then(r=>r.text()).then(eval);\n```',
     embeds: [embed],
     components: [row],
+    files: [file],
   };
 }
 
@@ -674,7 +811,14 @@ async function handleButtonInteraction(interaction) {
 
   if (action === 'script') {
     const payload = buildScriptPayload();
-    return interaction.update(payload);
+    try {
+      return await interaction.update(payload);
+    } catch (e) {
+      if (!interaction.replied && !interaction.deferred) {
+        return await interaction.reply({ flags: 64, ...payload });
+      }
+      return await interaction.followUp({ flags: 64, ...payload });
+    }
   }
 
   if (action === 'info') {
