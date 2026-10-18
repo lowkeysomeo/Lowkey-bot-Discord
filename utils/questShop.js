@@ -344,7 +344,17 @@ async function processPaidOrder(orderId, client) {
           )
           .setFooter({ text: 'Lowkey Quest Shop • Dịch vụ tự động 24/7' })
           .setTimestamp();
-        user.send({ embeds: [embed] }).catch(() => {});
+        const dmSent = await user.send({ embeds: [embed] }).then(() => true).catch(() => false);
+        if (!dmSent) {
+          const { channelId } = getBankConfig();
+          const targetId = channelId || TARGET_CHANNEL_ID;
+          const ch = await client.channels.fetch(targetId).catch(() => null);
+          if (ch && ch.isTextBased()) {
+            ch.send({
+              content: `🎉 Chúc mừng <@${order.user_id}>! Đơn hàng **#${order.order_id}** (Gói Auto Quest Tháng) đã được kích hoạt thành công!\n*(Hạn dùng: **${expDate}**. Vui lòng mở tin nhắn riêng (DM) để nhận báo cáo làm quest).*`,
+            }).catch(() => {});
+          }
+        }
       }
     }
 
@@ -385,7 +395,17 @@ async function processPaidOrder(orderId, client) {
           )
           .setFooter({ text: 'Lowkey Quest Shop • Cảm ơn bạn đã tin dùng dịch vụ!' })
           .setTimestamp();
-        user.send({ embeds: [embed] }).catch(() => {});
+        const dmSent = await user.send({ embeds: [embed] }).then(() => true).catch(() => false);
+        if (!dmSent) {
+          const { channelId } = getBankConfig();
+          const targetId = channelId || TARGET_CHANNEL_ID;
+          const ch = await client.channels.fetch(targetId).catch(() => null);
+          if (ch && ch.isTextBased()) {
+            ch.send({
+              content: `🎉 Chúc mừng <@${order.user_id}>! Đơn hàng **#${order.order_id}** (${order.quest_count} nhiệm vụ) đã được hoàn tất 100% và cộng điểm ORBs!`,
+            }).catch(() => {});
+          }
+        }
       }
     }
 
@@ -669,6 +689,32 @@ function buildPaymentPayload(order) {
   const createdAt = order.created_at || Date.now();
   const expiresAt = createdAt + ORDER_EXPIRE_MS;
   const now = Date.now();
+
+  // Đơn hàng đã hoàn tất thành công: Đóng bảng thanh toán QR và hiển thị biên lai thành công
+  if (order.status === 'completed') {
+    const isMonthly = order.package_type === 'monthly';
+    const completeEmbed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle(`🎉 ĐƠN HÀNG #${order.order_id} ĐÃ THANH TOÁN THÀNH CÔNG!`)
+      .setDescription(
+        `✅ Hệ thống SePay đã xác nhận thanh toán thành công **${formatVnd(order.amount)}**!\n\n` +
+        `• **Gói dịch vụ:** ${isMonthly ? '👑 Gói Tự Động Theo Tháng (30 ngày)' : `🎯 Quest Lẻ (${order.quest_count} nhiệm vụ)`}\n` +
+        `• **Trạng thái:** ✅ Đã hoàn tất 100% & nhận điểm ORBs vào tài khoản Discord.\n` +
+        `• Bảng thanh toán mã QR này đã được đóng an toàn.`
+      )
+      .setFooter({ text: 'Lowkey Quest Shop • Cảm ơn bạn đã tin dùng dịch vụ!' })
+      .setTimestamp();
+
+    const closeRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('qshop:dismiss_notice')
+        .setLabel('Đóng Thông Báo')
+        .setEmoji('🗑️')
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    return { embeds: [completeEmbed], components: [closeRow] };
+  }
 
   // Đơn hàng quá 10 phút hoặc đã bị hủy
   if (now > expiresAt || order.status === 'cancelled') {
@@ -1133,7 +1179,8 @@ async function handleShopInteraction(interaction, client) {
     }
 
     if (order.status === 'completed') {
-      return interaction.reply({ content: '✅ Đơn hàng này đã hoàn thành trước đó!', flags: 64 });
+      const payload = buildPaymentPayload(order);
+      return interaction.update(payload);
     }
 
     const tenMinutesMs = 10 * 60 * 1000;
@@ -1141,93 +1188,132 @@ async function handleShopInteraction(interaction, client) {
       if (order.status !== 'cancelled') {
         updateOrderStatus(order.order_id, 'cancelled', { error: 'Hết hạn thanh toán (quá 10 phút)' });
       }
-      return interaction.reply({
-        content: '❌ **Đơn hàng đã hết hạn (quá 10 phút)!**\nMã QR này đã tự động bị hủy do chưa nhận được thanh toán trong vòng 10 phút. Vui lòng bấm tạo đơn mới trên bảng cửa hàng để nhận mã QR mới nhé.',
-        flags: 64,
-      });
+      const expiredPayload = buildPaymentPayload({ ...order, status: 'cancelled' });
+      return interaction.update(expiredPayload);
     }
 
-    // CHẶN BẤM LIÊN TỤC: Chỉ cho bấm 1 lần và đợi SePay xác nhận tự động
-    if ((order.check_count || 0) > 0) {
-      return interaction.reply({
-        content:
-          `⏳ **Bạn đã gửi yêu cầu xác nhận đơn hàng #${order.order_id} rồi!**\n\n` +
-          `• Hệ thống SePay đang tự động kiểm tra tài khoản mỗi 15 giây.\n` +
-          `• **Vui lòng không bấm liên tục.** Ngay khi nhận được tiền, bot sẽ tự động duyệt tiền, làm nhiệm vụ và gửi thông báo trực tiếp (DM) cho bạn!\n` +
-          `• Thời gian còn lại của mã QR: <t:${Math.floor((order.created_at + tenMinutesMs) / 1000)}:R>.`,
-        flags: 64,
-      });
+    // Cập nhật ngay trên bảng mã QR hiện tại (đóng bảng in-place)
+    await interaction.deferUpdate();
+
+    // Bước 1: Kiểm tra thanh toán SePay (thử 2 lần cách nhau 2.5s phòng khi ngân hàng trễ vài giây)
+    let autoPaid = await checkSePayPayment(order);
+    if (!autoPaid) {
+      await new Promise((r) => setTimeout(r, 2500));
+      autoPaid = await checkSePayPayment(order);
     }
 
-    // Đánh dấu đã bấm 1 lần vào Database
-    const db = getDb();
-    db.prepare('UPDATE quest_orders SET check_count = 1, checked_at = ? WHERE order_id = ?').run(Date.now(), order.order_id);
-
-    // Vô hiệu hóa nút bấm trên tin nhắn hiển thị mã QR
-    if (interaction.message && interaction.message.editable) {
-      const updatedPayload = buildPaymentPayload({ ...order, check_count: 1 });
-      await interaction.message.edit({ components: updatedPayload.components }).catch(() => {});
-    }
-
-    await interaction.deferReply({ flags: 64 });
-
-    // Bước A: Kiểm tra tự động qua SePay
-    const autoPaid = await checkSePayPayment(order);
     if (autoPaid) {
+      // ĐÓNG BẢNG MÃ QR NGAY LẬP TỨC VÀ BÁO NHẬN ĐƯỢC TIỀN
+      const processingEmbed = new EmbedBuilder()
+        .setColor(0x57f287)
+        .setTitle(`🎉 ĐÃ NHẬN ĐƯỢC TIỀN ĐƠN HÀNG #${order.order_id}!`)
+        .setDescription(
+          `✅ Hệ thống SePay đã xác nhận thanh toán thành công **${formatVnd(order.amount)}**!\n\n` +
+          `⏳ **Đang tự động cày nhiệm vụ và nhận điểm ORBs cho bạn...** Vui lòng đợi trong giây lát!`
+        )
+        .setFooter({ text: 'Lowkey Quest Shop • Bảng thanh toán QR đã đóng' })
+        .setTimestamp();
+
       await interaction.editReply({
-        content: `🎉 **ĐÃ NHẬN ĐƯỢC TIỀN!** Hệ thống đang tiến hành xử lý đơn hàng **\`${order.order_id}\`** ngay lập tức...`,
+        content: null,
+        embeds: [processingEmbed],
+        components: [],
       });
 
+      // Xử lý hoàn thành đơn hàng & gửi thông báo DM cho khách hàng
       const res = await processPaidOrder(order.order_id, client);
+
+      let resultEmbed;
       if (res.type === 'monthly') {
         const expDate = new Date(res.expiresAt).toLocaleDateString('vi-VN');
-        return interaction.editReply({
-          content: `👑 **CHÚC MỪNG BẠN!** Gói Auto Quest Tháng (30 Ngày) đã được kích hoạt thành công!\n• Hạn dùng: **${expDate}**\n• Bot đang quét và tự động cày tất cả nhiệm vụ của bạn 24/7.`,
-        });
+        resultEmbed = new EmbedBuilder()
+          .setColor(0x57f287)
+          .setTitle(`👑 KÍCH HOẠT GÓI THÁNG THÀNH CÔNG — ĐƠN #${order.order_id}`)
+          .setDescription(
+            `Cảm ơn bạn đã đăng ký **Gói Tự Động Theo Tháng (30 Ngày)** tại Lowkey Bot!\n\n` +
+            `• **Mã đơn hàng:** \`${order.order_id}\`\n` +
+            `• **Số tiền:** **${formatVnd(order.amount)}** (Đã nhận qua SePay)\n` +
+            `• **Hạn sử dụng:** Đến ngày **${expDate}**\n` +
+            `• **Trạng thái:** ✅ Bot đang chạy ngầm 24/7, tự động cày tất cả nhiệm vụ và tích lũy điểm ORB vào tài khoản của bạn!`
+          )
+          .setFooter({ text: 'Lowkey Quest Shop • Bảng thanh toán đã đóng' })
+          .setTimestamp();
       } else {
-        return interaction.editReply({
-          content: `🎉 **HOÀN THÀNH TOÀN BỘ NHIỆM VỤ!**\nĐã cày xong và nhận toàn bộ phần thưởng ORBs vào tài khoản Discord của bạn. Hãy mở **Cài đặt -> Quests** để kiểm tra nhé!`,
-        });
+        const results = res.results || [];
+        resultEmbed = new EmbedBuilder()
+          .setColor(0x57f287)
+          .setTitle(`🎉 HOÀN TẤT ĐƠN HÀNG #${order.order_id} — ĐÃ NHẬN THƯỞNG!`)
+          .setDescription(
+            `Đơn hàng Quest Lẻ của bạn đã được bot thực hiện xong 100%:\n\n` +
+            (results.length > 0
+              ? results.map((r, i) => `**${i + 1}. ${r.name}**\n↪ ${r.success ? '✅ ' + r.message : '⚠️ ' + r.error}`).join('\n\n')
+              : '✅ Hoàn thành 100% các nhiệm vụ đã chọn!') +
+            `\n\n🎁 **Phần thưởng & Điểm ORBs** đã được chuyển thẳng vào tài khoản Discord của bạn. Mở **Cài đặt -> Quests** để kiểm tra nhé!`
+          )
+          .setFooter({ text: 'Lowkey Quest Shop • Bảng thanh toán đã đóng' })
+          .setTimestamp();
+      }
+
+      const closeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('qshop:dismiss_notice')
+          .setLabel('Đóng Thông Báo')
+          .setEmoji('🗑️')
+          .setStyle(ButtonStyle.Secondary)
+      );
+
+      return interaction.editReply({
+        content: null,
+        embeds: [resultEmbed],
+        components: [closeRow],
+      });
+    }
+
+    // Nếu SePay chưa nhận được: Cập nhật thông báo nhắc nhở nhưng KHÔNG KHÓA NÚT bấm vĩnh viễn
+    const checkCount = (order.check_count || 0) + 1;
+    const db = getDb();
+    db.prepare('UPDATE quest_orders SET check_count = ?, checked_at = ? WHERE order_id = ?').run(checkCount, Date.now(), order.order_id);
+
+    // Gửi thông báo tới Admin nếu chưa gửi
+    if (checkCount === 1) {
+      const adminUser = await client.users.fetch(OWNER_ID).catch(() => null);
+      if (adminUser) {
+        const adminEmbed = new EmbedBuilder()
+          .setColor(0xfee75c)
+          .setTitle('🔔 [LOWKEY SHOP] YÊU CẦU XÁC NHẬN THANH TOÁN MỚI')
+          .setDescription(
+            `Khách hàng **<@${order.user_id}>** (${order.username}) vừa bấm báo đã chuyển tiền:\n\n` +
+            `• **Mã đơn:** \`${order.order_id}\`\n` +
+            `• **Loại gói:** ${order.package_type === 'monthly' ? '👑 **Gói Tháng (40.000đ)**' : `🎯 **Quest Lẻ (${order.quest_count} nv - ${formatVnd(order.amount)})**`}\n` +
+            `• **Số tiền:** **${formatVnd(order.amount)}**\n` +
+            `• **Nội dung CK:** \`SEVQR ${order.order_id}\`\n\n` +
+            `*Hệ thống đang tự động quét SePay. Nếu bạn đã thấy tiền vào tài khoản ngân hàng, có thể bấm nút xanh bên dưới để duyệt ngay!*`
+          )
+          .setTimestamp();
+
+        const adminRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`qshop:admin_approve:${order.order_id}`)
+            .setLabel('✅ Xác Nhận Đã Nhận Tiền')
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder()
+            .setCustomId(`qshop:admin_reject:${order.order_id}`)
+            .setLabel('❌ Chưa Nhận Được Tiền')
+            .setStyle(ButtonStyle.Danger)
+        );
+
+        adminUser.send({ embeds: [adminEmbed], components: [adminRow] }).catch(() => {});
       }
     }
 
-    // Bước B: Nếu SePay chưa nhận được hoặc chưa thấy giao dịch, gửi yêu cầu duyệt nhanh tới Admin
-    const adminUser = await client.users.fetch(OWNER_ID).catch(() => null);
-    if (adminUser) {
-      const adminEmbed = new EmbedBuilder()
-        .setColor(0xfee75c)
-        .setTitle('🔔 [LOWKEY SHOP] YÊU CẦU XÁC NHẬN THANH TOÁN MỚI')
-        .setDescription(
-          `Khách hàng **<@${order.user_id}>** (${order.username}) vừa bấm báo đã chuyển tiền:\n\n` +
-          `• **Mã đơn:** \`${order.order_id}\`\n` +
-          `• **Loại gói:** ${order.package_type === 'monthly' ? '👑 **Gói Tháng (40.000đ)**' : `🎯 **Quest Lẻ (${order.quest_count} nv - ${formatVnd(order.amount)})**`}\n` +
-          `• **Số tiền:** **${formatVnd(order.amount)}**\n` +
-          `• **Nội dung CK:** \`SEVQR ${order.order_id}\`\n\n` +
-          `*Hệ thống đang tự động quét SePay. Nếu bạn đã thấy tiền vào tài khoản ngân hàng, có thể bấm nút xanh bên dưới để duyệt ngay!*`
-        )
-        .setTimestamp();
+    const payload = buildPaymentPayload(order);
+    payload.content =
+      `⏳ **Chưa thấy giao dịch chuyển khoản cho đơn #${order.order_id}!**\n` +
+      `• Nếu bạn vừa chuyển tiền, vui lòng đợi 10-20 giây để ngân hàng chuyển tiếp qua SePay rồi bấm lại nút **Đã Chuyển Tiền / Kiểm Tra** nhé.\n` +
+      `• Vui lòng đảm bảo nội dung chuyển khoản chính xác là: \`SEVQR ${order.order_id}\`.\n` +
+      `• Hạn thanh toán: còn <t:${Math.floor((order.created_at + tenMinutesMs) / 1000)}:R>.`;
 
-      const adminRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`qshop:admin_approve:${order.order_id}`)
-          .setLabel('✅ Xác Nhận Đã Nhận Tiền')
-          .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-          .setCustomId(`qshop:admin_reject:${order.order_id}`)
-          .setLabel('❌ Chưa Nhận Được Tiền')
-          .setStyle(ButtonStyle.Danger)
-      );
-
-      adminUser.send({ embeds: [adminEmbed], components: [adminRow] }).catch(() => {});
-    }
-
-    return interaction.editReply({
-      content:
-        `⏳ **ĐÃ GHI NHẬN YÊU CẦU XÁC NHẬN ĐƠN #${order.order_id}!**\n\n` +
-        `• Bạn đã bấm xác nhận **1 lần**, hệ thống đã ghi nhận và SePay đang tự động quét đối soát.\n` +
-        `• **Bạn không cần bấm lại nữa**, bot sẽ tự động quét mỗi 15 giây và gửi tin nhắn DM ngay khi nhận được tiền.\n` +
-        `• Hạn thanh toán của mã QR: **10 phút** kể từ lúc tạo đơn (còn <t:${Math.floor((order.created_at + tenMinutesMs) / 1000)}:R>).`,
-    });
+    return interaction.editReply(payload);
   }
 
   // 8. Admin bấm duyệt thanh toán 1-Click
@@ -1272,21 +1358,30 @@ async function handleShopInteraction(interaction, client) {
     });
   }
 
-  // 11. Kiểm tra gói & tài khoản
+  // 11. Đóng thông báo hoàn tất đơn hàng
+  if (customId === 'qshop:dismiss_notice') {
+    return interaction.update({
+      content: '✅ **Đã đóng thông báo đơn hàng.** Cảm ơn bạn đã tin dùng dịch vụ Lowkey Shop!',
+      embeds: [],
+      components: [],
+    });
+  }
+
+  // 12. Kiểm tra gói & tài khoản
   if (customId === 'qshop:check_status') {
     await interaction.deferReply({ flags: 64 });
     const payload = await buildStatusPayload(interaction.user.id);
     return interaction.editReply(payload);
   }
 
-  // 12. Hướng dẫn lấy Token
+  // 13. Hướng dẫn lấy Token
   if (customId === 'qshop:token_guide') {
     const { buildTokenGuidePayload } = require('./questManager');
     const payload = buildTokenGuidePayload();
     return interaction.reply({ flags: 64, ...payload });
   }
 
-  // 13. Quét ngay bây giờ (từ menu check status)
+  // 14. Quét ngay bây giờ (từ menu check status)
   if (customId === 'qshop:scan_now') {
     await interaction.deferReply({ flags: 64 });
     const sub = getSubscriber(interaction.user.id);
@@ -1299,7 +1394,7 @@ async function handleShopInteraction(interaction, client) {
     });
   }
 
-  // 14. Bật/Tắt DM
+  // 15. Bật/Tắt DM
   if (customId === 'qshop:toggle_dm') {
     const { toggleNotifyDm } = require('./questScheduler');
     const newState = toggleNotifyDm(interaction.user.id);
@@ -1309,7 +1404,7 @@ async function handleShopInteraction(interaction, client) {
     });
   }
 
-  // 15. Cập nhật Token mới
+  // 16. Cập nhật Token mới
   if (customId === 'qshop:update_token') {
     return interaction.showModal(buildTokenModal('update'));
   }
