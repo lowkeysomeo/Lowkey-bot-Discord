@@ -318,16 +318,26 @@ async function completeVideoQuest(token, quest, options = {}) {
     await new Promise((r) => setTimeout(r, 1000));
   }
 
-  // Chờ 1.2s trước khi nhận thưởng để tránh xung đột
-  await new Promise((r) => setTimeout(r, 1200));
-  const reward = await claimQuestReward(token, questId);
+  let reward = null;
+  let claimed = false;
+  if (options.autoClaim === true) {
+    try {
+      await new Promise((r) => setTimeout(r, 1200));
+      reward = await claimQuestReward(token, questId);
+      claimed = true;
+    } catch (e) {}
+  }
 
   return {
     questId,
     questName,
     completed: true,
-    claimed: true,
+    claimed,
+    readyToClaim: !claimed,
     reward,
+    message: claimed
+      ? 'Đã hoàn thành 100% & Nhận thưởng thành công!'
+      : 'Đã hoàn thành 100%! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
   };
 }
 
@@ -600,18 +610,26 @@ async function completeSingleQuest(token, quest, options = {}) {
 
   // Nếu nhiệm vụ đã hoàn thành tiến độ (có completed_at) nhưng chưa nhận thưởng:
   if (quest.user_status?.completed_at) {
-    try {
-      const reward = await claimQuestReward(token, questId);
-      return {
-        questId,
-        questName,
-        completed: true,
-        claimed: true,
-        progressPercent: 100,
-        reward,
-        message: 'Nhiệm vụ đã hoàn thành tiến độ! Đã tự động nhận thưởng (Claim ORB) thành công.',
-      };
-    } catch (e) {}
+    let reward = null;
+    let claimed = false;
+    if (options.autoClaim === true) {
+      try {
+        reward = await claimQuestReward(token, questId);
+        claimed = true;
+      } catch (e) {}
+    }
+    return {
+      questId,
+      questName,
+      completed: true,
+      claimed,
+      readyToClaim: !claimed,
+      progressPercent: 100,
+      reward,
+      message: claimed
+        ? 'Nhiệm vụ đã hoàn thành tiến độ! Đã tự động nhận thưởng (Claim ORB) thành công.'
+        : 'Đã hoàn thành 100%! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
+    };
   }
 
   const tasks = {
@@ -640,21 +658,29 @@ async function completeSingleQuest(token, quest, options = {}) {
   let currentSeconds = getQuestProgressSeconds(quest);
 
   if (currentSeconds >= targetSeconds) {
-    try {
-      const reward = await claimQuestReward(token, questId);
-      return {
-        questId,
-        questName,
-        type: isActivity ? 'activity' : 'game',
-        completed: true,
-        claimed: true,
-        currentSeconds: targetSeconds,
-        targetSeconds,
-        progressPercent: 100,
-        reward,
-        message: 'Đã hoàn thành 100% thời gian chơi & Nhận thưởng thành công!',
-      };
-    } catch (e) {}
+    let reward = null;
+    let claimed = false;
+    if (options.autoClaim === true) {
+      try {
+        reward = await claimQuestReward(token, questId);
+        claimed = true;
+      } catch (e) {}
+    }
+    return {
+      questId,
+      questName,
+      type: isActivity ? 'activity' : 'game',
+      completed: true,
+      claimed,
+      readyToClaim: !claimed,
+      currentSeconds: targetSeconds,
+      targetSeconds,
+      progressPercent: 100,
+      reward,
+      message: claimed
+        ? 'Đã hoàn thành 100% thời gian chơi & Nhận thưởng thành công!'
+        : 'Đã hoàn thành 100% thời gian chơi! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
+    };
   }
 
   // Tạo stream_key chuẩn xác dạng call:channelId:userId nếu cần cho Activity hoặc Stream
@@ -761,24 +787,33 @@ async function completeSingleQuest(token, quest, options = {}) {
         await sendHeartbeat(token, questId, { streamKey, terminal: true });
       } catch {}
 
-      const claimDelay = options.heartbeatDelayMs && options.heartbeatDelayMs < 1000 ? 0 : 1000;
-      if (claimDelay > 0) {
-        await new Promise((r) => setTimeout(r, claimDelay));
+      let reward = null;
+      let claimed = false;
+      if (options.autoClaim === true) {
+        const claimDelay = options.heartbeatDelayMs && options.heartbeatDelayMs < 1000 ? 0 : 1000;
+        if (claimDelay > 0) {
+          await new Promise((r) => setTimeout(r, claimDelay));
+        }
+        try {
+          reward = await claimQuestReward(token, questId);
+          claimed = true;
+        } catch (e) {}
       }
-
-      const reward = await claimQuestReward(token, questId);
 
       return {
         questId,
         questName,
         type: isActivity ? 'activity' : 'game',
         completed: true,
-        claimed: true,
+        claimed,
+        readyToClaim: !claimed,
         currentSeconds: targetSeconds,
         targetSeconds,
         progressPercent: 100,
         reward,
-        message: 'Hoàn thành 100% & Đã nhận thưởng ORB thành công!',
+        message: claimed
+          ? 'Hoàn thành 100% & Đã nhận thưởng ORB thành công!'
+          : 'Hoàn thành 100% thời gian chơi! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
       };
     }
 
@@ -861,6 +896,7 @@ async function runAutoQuestForToken(token, options = {}) {
   let enrolledCount = 0;
   let completedCount = 0;
   let claimedCount = 0;
+  let readyToClaimCount = 0;
 
   for (let i = 0; i < quests.length; i++) {
     const quest = quests[i];
@@ -880,6 +916,7 @@ async function runAutoQuestForToken(token, options = {}) {
 
     try {
       const res = await completeSingleQuest(token, quest, {
+        autoClaim: options.autoClaim,
         heartbeatDelayMs: options.heartbeatDelayMs,
         onProgress: (p) =>
           onProgress({
@@ -895,6 +932,7 @@ async function runAutoQuestForToken(token, options = {}) {
       if (res.enrolled || res.completed || res.alreadyDone) enrolledCount++;
       if (res.completed || res.alreadyDone) completedCount++;
       if (res.claimed) claimedCount++;
+      if (res.readyToClaim) readyToClaimCount++;
     } catch (err) {
       results.push({
         success: false,
@@ -912,6 +950,7 @@ async function runAutoQuestForToken(token, options = {}) {
     enrolledCount,
     completedCount,
     claimedCount,
+    readyToClaimCount,
     results,
   };
 }

@@ -37,7 +37,7 @@
         running: true,
         cleanups: new Set(),            // tracks active event listeners for safe shutdown
         autoEnroll: true,               // whether to auto-enroll in quests before execution
-        autoClaim: true,               // whether to try auto-claiming quest rewards
+        autoClaim: false,               // whether to try auto-claiming quest rewards (disabled: claim requires captcha)
         playSound: true,               // whether to play an audio cue on quest completion
         randomDelay: false              // whether to inject randomized 1-30min idle gaps between quests (anti-detection)
     };
@@ -932,7 +932,7 @@
                     resolve(data);
                 };
 
-                if (!body) return closePicker({ selectedQuests: new Set(), autoEnroll: false, autoClaim: true, playSound: true });
+                if (!body) return closePicker({ selectedQuests: new Set(), autoEnroll: false, autoClaim: false, playSound: true });
                 if (logs) logs.style.display = 'none';
 
                 const items = [];
@@ -986,7 +986,7 @@
                     });
                 });
 
-                if (!items.length) return closePicker({ selectedQuests: new Set(), autoEnroll: false, autoClaim: true, playSound: true });
+                if (!items.length) return closePicker({ selectedQuests: new Set(), autoEnroll: false, autoClaim: false, playSound: true });
 
                 const buildCard = (q) => `
                     <label class="quest-pick" data-rt="${q.rewardType}" data-qt="${q.type}" data-orbs="${q.orbs}" style="border-left-color: ${q.color};">

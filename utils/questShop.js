@@ -397,7 +397,7 @@ async function processPaidOrder(orderId, client) {
     }
     // Nếu khách hàng không chọn cụ thể từ dropdown hoặc quest đã thay đổi, tự động chọn các quest chưa nhận thưởng theo số lượng quest_count
     if (targetQuests.length === 0) {
-      const pending = allQuests.filter((q) => !q.user_status?.claimed_at);
+      const pending = allQuests.filter((q) => !q.user_status?.completed_at && !q.user_status?.claimed_at);
       targetQuests = pending.slice(0, Math.max(1, order.quest_count || 1));
     }
 
@@ -415,7 +415,9 @@ async function processPaidOrder(orderId, client) {
             name: res.questName || q.id,
             success: true,
             completed: true,
-            message: res.alreadyDone ? 'Đã nhận thưởng trước đó' : 'Hoàn thành 100% & Đã nhận thưởng ORB',
+            message: res.alreadyDone
+              ? 'Đã nhận thưởng trước đó'
+              : (res.claimed ? 'Hoàn thành 100% & Đã nhận thưởng ORB' : 'Hoàn thành 100% (Vào Discord bấm Claim)'),
           });
         } else if (res.requiresDesktop) {
           desktopCount++;
@@ -492,7 +494,7 @@ async function processPaidOrder(orderId, client) {
             .join('\n\n');
 
         if (isAllDone) {
-          desc += `\n\n🎁 **Phần thưởng & Điểm ORB** đã được chuyển trực tiếp vào tài khoản Discord của bạn. Mở **Cài đặt -> Quests** để kiểm tra nhé!`;
+          desc += `\n\n🎁 **Nhiệm vụ đã hoàn thành 100%!** Vui lòng mở **Cài đặt -> Quests** trên Discord để tự bấm **Claim** nhận thưởng (Discord yêu cầu xác thực con người khi nhận quà).`;
         } else if (desktopCount > 0) {
           desc +=
             `\n\n💡 **HƯỚNG DẪN HOÀN TẤT TRONG 10 GIÂY KHÔNG CẦN TẢI GAME:**\n` +
@@ -932,8 +934,8 @@ async function buildStatusPayload(userId) {
     }
   }
 
-  const completedQuests = allQuests.filter((q) => q.user_status?.claimed_at);
-  const pendingQuests = allQuests.filter((q) => !q.user_status?.claimed_at);
+  const completedQuests = allQuests.filter((q) => q.user_status?.completed_at || q.user_status?.claimed_at);
+  const pendingQuests = allQuests.filter((q) => !q.user_status?.completed_at && !q.user_status?.claimed_at);
 
   const embed = new EmbedBuilder()
     .setColor(tokenValid ? 0x57f287 : 0xed4245)
@@ -1076,7 +1078,7 @@ async function handleShopInteraction(interaction, client) {
         return interaction.editReply({ content: `❌ Không thể tải danh sách Quest: ${e.message}`, embeds: [], components: [] });
       }
 
-      const pendingQuests = quests.filter((q) => !q.user_status?.claimed_at);
+      const pendingQuests = quests.filter((q) => !q.user_status?.completed_at && !q.user_status?.claimed_at);
       if (pendingQuests.length === 0) {
         return interaction.editReply({
           content: `ℹ️ Tài khoản **@${username}** hiện không có nhiệm vụ Discord nào chưa hoàn thành! Hãy quay lại khi Discord ra mắt Quest mới nhé.`,
@@ -1197,7 +1199,7 @@ async function handleShopInteraction(interaction, client) {
         return interaction.editReply({ content: `❌ Không thể tải danh sách Quest: ${e.message}` });
       }
 
-      const pendingQuests = quests.filter((q) => !q.user_status?.claimed_at);
+      const pendingQuests = quests.filter((q) => !q.user_status?.completed_at && !q.user_status?.claimed_at);
       if (pendingQuests.length === 0) {
         return interaction.editReply({
           content: `ℹ️ Tài khoản **@${username}** hiện không có nhiệm vụ Discord nào chưa hoàn thành! Hãy quay lại khi Discord ra mắt Quest mới nhé.`,

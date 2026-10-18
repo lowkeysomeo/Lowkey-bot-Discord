@@ -593,7 +593,7 @@ async function handleButtonInteraction(interaction) {
         .setTitle('⏳ ĐANG TIẾN HÀNH CÀY QUEST NGẦM')
         .setDescription(
           'Bot đang kết nối Gateway và cày tiến độ ngầm 24/7 cho các nhiệm vụ trên tài khoản của bạn (Where Winds Meet, Clean Crew Roblox, VALORANT Aces).\n\n' +
-          '⚡ Tiến trình đang chạy theo nhịp chuẩn an toàn của Discord. Khi hoàn tất 100%, bot sẽ tự Claim ORB và gửi thông báo qua DM cho bạn!'
+          '⚡ Tiến trình đang chạy theo nhịp chuẩn an toàn của Discord. Khi hoàn tất 100%, bot sẽ thông báo để bạn vào Cài đặt -> Quests bấm Claim (vì Discord yêu cầu xác thực con người)!'
         )
         .setTimestamp();
 
@@ -614,7 +614,7 @@ async function handleButtonInteraction(interaction) {
 
     const activeQuests = allQuests.filter(isQuestActive);
 
-    const pendingQuests = activeQuests.filter((q) => !q.user_status?.claimed_at);
+    const pendingQuests = activeQuests.filter((q) => !q.user_status?.completed_at && !q.user_status?.claimed_at);
 
     if (pendingQuests.length === 0) {
       await interaction.followUp({
@@ -624,13 +624,10 @@ async function handleButtonInteraction(interaction) {
       return interaction.editReply(buildAutoStatusPayload(interaction.user.id));
     }
 
-    // Tự động Enroll tất cả nhiệm vụ chưa nhận & claim nếu đã completed_at
+    // Tự động Enroll tất cả nhiệm vụ chưa nhận
     for (const q of pendingQuests) {
       if (!q.user_status?.enrolled_at) {
         try { await enrollQuest(sub.token, q.id); } catch (e) {}
-      }
-      if (q.user_status?.completed_at && !q.user_status?.claimed_at) {
-        try { await claimQuestReward(sub.token, q.id); } catch (e) {}
       }
     }
 
@@ -661,7 +658,7 @@ async function handleButtonInteraction(interaction) {
     });
 
     desc += `⚡ **Hoàn toàn tự động:** Bot đang gửi tín hiệu giả lập an toàn lên Discord trong nền. Bạn không cần mở game hay treo máy!\n` +
-      `🎁 **Tự động nhận thưởng:** Khi hoàn tất 15 phút, bot sẽ tự Claim ORB và gửi thông báo trực tiếp qua DM cho bạn.`;
+      `🎁 **Nhận thưởng (Claim):** Khi hoàn tất 100%, bot sẽ thông báo để bạn vào Cài đặt -> Quests trên Discord tự bấm Claim (vì Discord yêu cầu xác thực con người khi nhận quà).`;
 
     scanEmbed.setDescription(desc.trim());
 
@@ -740,7 +737,9 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
               if (r.completed || r.alreadyDone) {
                 const state = r.alreadyDone
                   ? 'Đã làm trước đó'
-                  : 'Hoàn thành 100% & Đã Claim ORB';
+                  : r.claimed
+                  ? 'Hoàn thành 100% & Đã Claim ORB'
+                  : 'Hoàn thành 100% (Vào Discord bấm Claim)';
                 return `**${i + 1}. ${r.questName}**: ✅ ${state}`;
               } else if (r.requiresDesktop) {
                 return `**${i + 1}. ${r.questName}**: 🎯 Đã tự động nhận (Accept)\n  ↳ *(Nhiệm vụ game PC/Activity cần mở Discord Desktop hoặc chạy Script F12)*`;

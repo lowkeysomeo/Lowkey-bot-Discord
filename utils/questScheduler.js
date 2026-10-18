@@ -185,8 +185,8 @@ async function scanUserQuests(subscriber, client, options = {}) {
   const now = Date.now();
   const activeQuests = allQuests.filter(isQuestActive);
 
-  // Một nhiệm vụ chỉ coi là đã kết thúc hoàn toàn khi đã claim phần thưởng (claimed_at).
-  const pendingQuests = activeQuests.filter((q) => !q.user_status?.claimed_at);
+  // Một nhiệm vụ chỉ coi là cần làm khi chưa hoàn thành và chưa claim:
+  const pendingQuests = activeQuests.filter((q) => !q.user_status?.completed_at && !q.user_status?.claimed_at);
 
   if (pendingQuests.length === 0) {
     getDb()
@@ -284,7 +284,7 @@ async function scanUserQuests(subscriber, client, options = {}) {
         .setColor(completedList.length > 0 ? 0x57f287 : 0x5865f2)
         .setTitle('🔔 [LOWKEY QUEST] BÁO CÁO TỰ ĐỘNG HOÀN THÀNH DISCORD QUESTS')
         .setDescription(
-          `Hệ thống vừa tự động cày tiến độ ngầm và nhận thưởng cho **${actions.length}** nhiệm vụ:\n\n` +
+          `Hệ thống vừa tự động cày hoàn thành 100% thời gian cho **${actions.length}** nhiệm vụ:\n\n` +
             actions
               .map((a, i) => {
                 const pctText = typeof a.progressPercent === 'number' ? ` (${a.progressPercent}%)` : '';
@@ -300,8 +300,8 @@ async function scanUserQuests(subscriber, client, options = {}) {
 
       if (completedList.length > 0) {
         embed.addFields({
-          name: '🎁 Phần thưởng',
-          value: 'Điểm ORB và phần quà của các nhiệm vụ hoàn thành đã được tự động nhận (Claim) vào tài khoản Discord của bạn!',
+          name: '🎁 Nhận phần thưởng (Claim ORB)',
+          value: 'Nhiệm vụ đã hoàn thành 100%! Vui lòng mở **Cài đặt -> Quests** trên Discord để tự bấm **Claim** nhận quà (Discord yêu cầu xác thực con người khi nhận quà).',
         });
       }
 

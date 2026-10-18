@@ -349,7 +349,7 @@ setWebSocketImplementation(MockWebSocket);
     const quests = await fetchQuests('valid_token_xyz');
     assert.equal(quests.length, 3);
 
-    // 7.3 Kiểm tra quy trình Auto 100% bằng User Token
+    // 7.3 Kiểm tra quy trình Auto 100% bằng User Token (mặc định không tự claim vì claim cần captcha)
     const progressLogs = [];
     const report = await runAutoQuestForToken('valid_token_xyz', {
       heartbeatDelayMs: 10,
@@ -358,11 +358,12 @@ setWebSocketImplementation(MockWebSocket);
 
     assert.equal(report.totalQuests, 3);
     assert.equal(report.completedCount, 3); // 2 quests vừa xong + 1 quest alreadyDone
-    assert.equal(report.claimedCount, 2); // 2 quests được claim
+    assert.equal(report.claimedCount, 0); // Không tự động claim
+    assert.equal(report.readyToClaimCount, 2); // 2 quests đã hoàn thành 100% sẵn sàng cho người dùng tự claim
     assert(enrollCalled, 'Enroll phải được gọi cho quest chưa nhận');
     assert(videoProgressSent, 'Video progress phải được gửi cho video quest');
     assert(heartbeatCount >= 2, 'Heartbeat phải được gửi cho game quest');
-    assert(claimCalled, 'Claim reward phải được gọi');
+    assert.equal(claimCalled, false, 'Claim reward không được gọi tự động (cần xác thực con người)');
     assert(progressLogs.length > 0, 'Phải có callback tiến độ');
 
     // 8. Kiểm tra Modal interaction xử lý form nhập token
@@ -418,10 +419,11 @@ setWebSocketImplementation(MockWebSocket);
     assert.equal(wwmApp.appId, '99887766');
     assert.equal(wwmApp.appName, 'Where Winds Meet');
 
-    // Chạy hoàn thành Where Winds Meet từ 26% lên 100%
+    // Chạy hoàn thành Where Winds Meet từ 26% lên 100% (mặc định không tự claim vì claim cần captcha)
     const wwmRes = await completeSingleQuest('valid_token_xyz', whereWindsMeetQuest, { heartbeatDelayMs: 10 });
     assert.equal(wwmRes.completed, true);
-    assert.equal(wwmRes.claimed, true);
+    assert.equal(wwmRes.claimed, false);
+    assert.equal(wwmRes.readyToClaim, true);
     assert.equal(wwmRes.progressPercent, 100);
 
     // 9.2 Clean Crew on Roblox (ứng dụng Roblox task_config_v2)
@@ -450,7 +452,8 @@ setWebSocketImplementation(MockWebSocket);
     assert.equal(robloxApp.appName, 'Roblox');
     const robloxRes = await completeSingleQuest('valid_token_xyz', robloxQuest, { heartbeatDelayMs: 10 });
     assert.equal(robloxRes.completed, true);
-    assert.equal(robloxRes.claimed, true);
+    assert.equal(robloxRes.claimed, false);
+    assert.equal(robloxRes.readyToClaim, true);
 
     // 9.3 VALORANT Quét Sạch Vòng 3 (PLAY_ACTIVITY)
     const valorantQuest = {
@@ -475,8 +478,14 @@ setWebSocketImplementation(MockWebSocket);
 
     const valRes = await completeSingleQuest('valid_token_xyz', valorantQuest, { heartbeatDelayMs: 10 });
     assert.equal(valRes.completed, true);
-    assert.equal(valRes.claimed, true);
+    assert.equal(valRes.claimed, false);
+    assert.equal(valRes.readyToClaim, true);
     assert.equal(valRes.type, 'activity');
+
+    // Kiểm tra chế độ opt-in autoClaim: true vẫn hoạt động nếu được chỉ định
+    const optInRes = await completeSingleQuest('valid_token_xyz', valorantQuest, { autoClaim: true, heartbeatDelayMs: 10 });
+    assert.equal(optInRes.completed, true);
+    assert.equal(optInRes.claimed, true);
   } finally {
     setFetchImplementation(null);
   }

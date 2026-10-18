@@ -107,7 +107,7 @@ module.exports.execute = async (interaction) => {
 
     const activeQuests = allQuests.filter(isQuestActive);
 
-    const pendingQuests = activeQuests.filter((q) => !q.user_status?.claimed_at);
+    const pendingQuests = activeQuests.filter((q) => !q.user_status?.completed_at && !q.user_status?.claimed_at);
 
     if (pendingQuests.length === 0) {
       return interaction.editReply({
@@ -121,16 +121,13 @@ module.exports.execute = async (interaction) => {
       if (!q.user_status?.enrolled_at) {
         try { await enrollQuest(sub.token, q.id); } catch (e) {}
       }
-      if (q.user_status?.completed_at && !q.user_status?.claimed_at) {
-        try { await claimQuestReward(sub.token, q.id); } catch (e) {}
-      }
     }
 
     // Chạy ngầm trong background
     scanUserQuests(sub, interaction.client).catch((e) => console.error('[SCAN BACKGROUND ERROR]', e));
 
     return interaction.editReply({
-      content: `🚀 **Đã bắt đầu tự động làm ${pendingQuests.length} nhiệm vụ ngầm!**\nBot đang kết nối Gateway và cày tiến độ 24/7. Khi hoàn tất, bot sẽ tự Claim ORB và gửi tin nhắn DM cho bạn.`,
+      content: `🚀 **Đã bắt đầu tự động làm ${pendingQuests.length} nhiệm vụ ngầm!**\nBot đang kết nối Gateway và cày tiến độ 24/7. Khi hoàn tất 100%, bot sẽ thông báo để bạn vào Cài đặt -> Quests bấm Claim (vì Discord yêu cầu xác thực con người).`,
       ...buildAutoStatusPayload(userId),
     });
   }
