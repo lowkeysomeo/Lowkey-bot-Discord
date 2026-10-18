@@ -81,12 +81,13 @@ assert.equal(lastTimeoutMs, 600000, 'Lần 1 mention 1 người 3 lần phải t
 const mExempt = make('mention-user-exempt', '<@123456789012345678> <@123456789012345678> <@123456789012345678>', '222222222222222222', baseTime);
 assert.equal(await security.message(mExempt), false, 'Kênh ngoại lệ không được phạt');
 
-// Mention liên tục từ người này qua người khác trong vòng 2 phút -> timeout 10 phút (600.000 ms)
+// Mention liên tục 10 người trong vòng 2 phút -> timeout 10 phút (600.000 ms)
 const u2 = 'mention-continuous-user';
-assert.equal(await security.message(make(u2, '<@111111111111111111>', '111111111111111111', baseTime)), false);
-assert.equal(await security.message(make(u2, '<@222222222222222222>', '111111111111111111', baseTime + 30000)), false);
-assert.equal(await security.message(make(u2, '<@333333333333333333>', '111111111111111111', baseTime + 60000)), true);
-assert.equal(lastTimeoutMs, 600000, 'Lần 1 tag liên tục nhiều người phải timeout 10 phút');
+for (let i = 1; i <= 9; i++) {
+  assert.equal(await security.message(make(u2, `<@${String(i).padStart(18, '1')}>`, '111111111111111111', baseTime + (i - 1) * 10000)), false, `Tag ${i} người chưa được timeout`);
+}
+assert.equal(await security.message(make(u2, '<@999999999999999999>', '111111111111111111', baseTime + 95000)), true, 'Tag đủ 10 người trong 2 phút phải timeout');
+assert.equal(lastTimeoutMs, 600000, 'Lần 1 tag liên tục 10 người phải timeout 10 phút');
 
 // Tái phạm mention trong vòng 24 giờ -> timeout 12 giờ (43.200.000 ms)
 const repeat1h = make('mention-user-1', '<@888888888888888888> <@888888888888888888> <@888888888888888888>', '111111111111111111', baseTime + 3600000);

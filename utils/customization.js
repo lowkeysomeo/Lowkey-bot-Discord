@@ -43,6 +43,7 @@ const definitions = [
   ["securitySpamLimit","security","Số tin nhắn để xử lý spam","number",7,3,30],
   ["securitySpamWindow","security","Cửa sổ chống spam (giây)","number",5,2,30],
   ["securityMentionLimit","security","Số mention trong một tin để xử lý","number",5,2,30],
+  ["securityContinuousMentionLimit","security","Số người tag liên tục trong 2 phút để xử lý","number",10,3,30],
   ["securityLogChannel","security","Kênh cảnh báo bảo vệ","channel",""],
   ["securityTrusted","security","ID người/bot tin cậy, cách nhau bằng dấu phẩy; nhập none nếu trống","text","none",2200],
   ['securityAntiWebhook','security','Chống Webhook: Xóa webhook lạ và chặn tin nhắn spam từ webhook','boolean',true],

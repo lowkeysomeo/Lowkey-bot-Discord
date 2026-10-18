@@ -75,7 +75,7 @@ function getMaxSingleUserMentions(userIds) {
   return max;
 }
 
-function trackAndCheckContinuousMentions(guildId, authorId, targetIds, windowMs = 120000, threshold = 3, now = Date.now()) {
+function trackAndCheckContinuousMentions(guildId, authorId, targetIds, windowMs = 120000, threshold = 10, now = Date.now()) {
   if (!targetIds || !targetIds.length) return false;
   const key = `${guildId}:${authorId}`;
   const cutoff = now - windowMs;
@@ -154,8 +154,9 @@ async function inspect(msg, tools) {
   if (!violation && !exempt(msg, o.securityChatChannels, o.securityChatRoles)) {
     const userMentions = extractUserMentions(msg.content);
     const maxSingle = getMaxSingleUserMentions(userMentions);
+    const continuousLimit = Number(o.securityContinuousMentionLimit) || 10;
     const isContinuous = (o.securitySpam && o.securityMentionEnabled && userMentions.length > 0)
-      ? trackAndCheckContinuousMentions(msg.guild.id, msg.author.id, userMentions, 120000, 3, now)
+      ? trackAndCheckContinuousMentions(msg.guild.id, msg.author.id, userMentions, 120000, continuousLimit, now)
       : false;
 
     let mentionViolation = '';
@@ -163,7 +164,7 @@ async function inspect(msg, tools) {
       if (maxSingle >= 3) {
         mentionViolation = 'tag 1 người 3 lần trong 1 tin nhắn';
       } else if (isContinuous) {
-        mentionViolation = 'tag liên tục nhiều người trong vòng 2 phút';
+        mentionViolation = `tag liên tục ${continuousLimit} người trong vòng 2 phút`;
       }
     }
 
