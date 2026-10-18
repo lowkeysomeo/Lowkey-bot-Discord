@@ -236,13 +236,20 @@ async function scanUserQuests(subscriber, client, options = {}) {
 
   console.log(`[QUEST SCHEDULER] Bắt đầu tự động làm ${pendingQuests.length} nhiệm vụ cho User ${userId}...`);
 
+  // Sắp xếp ưu tiên các nhiệm vụ Video làm trước
+  pendingQuests.sort((a, b) => {
+    const aVid = isVideoQuest(a) ? 1 : 0;
+    const bVid = isVideoQuest(b) ? 1 : 0;
+    return bVid - aVid;
+  });
+
   // Tự động Enroll trước cho tất cả các nhiệm vụ chưa nhận
   for (const q of pendingQuests) {
     if (!q.user_status?.enrolled_at) {
       try {
         const isVid = isVideoQuest(q);
         const tasks = extractQuestTasks(q);
-        const platform = isVid ? 0 : (tasks.PLAY_ON_MOBILE ? 2 : 0);
+        const platform = isVid ? -1 : (tasks.PLAY_ON_MOBILE ? 2 : 0);
         await enrollQuest(token, q.id, platform);
       } catch (e) {}
     }

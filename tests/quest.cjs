@@ -278,7 +278,7 @@ setWebSocketImplementation(MockWebSocket);
     },
   ];
 
-  setFetchImplementation(async (url, options = {}) => {
+  const mainMockFetch = async (url, options = {}) => {
     const urlStr = String(url);
 
     // 401 Unauthorized test
@@ -348,7 +348,8 @@ setWebSocketImplementation(MockWebSocket);
     }
 
     return { status: 200, ok: true, json: async () => ({}) };
-  });
+  };
+  setFetchImplementation(mainMockFetch);
 
   try {
     // 7.1 Kiểm tra fetchUserInfo & bắt lỗi 401
@@ -611,6 +612,67 @@ setWebSocketImplementation(MockWebSocket);
     setFetchImplementation(retryTestFetch);
     const retryRes = await sendVideoProgress('valid_token_xyz', 'quest-retry-test', 30, 2);
     assert.equal(retryRes.completed, true, 'sendVideoProgress phải tự động retry và hoàn tất khi gặp 400 tạm thời');
+
+    // Khôi phục mainMockFetch cho các bài kiểm tra tiếp theo
+    setFetchImplementation(mainMockFetch);
+
+    // 9.7 Kiểm tra Hybrid Quest (Game + Video như Enshrouded): Phải tự động ưu tiên Video 45s và KHÔNG gọi select-task-platform
+    lastPlatformSelected = null;
+    const enshroudedQuest = {
+      id: 'quest-enshrouded-hybrid',
+      config: {
+        messages: { quest_name: 'Enshrouded Quest (Chơi 15p hoặc Xem 45s)' },
+        task_config: {
+          tasks: {
+            PLAY_ON_DESKTOP: { target: 900, applications: [{ id: '999888777', name: 'Enshrouded' }] },
+          },
+        },
+        task_config_v2: {
+          tasks: {
+            WATCH_VIDEO: { target: 45 },
+          },
+        },
+      },
+      user_status: { enrolled_at: null, completed_at: null, claimed_at: null },
+    };
+
+    assert.equal(isVideoQuest(enshroudedQuest), true, 'Hybrid quest có task WATCH_VIDEO phải được nhận diện là Video Quest');
+    const enshroudedRes = await completeSingleQuest('valid_token_xyz', enshroudedQuest, { heartbeatDelayMs: 10 });
+    assert.equal(enshroudedRes.completed, true);
+    assert.equal(enshroudedRes.type, 'video', 'Hybrid quest phải hoàn thành qua luồng video nhanh');
+    assert.equal(enshroudedRes.currentSeconds, 45);
+    assert.equal(lastPlatformSelected, null, 'Video quest tuyệt đối không được gọi select-task-platform');
+
+    // 9.8 Kiểm tra nút bấm Quét Ngay (quest:auto_scan_now) chạy trực tiếp executeAutoQuestFlow
+    approveUser('user-scan-btn', 'test-suite');
+    const { registerSubscriber } = require('../utils/questScheduler');
+    registerSubscriber('user-scan-btn', 'valid_token_xyz', 'ScanButtonUser', 1);
+    let scanEditReply = null;
+    const mockScanBtnInteraction = {
+      customId: 'quest:auto_scan_now',
+      user: { id: 'user-scan-btn', username: 'ScanButtonUser' },
+      isButton: () => true,
+      reply: async (p) => { scanEditReply = p; },
+      deferUpdate: async () => {},
+      deferReply: async () => {},
+      editReply: async (p) => { scanEditReply = p; },
+    };
+    await handleButtonInteraction(mockScanBtnInteraction);
+    assert(scanEditReply && scanEditReply.embeds && scanEditReply.embeds.length === 1, 'auto_scan_now phải trả về kết quả quét');
+    assert.match(scanEditReply.embeds[0].data.title, /KẾT QUẢ AUTO QUEST DISCORD/);
+
+    // 9.9 Kiểm tra slash command /quest action:scan chạy trực tiếp executeAutoQuestFlow
+    let questScanReply = null;
+    const mockQuestScanInteraction = {
+      options: { getString: (name) => (name === 'action' ? 'scan' : null) },
+      user: { id: 'user-scan-btn', username: 'ScanButtonUser' },
+      reply: async (p) => { questScanReply = p; },
+      deferReply: async () => {},
+      editReply: async (p) => { questScanReply = p; },
+    };
+    await questCmd.execute(mockQuestScanInteraction);
+    assert(questScanReply && questScanReply.embeds && questScanReply.embeds.length === 1, '/quest action:scan phải trả về kết quả');
+    assert.match(questScanReply.embeds[0].data.title, /KẾT QUẢ AUTO QUEST DISCORD/);
   } finally {
     setFetchImplementation(null);
   }

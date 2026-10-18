@@ -573,20 +573,10 @@ async function handleButtonInteraction(interaction) {
   }
 
   if (action === 'auto_scan_now') {
-    await interaction.deferUpdate();
-    const { getSubscriber, scanUserQuests, buildAutoStatusPayload, isUserJobRunning } = require('./questScheduler');
-    const {
-      fetchQuests,
-      enrollQuest,
-      claimQuestReward,
-      getQuestProgressSeconds,
-      getQuestTargetSeconds,
-      isQuestActive,
-      isVideoQuest,
-    } = require('./questTokenWorker');
+    const { getSubscriber, isUserJobRunning } = require('./questScheduler');
     const sub = getSubscriber(interaction.user.id);
-    if (!sub) {
-      return interaction.followUp({
+    if (!sub || !sub.token) {
+      return interaction.reply({
         content: '⚠️ Bạn chưa nạp Token vào hệ thống bot. Hãy bấm nút **Nhập Token** để nạp và kích hoạt nhé!',
         flags: 64,
       });
@@ -602,108 +592,28 @@ async function handleButtonInteraction(interaction) {
         )
         .setTimestamp();
 
-      await interaction.followUp({ embeds: [runningEmbed], flags: 64 });
-      return interaction.editReply(buildAutoStatusPayload(interaction.user.id));
+      return interaction.reply({ embeds: [runningEmbed], flags: 64 });
     }
 
-    // Tải danh sách Quest trực tiếp để hiển thị tiến độ tức thì cho người dùng
-    let allQuests = [];
-    try {
-      allQuests = await fetchQuests(sub.token);
-    } catch (err) {
-      return interaction.followUp({
-        content: `❌ Không thể kiểm tra nhiệm vụ: ${err.message}`,
-        flags: 64,
-      });
-    }
-
-    const activeQuests = allQuests.filter(isQuestActive);
-
-    const pendingQuests = activeQuests.filter((q) => !q.user_status?.completed_at && !q.user_status?.claimed_at);
-
-    if (pendingQuests.length === 0) {
-      await interaction.followUp({
-        content: '✅ **Đã quét xong:** Hiện tại bạn không có nhiệm vụ Discord nào chưa hoàn thành!',
-        flags: 64,
-      });
-      return interaction.editReply(buildAutoStatusPayload(interaction.user.id));
-    }
-
-    // Tự động Enroll tất cả nhiệm vụ chưa nhận
-    for (const q of pendingQuests) {
-      if (!q.user_status?.enrolled_at) {
-        try {
-          const isVid = isVideoQuest(q);
-          await enrollQuest(sub.token, q.id, isVid ? 0 : 0);
-        } catch (e) {}
-      }
-    }
-
-    // Khởi chạy tiến trình cày ngầm bằng scanUserQuests trong background với nhịp nhanh 1.2s
-    scanUserQuests(sub, interaction.client, { heartbeatDelayMs: 1200 }).catch((e) => console.error('[AUTO SCAN BACKGROUND ERROR]', e));
-
-    const scanEmbed = new EmbedBuilder()
-      .setColor(0x57f287)
-      .setTitle(`🚀 ĐÃ BẮT ĐẦU TỰ ĐỘNG LÀM ${pendingQuests.length} NHIỆM VỤ (VIDEO & GAME)`)
-      .setTimestamp();
-
-    let desc = `Bot đã nhận diện thành công **${pendingQuests.length} nhiệm vụ (Video & Game)** trên tài khoản của bạn:\n\n`;
-    pendingQuests.forEach((q, idx) => {
-      const qName =
-        q.config?.messages?.quest_name ||
-        q.config?.messages?.game_title ||
-        q.config?.messages?.game_name ||
-        q.config?.application?.name ||
-        `Nhiệm vụ #${q.id}`;
-
-      const currSec = getQuestProgressSeconds(q);
-      const targetSec = getQuestTargetSeconds(q);
-      const pct = Math.min(100, Math.round((currSec / targetSec) * 100));
-      const isVid = isVideoQuest(q);
-      const typeBadge = isVid ? '🎬 [Video]' : '🎮 [Game]';
-      const actionText = isVid
-        ? 'Bot đang tự động xem video và gửi progress đến 100%...'
-        : 'Bot đang kết nối Gateway và cày tiếp đến 100%...';
-
-      let icon = isVid ? '🎬' : '🎮';
-      if (pct > 0) icon = '🔄';
-      desc += `**${idx + 1}.** ${typeBadge} **${qName}** (Tiến độ: **${pct}%**)\n└ ${icon} ${actionText}\n\n`;
-    });
-
-    desc += `⚡ **Hoàn toàn tự động 100%:** Bot đang chạy song song cả nhiệm vụ Video và Game với nhịp an toàn. Bạn không cần mở game hay video!\n` +
-      `🎁 **Nhận thưởng (Claim):** Khi hoàn tất 100%, bot sẽ thông báo để bạn vào Cài đặt -> Quests trên Discord tự bấm Claim (vì Discord yêu cầu xác thực con người khi nhận quà).`;
-
-    scanEmbed.setDescription(desc.trim());
-
-    const scanRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId('quest:auto_scan_now')
-        .setLabel('Kiểm Tra Lại Tiến Độ')
-        .setEmoji('🔄')
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId('quest:script')
-        .setLabel('Script F12 Dự Phòng')
-        .setEmoji('📜')
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId('quest:hub')
-        .setLabel('Về Menu')
-        .setEmoji('↩️')
-        .setStyle(ButtonStyle.Secondary)
-    );
-
-    await interaction.followUp({
-      embeds: [scanEmbed],
-      components: [scanRow],
-      flags: 64,
-    });
-
-    return interaction.editReply(buildAutoStatusPayload(interaction.user.id));
+    return executeAutoQuestFlow(interaction, sub.token, interaction.user.id, sub.username || interaction.user.username);
   }
 }
 
 async function executeAutoQuestFlow(interaction, token, userId, username) {
+  if (!interaction.deferred && !interaction.replied) {
+    if (typeof interaction.deferUpdate === 'function' && interaction.isButton && interaction.isButton()) {
+      try {
+        await interaction.deferUpdate();
+      } catch (e) {
+        if (typeof interaction.deferReply === 'function') {
+          await interaction.deferReply({ flags: 64 }).catch(() => {});
+        }
+      }
+    } else if (typeof interaction.deferReply === 'function') {
+      await interaction.deferReply({ flags: 64 }).catch(() => {});
+    }
+  }
+
   try {
     const { registerSubscriber } = require('./questScheduler');
     registerSubscriber(userId, token, username, 1);
@@ -714,7 +624,7 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
     const now = Date.now();
     if (now - lastUpdate > 1200) {
       lastUpdate = now;
-      await interaction.editReply({ content: text }).catch(() => {});
+      await interaction.editReply({ content: text, embeds: [], components: [] }).catch(() => {});
     }
   };
 

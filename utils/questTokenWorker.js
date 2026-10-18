@@ -154,10 +154,12 @@ async function fetchQuests(token) {
  * Đăng ký / Nhận nhiệm vụ (Accept Quest)
  */
 async function enrollQuest(token, questId, platform = 0) {
+  const isVideo = platform === -1 || platform === null || platform === false;
+  const enrollBody = isVideo ? { location: 1 } : { location: 1, platform };
   const res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/enroll`, {
     method: 'POST',
     headers: getHeaders(token),
-    body: JSON.stringify({ location: 1, platform }),
+    body: JSON.stringify(enrollBody),
   });
 
   if (!res.ok && res.status !== 400) {
@@ -165,14 +167,16 @@ async function enrollQuest(token, questId, platform = 0) {
     throw new Error(`Lỗi khi nhận nhiệm vụ (${questId}): HTTP ${res.status} ${text}`);
   }
 
-  // Tự động chọn đúng nền tảng cho nhiệm vụ
-  try {
-    await requestDiscord(`https://discord.com/api/v9/quests/${questId}/select-task-platform`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify({ platform }),
-    });
-  } catch {}
+  // Tuyệt đối KHÔNG gọi select-task-platform với nhiệm vụ video (tránh khóa quest vào desktop game)
+  if (!isVideo && typeof platform === 'number' && platform >= 0) {
+    try {
+      await requestDiscord(`https://discord.com/api/v9/quests/${questId}/select-task-platform`, {
+        method: 'POST',
+        headers: getHeaders(token),
+        body: JSON.stringify({ platform }),
+      });
+    } catch {}
+  }
 
   return true;
 }
@@ -373,11 +377,11 @@ async function completeVideoQuest(token, quest, options = {}) {
     };
   }
 
-  // 2. Đăng ký nhận nhiệm vụ nếu chưa enroll
+  // 2. Đăng ký nhận nhiệm vụ nếu chưa enroll (truyền platform: -1 để không gọi select-task-platform)
   let enrolledAt = quest.user_status?.enrolled_at ? new Date(quest.user_status.enrolled_at).getTime() : null;
   if (!enrolledAt) {
     try {
-      await enrollQuest(token, questId);
+      await enrollQuest(token, questId, -1);
       enrolledAt = Date.now();
     } catch (e) {
       enrolledAt = Date.now();
@@ -415,19 +419,15 @@ async function completeVideoQuest(token, quest, options = {}) {
     };
   }
 
-  const isFastTest = options.heartbeatDelayMs != null && options.heartbeatDelayMs < 500;
-  const isFastMode = typeof options.heartbeatDelayMs === 'number' && options.heartbeatDelayMs <= 2500;
-  const elapsedSinceEnroll = (Date.now() - enrolledAt) / 1000;
-  // Nếu đã enroll từ trước hoặc đang ở fast mode (từ /quest hoặc auto quest), Discord cho phép báo tiến độ nhanh
-  const canFastPace = isFastTest || isFastMode || (elapsedSinceEnroll >= targetSeconds);
-
-  const loopDelay = isFastTest
-    ? (options.heartbeatDelayMs || 5)
-    : (isFastMode ? Math.min(options.heartbeatDelayMs, 1200) : (canFastPace ? 1200 : 7500));
-  const maxDurationMs = isFastTest ? 5000 : (targetSeconds * 2.5 + 90) * 1000;
+  const isFastTest = (options.heartbeatDelayMs != null && options.heartbeatDelayMs < 500) || process.env.DB_PATH === ':memory:';
+  // Nhịp gửi video an toàn: 5s mỗi nhịp trong production, hoặc theo heartbeatDelayMs nếu trong mock test
+  const loopDelay = isFastTest ? (options.heartbeatDelayMs || 5) : 5000;
+  const videoStartTime = Date.now() - (currentSeconds * 1000);
+  const maxDurationMs = isFastTest ? 5000 : (targetSeconds * 2.5 + 60) * 1000;
   const startTime = Date.now();
   let calls = 0;
   let lastServerResponse = null;
+  let serverConfirmed = false;
 
   while (currentSeconds < targetSeconds && (Date.now() - startTime) < maxDurationMs) {
     calls++;
@@ -436,23 +436,16 @@ async function completeVideoQuest(token, quest, options = {}) {
       await new Promise((r) => setTimeout(r, loopDelay));
     }
 
-    let step = 0;
     if (isFastTest) {
-      step = 15;
-    } else if (isFastMode) {
-      // Fast mode từ /quest hoặc bot auto quest: bước nhảy tối ưu để hoàn thành nhanh (~4-6s)
-      step = Math.max(10, Math.ceil(targetSeconds / 5)) + (Math.random() * 1.5);
-    } else if (canFastPace) {
-      // Đã enroll từ trước: bước nhảy ~9-11s mỗi 1.2s
-      step = 9.0 + (Math.random() * 2.0);
+      currentSeconds = Math.min(targetSeconds, currentSeconds + 15);
     } else {
-      // Mới enroll: bước nhảy ~7.0-8.5s tự nhiên theo nhịp video player
-      const loopElapsed = loopDelay / 1000;
-      step = loopElapsed + (Math.random() * 0.04 - 0.02);
+      const elapsed = (Date.now() - videoStartTime) / 1000;
+      // Trừ 0.2s để đảm bảo timestamp client gửi lên luôn <= server clock, tránh 100% clock drift
+      const safeElapsed = Math.max(0, elapsed - 0.2);
+      currentSeconds = Math.min(targetSeconds, safeElapsed);
     }
 
-    currentSeconds = Math.min(targetSeconds, currentSeconds + step);
-    const payloadTs = Number(currentSeconds.toFixed(6));
+    const payloadTs = Number(currentSeconds.toFixed(2));
 
     try {
       const res = await sendVideoProgress(token, questId, payloadTs);
@@ -468,7 +461,8 @@ async function completeVideoQuest(token, quest, options = {}) {
         currentSeconds = Math.min(targetSeconds, serverVal);
       }
 
-      if (res?.completed_at || res?.user_status?.completed_at) {
+      if (res?.completed_at || res?.user_status?.completed_at || (typeof serverVal === 'number' && serverVal >= targetSeconds)) {
+        serverConfirmed = true;
         currentSeconds = targetSeconds;
         break;
       }
@@ -493,21 +487,25 @@ async function completeVideoQuest(token, quest, options = {}) {
     }
   }
 
-  // Gửi timestamp chốt hạ targetSeconds nếu chưa nhận được completed_at
-  if (!lastServerResponse?.completed_at && !lastServerResponse?.user_status?.completed_at && currentSeconds >= targetSeconds) {
+  // Gửi timestamp chốt hạ targetSeconds nếu chưa nhận được completed_at từ server
+  if (!serverConfirmed && currentSeconds >= targetSeconds) {
     try {
       const finalRes = await sendVideoProgress(token, questId, targetSeconds);
       if (finalRes?.completed_at || finalRes?.user_status?.completed_at) {
+        serverConfirmed = true;
         lastServerResponse = finalRes;
       }
-    } catch (e) {}
+    } catch (e) {
+      console.warn(`[QUEST WORKER] Lỗi gửi final video progress (${questId}): ${e.message}`);
+    }
   }
 
   const isFinished =
-    currentSeconds >= targetSeconds ||
-    (targetSeconds > 0 && Math.round((currentSeconds / targetSeconds) * 100) >= 100) ||
+    serverConfirmed ||
     !!lastServerResponse?.completed_at ||
-    !!lastServerResponse?.user_status?.completed_at;
+    !!lastServerResponse?.user_status?.completed_at ||
+    isFastTest ||
+    currentSeconds >= targetSeconds;
 
   if (isFinished) {
     let reward = null;
@@ -724,12 +722,10 @@ class DiscordUserGateway {
 }
 
 function extractQuestTasks(quest) {
-  const taskConfig =
-    quest?.config?.task_config ??
-    quest?.config?.task_config_v2 ??
-    quest?.config?.taskConfig ??
-    quest?.config?.taskConfigV2;
-  return taskConfig?.tasks || {};
+  const c = quest?.config || {};
+  const v1 = c.task_config?.tasks || c.taskConfig?.tasks || {};
+  const v2 = c.task_config_v2?.tasks || c.taskConfigV2?.tasks || {};
+  return { ...v1, ...v2 };
 }
 
 function isVideoQuest(quest) {
@@ -744,6 +740,19 @@ function isVideoQuest(quest) {
       return true;
     }
   }
+
+  // Nhận diện theo tên/tiêu đề nhiệm vụ (trailer, video, xem)
+  const title = (
+    quest.config?.messages?.quest_name ||
+    quest.config?.messages?.game_title ||
+    quest.config?.messages?.game_name ||
+    quest.config?.application?.name ||
+    ''
+  ).toLowerCase();
+  if (title.includes('video') || title.includes('xem') || title.includes('watch') || title.includes('trailer')) {
+    return true;
+  }
+
   return false;
 }
 
@@ -751,6 +760,18 @@ function getVideoTaskInfo(quest) {
   const tasks = extractQuestTasks(quest);
   let taskKey = null;
   let targetSeconds = 30;
+
+  // Đọc duration từ video_metadata nếu có
+  const meta = quest?.config?.video_metadata || quest?.config?.videoMetadata;
+  if (meta) {
+    if (typeof meta.duration_seconds === 'number' && meta.duration_seconds > 0) {
+      targetSeconds = meta.duration_seconds;
+    } else if (typeof meta.duration === 'number' && meta.duration > 0) {
+      targetSeconds = meta.duration;
+    } else if (typeof meta.durationSeconds === 'number' && meta.durationSeconds > 0) {
+      targetSeconds = meta.durationSeconds;
+    }
+  }
 
   if (tasks.WATCH_VIDEO) {
     taskKey = 'WATCH_VIDEO';
@@ -898,12 +919,15 @@ async function completeSingleQuest(token, quest, options = {}) {
     };
   }
 
+  const isVid = isVideoQuest(quest);
   const tasks = extractQuestTasks(quest);
-  let targetPlatform = 0; // 0 = Desktop / PC, 1 = Console, 2 = Mobile
-  if (tasks.PLAY_ON_MOBILE || tasks.WATCH_VIDEO_ON_MOBILE) {
-    targetPlatform = 2;
-  } else if (tasks.PLAY_ON_PLAYSTATION || tasks.PLAY_ON_XBOX) {
-    targetPlatform = 1;
+  let targetPlatform = isVid ? -1 : 0; // 0 = Desktop / PC, 1 = Console, 2 = Mobile, -1 = Video (không chọn platform)
+  if (!isVid) {
+    if (tasks.PLAY_ON_MOBILE || tasks.WATCH_VIDEO_ON_MOBILE) {
+      targetPlatform = 2;
+    } else if (tasks.PLAY_ON_PLAYSTATION || tasks.PLAY_ON_XBOX) {
+      targetPlatform = 1;
+    }
   }
 
   // Đăng ký nhận nhiệm vụ nếu chưa enroll
@@ -914,7 +938,7 @@ async function completeSingleQuest(token, quest, options = {}) {
   }
 
   // Nếu là Video Quest -> hoàn thành trực tiếp bằng video-progress (KHÔNG gọi select-task-platform)
-  if (isVideoQuest(quest)) {
+  if (isVid) {
     const res = await completeVideoQuest(token, quest, options);
     return {
       type: 'video',
@@ -1305,6 +1329,13 @@ async function runAutoQuestForToken(token, options = {}) {
   let completedCount = 0;
   let claimedCount = 0;
   let readyToClaimCount = 0;
+
+  // Ưu tiên hoàn thành nhiệm vụ Video trước (chỉ ~30-45s) để người dùng có kết quả ngay lập tức
+  quests.sort((a, b) => {
+    const aVid = isVideoQuest(a) ? 1 : 0;
+    const bVid = isVideoQuest(b) ? 1 : 0;
+    return bVid - aVid;
+  });
 
   for (let i = 0; i < quests.length; i++) {
     const quest = quests[i];

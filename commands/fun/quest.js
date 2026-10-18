@@ -96,40 +96,8 @@ module.exports.execute = async (interaction) => {
       });
     }
 
-    let allQuests = [];
-    try {
-      allQuests = await fetchQuests(sub.token);
-    } catch (err) {
-      return interaction.editReply({
-        content: `❌ Không thể kiểm tra nhiệm vụ: ${err.message}`,
-      });
-    }
-
-    const activeQuests = allQuests.filter(isQuestActive);
-
-    const pendingQuests = activeQuests.filter((q) => !q.user_status?.completed_at && !q.user_status?.claimed_at);
-
-    if (pendingQuests.length === 0) {
-      return interaction.editReply({
-        content: '✅ Đã quét xong: Hiện tại không có nhiệm vụ mới nào trên tài khoản của bạn.',
-        ...buildAutoStatusPayload(userId),
-      });
-    }
-
-    // Tự động enroll trước
-    for (const q of pendingQuests) {
-      if (!q.user_status?.enrolled_at) {
-        try { await enrollQuest(sub.token, q.id); } catch (e) {}
-      }
-    }
-
-    // Chạy ngầm trong background với nhịp nhanh 1.2s cho cả video & game
-    scanUserQuests(sub, interaction.client, { heartbeatDelayMs: 1200 }).catch((e) => console.error('[SCAN BACKGROUND ERROR]', e));
-
-    return interaction.editReply({
-      content: `🚀 **Đã bắt đầu tự động làm ${pendingQuests.length} nhiệm vụ (Video & Game) ngầm!**\nBot đang tự động xem video và gửi heartbeat cày tiến độ 24/7. Khi hoàn tất 100%, bot sẽ thông báo để bạn vào Cài đặt -> Quests bấm Claim (vì Discord yêu cầu xác thực con người).`,
-      ...buildAutoStatusPayload(userId),
-    });
+    const { executeAutoQuestFlow } = require('../../utils/questManager');
+    return executeAutoQuestFlow(interaction, sub.token, userId, interaction.user.username);
   }
 
   if (action === 'token') {

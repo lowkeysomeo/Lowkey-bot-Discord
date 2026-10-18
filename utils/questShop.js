@@ -1486,15 +1486,12 @@ async function handleShopInteraction(interaction, client) {
 
   // 14. Quét ngay bây giờ (từ menu check status)
   if (customId === 'qshop:scan_now') {
-    await interaction.deferReply({ flags: 64 });
     const sub = getSubscriber(interaction.user.id);
-    if (!sub) {
-      return interaction.editReply({ content: '❌ Bạn chưa có tài khoản lưu trong hệ thống.' });
+    if (!sub || !sub.token) {
+      return interaction.reply({ content: '❌ Bạn chưa có tài khoản lưu trong hệ thống.', flags: 64 });
     }
-    const res = await scanUserQuests(sub, client);
-    return interaction.editReply({
-      content: `✅ Đã quét xong tài khoản! Phát hiện và xử lý **${res.actions?.length || 0}** nhiệm vụ. Kiểm tra DM để xem chi tiết nhé!`,
-    });
+    const { executeAutoQuestFlow } = require('./questManager');
+    return executeAutoQuestFlow(interaction, sub.token, interaction.user.id, sub.username || interaction.user.username);
   }
 
   // 15. Bật/Tắt DM
