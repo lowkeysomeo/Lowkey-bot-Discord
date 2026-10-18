@@ -25,7 +25,10 @@ const SUPER_PROPERTIES = Buffer.from(
     os: 'Windows',
     browser: 'Discord Client',
     release_channel: 'stable',
-    system_locale: 'en-US',
+    client_version: '1.0.9168',
+    os_version: '10.0.19045',
+    os_arch: 'x64',
+    system_locale: 'vi-VN',
   })
 ).toString('base64');
 
@@ -35,8 +38,12 @@ function getHeaders(rawToken) {
     Authorization: token,
     'Content-Type': 'application/json',
     'User-Agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9168 Chrome/128.0.6613.186 Electron/32.2.7 Safari/537.36',
     'X-Super-Properties': SUPER_PROPERTIES,
+    Origin: 'https://discord.com',
+    Referer: 'https://discord.com/channels/@me',
+    'X-Discord-Locale': 'vi',
+    'X-Discord-Timezone': 'Asia/Ho_Chi_Minh',
     Accept: '*/*',
   };
 }
@@ -106,8 +113,8 @@ function isQuestActive(q) {
   if (!exp) return true;
   const expMs = new Date(exp).getTime();
   if (Number.isNaN(expMs)) return true;
-  // Cho phép độ trễ 24h đối với múi giờ hoặc nhiệm vụ sắp kết thúc trong ngày hôm nay
-  return expMs > (Date.now() - 24 * 60 * 60 * 1000);
+  // Bắt buộc còn hạn thực tế, tuyệt đối không nhận nhiệm vụ đã hết hạn (Discord sẽ trả 404 code 260017)
+  return expMs > Date.now();
 }
 
 /**
@@ -178,29 +185,25 @@ async function sendHeartbeat(token, questId, { streamKey = null, applicationId =
   // Xây dựng danh sách các body cần thử theo thứ tự ưu tiên
   const bodiesToTry = [];
 
-  // Ưu tiên 1: streamKey được truyền vào + applicationId
-  if (streamKey && applicationId) {
-    bodiesToTry.push({ stream_key: streamKey, application_id: String(applicationId), terminal: Boolean(terminal) });
-  }
-  // Ưu tiên 2: streamKey được truyền vào, không có applicationId
+  // Ưu tiên 1: stream_key chuẩn (chuẩn Discord chính thức trả về 200 OK)
   if (streamKey) {
     bodiesToTry.push({ stream_key: streamKey, terminal: Boolean(terminal) });
   }
 
-  // Ưu tiên 3: Tạo stream_key từ userId thật (userId luôn hợp lệ khi decode từ token)
+  // Ưu tiên 2: Tạo stream_key từ userId thật (dạng call:userId:userId)
   const effectiveUserId = userId || getUserIdFromToken(token);
   if (effectiveUserId) {
-    // Discord chấp nhận stream_key dạng call:CHANNEL_ID:USER_ID
-    // Dùng userId làm channelId giả — hợp lệ về format (18-19 chữ số)
     const fakeChannelId = effectiveUserId;
     const selfCallKey = `call:${fakeChannelId}:${effectiveUserId}`;
-    if (applicationId) {
-      bodiesToTry.push({ stream_key: selfCallKey, application_id: String(applicationId), terminal: Boolean(terminal) });
-    }
     bodiesToTry.push({ stream_key: selfCallKey, terminal: Boolean(terminal) });
   }
 
-  // Ưu tiên 4: Chỉ applicationId, không có stream_key
+  // Ưu tiên 3: stream_key + application_id
+  if (streamKey && applicationId) {
+    bodiesToTry.push({ stream_key: streamKey, application_id: String(applicationId), terminal: Boolean(terminal) });
+  }
+
+  // Ưu tiên 4: Chỉ applicationId
   if (applicationId) {
     bodiesToTry.push({ application_id: String(applicationId), terminal: Boolean(terminal) });
   }
@@ -230,16 +233,19 @@ async function sendHeartbeat(token, questId, { streamKey = null, applicationId =
         body: JSON.stringify(body),
       });
 
-      const responseText = await res.clone().text().catch(() => '');
+      let responseData = {};
+      let responseText = '';
+      if (res.ok) {
+        responseData = await res.json().catch(() => ({}));
+        responseText = JSON.stringify(responseData);
+      } else {
+        responseText = await (typeof res.text === 'function' ? res.text() : Promise.resolve('')).catch(() => '');
+      }
+
       console.log(`[HEARTBEAT] Quest=${questId} | status=${res.status} | body=${JSON.stringify(body).substring(0, 80)} | resp=${responseText.substring(0, 120)}`);
 
       if (res.ok) {
-        // Thành công — parse JSON và trả về
-        try {
-          return JSON.parse(responseText);
-        } catch {
-          return {};
-        }
+        return responseData;
       }
 
       lastRes = res;
@@ -777,27 +783,32 @@ async function completeSingleQuest(token, quest, options = {}) {
   }
 
   // Kết nối Gateway giả lập người dùng đang chạy game trên Discord Windows
+  // QUAN TRỌNG: Gateway phải READY trước khi gửi heartbeat để Discord chấp nhận Rich Presence
   let gateway = null;
   const isFastTestMode = typeof options.heartbeatDelayMs === 'number' && options.heartbeatDelayMs < 500;
-  if (!isFastTestMode && (appId || !isActivity)) {
+  const gatewayActivity = {
+    name: appName,
+    type: 0,
+    application_id: appId,
+    timestamps: { start: Date.now() - (currentSeconds * 1000) },
+  };
+  if (!isFastTestMode) {
     try {
       const device = isMobileTask ? 'mobile' : (options.device || 'desktop');
       gateway = new DiscordUserGateway(token, { device });
-      await gateway.connect({
-        name: appName,
-        type: 0,
-        application_id: appId,
-        timestamps: {
-          start: Date.now() - (currentSeconds * 1000),
-        },
-      });
+      await gateway.connect(gatewayActivity);
+      // Đợi Discord server sync Rich Presence — tăng lên 8s để đảm bảo heartbeat không bị reject
       const syncWait = typeof options.gatewaySyncDelayMs === 'number'
         ? options.gatewaySyncDelayMs
-        : 2000;
+        : 8000;
       if (syncWait > 0) {
+        console.log(`[QUEST WORKER] Gateway connected, waiting ${syncWait}ms for Discord to sync presence...`);
         await new Promise((r) => setTimeout(r, syncWait));
       }
-    } catch (e) {}
+      console.log(`[QUEST WORKER] Ready to heartbeat — Quest: ${questName} | App: ${appName} (${appId})`);
+    } catch (e) {
+      console.warn(`[QUEST WORKER] Gateway connect error: ${e.message}`);
+    }
   }
 
   const heartbeatDelay = options.heartbeatDelayMs ?? 20000;
@@ -807,22 +818,57 @@ async function completeSingleQuest(token, quest, options = {}) {
   // Track thời gian thực để ước lượng tiến độ khi server không phản hồi progress
   const startTimestamp = Date.now() - (currentSeconds * 1000);
 
+  let lastActivityRefresh = Date.now();
+
   try {
     while (currentSeconds < targetSeconds && loops < maxLoops) {
       loops++;
+
+      // Refresh Rich Presence mỗi 60s để Discord không xóa session
+      if (gateway && (Date.now() - lastActivityRefresh) > 60000) {
+        gateway.setActivities([{
+          ...gatewayActivity,
+          timestamps: { start: Date.now() - (currentSeconds * 1000) },
+        }]);
+        lastActivityRefresh = Date.now();
+        console.log(`[QUEST WORKER] Refreshed Rich Presence for ${questName}`);
+      }
+
       let hb = {};
+      let heartbeatOk = false;
       try {
         hb = await sendHeartbeat(token, questId, { streamKey, applicationId: appId, terminal: false, userId });
+        heartbeatOk = true;
       } catch (heartbeatErr) {
-        // Heartbeat lỗi → log và tiếp tục (không break, cho Discord thêm thời gian)
-        console.warn(`[QUEST WORKER] Heartbeat failed loop=${loops} quest=${questId}: ${heartbeatErr.message}`);
-        // Vẫn tính thời gian trôi qua để cập nhật progress ước lượng
-        const elapsed = Math.floor((Date.now() - startTimestamp) / 1000);
-        if (elapsed > currentSeconds) currentSeconds = Math.min(targetSeconds, elapsed);
-        if (currentSeconds < targetSeconds) {
-          await new Promise((r) => setTimeout(r, heartbeatDelay));
+        const errMsg = heartbeatErr.message || '';
+        console.warn(`[QUEST WORKER] Heartbeat failed loop=${loops} quest=${questId}: ${errMsg}`);
+
+        // Nếu 404: re-send Rich Presence và chờ thêm rồi retry 1 lần
+        if (errMsg.includes('404') && gateway && loops <= 3) {
+          console.log(`[QUEST WORKER] 404 detected — re-sending Rich Presence and retrying in 5s...`);
+          gateway.setActivities([{
+            ...gatewayActivity,
+            timestamps: { start: Date.now() - (currentSeconds * 1000) },
+          }]);
+          lastActivityRefresh = Date.now();
+          await new Promise((r) => setTimeout(r, 5000));
+          try {
+            hb = await sendHeartbeat(token, questId, { streamKey, applicationId: appId, terminal: false, userId });
+            heartbeatOk = true;
+          } catch (retryErr) {
+            console.warn(`[QUEST WORKER] Retry heartbeat also failed: ${retryErr.message}`);
+          }
         }
-        continue;
+
+        if (!heartbeatOk) {
+          // Vẫn tính thời gian trôi qua để cập nhật progress ước lượng
+          const elapsed = Math.floor((Date.now() - startTimestamp) / 1000);
+          if (elapsed > currentSeconds) currentSeconds = Math.min(targetSeconds, elapsed);
+          if (currentSeconds < targetSeconds) {
+            await new Promise((r) => setTimeout(r, heartbeatDelay));
+          }
+          continue;
+        }
       }
 
       if (hb?.user_status?.completed_at || hb?.completed_at) {
@@ -841,7 +887,7 @@ async function completeSingleQuest(token, quest, options = {}) {
       if (typeof serverProgress === 'number' && serverProgress > currentSeconds) {
         // Discord xác nhận progress thật
         currentSeconds = serverProgress;
-        console.log(`[QUEST WORKER] Server confirmed: ${currentSeconds}/${targetSeconds}s (${Math.round(currentSeconds/targetSeconds*100)}%) quest=${questId}`);
+        console.log(`[QUEST WORKER] ✅ Server confirmed: ${currentSeconds}/${targetSeconds}s (${Math.round(currentSeconds/targetSeconds*100)}%) quest=${questId}`);
       } else if (isFastTestMode) {
         currentSeconds = Math.min(targetSeconds, currentSeconds + 30);
       } else {
@@ -866,6 +912,7 @@ async function completeSingleQuest(token, quest, options = {}) {
       if (currentSeconds >= targetSeconds) break;
       await new Promise((r) => setTimeout(r, heartbeatDelay));
     }
+
 
 
     if (currentSeconds >= targetSeconds) {
