@@ -16,7 +16,7 @@ const {
   TextInputStyle,
 } = require('discord.js');
 const { getDb } = require('./database');
-const { fetchUserInfo, fetchQuests, completeSingleQuest } = require('./questTokenWorker');
+const { fetchUserInfo, fetchQuests, completeSingleQuest, isVideoQuest } = require('./questTokenWorker');
 const { getSubscriber, registerSubscriber, scanUserQuests } = require('./questScheduler');
 const { isOwner, approveUser } = require('./questAuth');
 
@@ -762,8 +762,7 @@ function buildQuestSelectionPayload(orderId, pendingQuests, username) {
     .setMaxValues(Math.min(pendingQuests.length, 25));
 
   for (const q of pendingQuests.slice(0, 25)) {
-    const tasks = q.config?.task_config?.tasks || q.config?.task_config_v2?.tasks || {};
-    const isVideo = !!(tasks.WATCH_VIDEO || tasks.WATCH_VIDEO_ON_MOBILE);
+    const isVideo = isVideoQuest(q);
     const qName =
       q.config?.messages?.quest_name ||
       q.config?.messages?.game_title ||

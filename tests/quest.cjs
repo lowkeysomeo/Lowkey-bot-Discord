@@ -33,6 +33,9 @@ const {
   runAutoQuestForToken,
   getQuestProgressSeconds,
   getQuestApplicationInfo,
+  isVideoQuest,
+  getVideoTaskInfo,
+  extractQuestTasks,
 } = require('../utils/questTokenWorker');
 
 const EventEmitter = require('node:events');
@@ -528,6 +531,65 @@ setWebSocketImplementation(MockWebSocket);
     const mobileVidRes = await completeSingleQuest('valid_token_xyz', mobileVideoQuest, { heartbeatDelayMs: 10 });
     assert.equal(mobileVidRes.completed, true);
     assert.equal(mobileVidRes.type, 'video');
+
+    // 9.5 Kiểm tra helper isVideoQuest và getVideoTaskInfo
+    const desktopVideoQuest = {
+      id: 'quest-desktop-video',
+      config: {
+        messages: { quest_name: 'Watch Desktop Trailer' },
+        task_config_v2: {
+          tasks: {
+            WATCH_VIDEO_ON_DESKTOP: { target: 60 },
+          },
+        },
+      },
+      user_status: { enrolled_at: '2026-10-18T00:00:00Z', completed_at: null, claimed_at: null, progress: { WATCH_VIDEO_ON_DESKTOP: { value: 15 } } },
+    };
+
+    assert.equal(isVideoQuest(desktopVideoQuest), true, 'WATCH_VIDEO_ON_DESKTOP phải được nhận diện là Video Quest');
+    const dTaskInfo = getVideoTaskInfo(desktopVideoQuest);
+    assert.equal(dTaskInfo.taskKey, 'WATCH_VIDEO_ON_DESKTOP');
+    assert.equal(dTaskInfo.targetSeconds, 60);
+    assert.equal(dTaskInfo.currentSeconds, 15);
+
+    const promotionalVideoQuest = {
+      id: 'quest-promo-video',
+      config: {
+        video_metadata: { url: 'https://example.com/video.mp4' },
+        task_config: {
+          tasks: {
+            WATCH_PROMOTIONAL_VIDEO: { target: 45 },
+          },
+        },
+      },
+    };
+    assert.equal(isVideoQuest(promotionalVideoQuest), true, 'video_metadata hoặc WATCH_PROMOTIONAL_VIDEO phải là video quest');
+
+    assert.equal(isVideoQuest(whereWindsMeetQuest), false, 'Where Winds Meet không phải là video quest');
+    assert.equal(isVideoQuest(robloxQuest), false, 'Roblox không phải là video quest');
+
+    // Hoàn thành desktop video quest 60s
+    const dVidRes = await completeSingleQuest('valid_token_xyz', desktopVideoQuest, { heartbeatDelayMs: 10 });
+    assert.equal(dVidRes.completed, true);
+    assert.equal(dVidRes.type, 'video');
+    assert.equal(dVidRes.currentSeconds, 60);
+
+    // 9.6 Kiểm tra cơ chế tự động phục hồi retry của sendVideoProgress khi gặp 400 tạm thời
+    let failOnce = true;
+    const retryTestFetch = async (url, options = {}) => {
+      const urlStr = String(url);
+      if (urlStr.includes('/video-progress')) {
+        if (failOnce) {
+          failOnce = false;
+          return { status: 400, ok: false, json: async () => ({ message: 'Bad request clock drift' }), text: async () => 'clock drift' };
+        }
+        return { status: 200, ok: true, json: async () => ({ completed: true }) };
+      }
+      return { status: 200, ok: true, json: async () => ({}) };
+    };
+    setFetchImplementation(retryTestFetch);
+    const retryRes = await sendVideoProgress('valid_token_xyz', 'quest-retry-test', 30, 2);
+    assert.equal(retryRes.completed, true, 'sendVideoProgress phải tự động retry và hoàn tất khi gặp 400 tạm thời');
   } finally {
     setFetchImplementation(null);
   }

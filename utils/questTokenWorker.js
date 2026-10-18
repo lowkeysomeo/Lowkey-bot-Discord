@@ -269,19 +269,45 @@ async function sendHeartbeat(token, questId, { streamKey = null, applicationId =
 /**
  * Gửi tiến trình xem video (cho Video Quests)
  */
-async function sendVideoProgress(token, questId, timestamp = 30) {
-  const res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/video-progress`, {
-    method: 'POST',
-    headers: getHeaders(token),
-    body: JSON.stringify({ timestamp }),
-  });
+async function sendVideoProgress(token, questId, timestamp = 30, retries = 3) {
+  const formattedTimestamp = Number(Number(timestamp).toFixed(6));
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    const res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/video-progress`, {
+      method: 'POST',
+      headers: getHeaders(token),
+      body: JSON.stringify({ timestamp: formattedTimestamp }),
+    });
 
-  if (!res.ok) {
+    if (res.ok) {
+      return await res.json().catch(() => ({ success: true }));
+    }
+
+    const status = res.status;
     const text = await res.text().catch(() => '');
-    throw new Error(`Lỗi khi gửi video-progress (${questId}): HTTP ${res.status} ${text}`);
-  }
 
-  return await res.json().catch(() => ({}));
+    // 429 Rate limited
+    if (status === 429 && attempt < retries) {
+      let retryAfter = 5;
+      try {
+        const data = JSON.parse(text);
+        if (typeof data.retry_after === 'number') retryAfter = data.retry_after;
+      } catch {}
+      console.warn(`[QUEST WORKER] Video progress 429 rate limit (${questId}). Chờ ${retryAfter}s (lần ${attempt}/${retries})...`);
+      await new Promise((r) => setTimeout(r, Math.ceil(retryAfter * 1000) + 500));
+      continue;
+    }
+
+    // 400: Thường do timestamp nhanh hơn clock server vài giây, chờ và retry
+    if (status === 400 && attempt < retries) {
+      console.warn(`[QUEST WORKER] Video progress 400 (${questId}): ${text.substring(0, 100)}. Chờ 2.5s để retry...`);
+      await new Promise((r) => setTimeout(r, 2500));
+      continue;
+    }
+
+    if (attempt === retries) {
+      throw new Error(`Lỗi khi gửi video-progress (${questId}): HTTP ${status} ${text}`);
+    }
+  }
 }
 
 /**
@@ -314,7 +340,7 @@ async function claimQuestReward(token, questId, platform = 0) {
 }
 
 /**
- * Tự động xem video theo nhịp an toàn (bước nhảy ~7s) để Discord chấp thuận tiến độ 100%
+ * Tự động xem video theo nhịp an toàn của Discord để đạt tiến độ 100%
  */
 async function completeVideoQuest(token, quest, options = {}) {
   const questId = quest.id;
@@ -325,7 +351,22 @@ async function completeVideoQuest(token, quest, options = {}) {
     quest.config?.application?.name ||
     `Nhiệm vụ #${questId}`;
 
-  // Đăng ký nhận nhiệm vụ nếu chưa enroll
+  // 1. Kiểm tra nếu đã nhận thưởng trước đó (claimed_at)
+  if (quest.user_status?.claimed_at) {
+    return {
+      questId,
+      questName,
+      type: 'video',
+      alreadyDone: true,
+      completed: true,
+      claimed: false,
+      readyToClaim: false,
+      progressPercent: 100,
+      message: 'Nhiệm vụ video này đã nhận thưởng trước đó.',
+    };
+  }
+
+  // 2. Đăng ký nhận nhiệm vụ nếu chưa enroll
   let enrolledAt = quest.user_status?.enrolled_at ? new Date(quest.user_status.enrolled_at).getTime() : null;
   if (!enrolledAt) {
     try {
@@ -336,65 +377,160 @@ async function completeVideoQuest(token, quest, options = {}) {
     }
   }
 
-  const tasks = quest.config?.task_config?.tasks || quest.config?.task_config_v2?.tasks || {};
-  const targetSeconds = tasks.WATCH_VIDEO?.target || tasks.WATCH_VIDEO_ON_MOBILE?.target || 30;
-  const taskName = tasks.WATCH_VIDEO ? 'WATCH_VIDEO' : 'WATCH_VIDEO_ON_MOBILE';
+  // 3. Trích xuất thông tin task video và targetSeconds
+  const { taskKey, targetSeconds, currentSeconds: initialSeconds } = getVideoTaskInfo(quest);
+  let currentSeconds = initialSeconds;
 
-  let currentSeconds = quest.user_status?.progress?.[taskName]?.value ?? 0;
-
-  const maxLoops = Math.ceil(targetSeconds / 5) + 20;
-  let loops = 0;
+  // 4. Nếu Discord đã có completed_at sẵn hoặc tiến độ đã đạt 100%:
+  if (quest.user_status?.completed_at || currentSeconds >= targetSeconds) {
+    let reward = null;
+    let claimed = false;
+    if (options.autoClaim === true) {
+      try {
+        reward = await claimQuestReward(token, questId);
+        claimed = true;
+      } catch (e) {}
+    }
+    return {
+      questId,
+      questName,
+      type: 'video',
+      completed: true,
+      claimed,
+      readyToClaim: !claimed,
+      currentSeconds: targetSeconds,
+      targetSeconds,
+      progressPercent: 100,
+      reward,
+      message: claimed
+        ? 'Đã hoàn thành 100% video & Nhận thưởng thành công!'
+        : 'Đã hoàn thành 100%! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
+    };
+  }
 
   const isFastTest = options.heartbeatDelayMs != null && options.heartbeatDelayMs < 500;
-  const loopDelay = isFastTest ? options.heartbeatDelayMs : 1000;
+  const elapsedSinceEnroll = (Date.now() - enrolledAt) / 1000;
+  // Nếu đã enroll từ trước (thời gian enroll >= targetSeconds), Discord cho phép báo tiến độ nhanh
+  const canFastPace = isFastTest || (elapsedSinceEnroll >= targetSeconds);
 
-  while (currentSeconds < targetSeconds && loops < maxLoops) {
-    loops++;
-    const maxAllowed = isFastTest ? 999999 : Math.floor((Date.now() - enrolledAt) / 1000) + 10;
-    const speed = 7;
-    const nextTimestamp = Math.min(targetSeconds, currentSeconds + speed);
+  const loopDelay = isFastTest ? (options.heartbeatDelayMs || 5) : (canFastPace ? 1200 : 7500);
+  const maxDurationMs = isFastTest ? 5000 : (targetSeconds * 2.5 + 90) * 1000;
+  const startTime = Date.now();
+  let calls = 0;
+  let lastServerResponse = null;
 
-    if (maxAllowed >= nextTimestamp) {
-      const jitter = Math.min(targetSeconds, nextTimestamp + (Math.random() * 0.4));
-      await sendVideoProgress(token, questId, jitter);
-      currentSeconds = nextTimestamp;
+  while (currentSeconds < targetSeconds && (Date.now() - startTime) < maxDurationMs) {
+    calls++;
 
-      if (options.onProgress) {
-        options.onProgress({
-          questId,
-          questName,
-          currentSeconds: Math.min(currentSeconds, targetSeconds),
-          targetSeconds,
-          percent: Math.min(100, Math.round((currentSeconds / targetSeconds) * 100)),
-        });
+    if (!isFastTest) {
+      await new Promise((r) => setTimeout(r, loopDelay));
+    }
+
+    let step = 0;
+    if (isFastTest) {
+      step = 15;
+    } else if (canFastPace) {
+      // Đã enroll từ trước: bước nhảy ~9-11s mỗi 1.2s
+      step = 9.0 + (Math.random() * 2.0);
+    } else {
+      // Mới enroll: bước nhảy ~7.0-8.5s tự nhiên theo nhịp video player
+      const loopElapsed = loopDelay / 1000;
+      step = loopElapsed + (Math.random() * 0.04 - 0.02);
+    }
+
+    currentSeconds = Math.min(targetSeconds, currentSeconds + step);
+    const payloadTs = Number(currentSeconds.toFixed(6));
+
+    try {
+      const res = await sendVideoProgress(token, questId, payloadTs);
+      lastServerResponse = res;
+
+      const serverVal =
+        res?.user_status?.progress?.[taskKey]?.value ??
+        res?.user_status?.progress?.WATCH_VIDEO?.value ??
+        res?.progress?.[taskKey]?.value ??
+        res?.progress?.WATCH_VIDEO?.value;
+
+      if (typeof serverVal === 'number' && serverVal > currentSeconds) {
+        currentSeconds = Math.min(targetSeconds, serverVal);
       }
+
+      if (res?.completed_at || res?.user_status?.completed_at) {
+        currentSeconds = targetSeconds;
+        break;
+      }
+    } catch (err) {
+      console.warn(`[QUEST WORKER] Lỗi gửi video progress loop=${calls} (${questId}): ${err.message}`);
+    }
+
+    if (options.onProgress) {
+      options.onProgress({
+        questId,
+        questName,
+        currentSeconds: Math.min(currentSeconds, targetSeconds),
+        targetSeconds,
+        percent: Math.min(100, Math.round((currentSeconds / targetSeconds) * 100)),
+      });
     }
 
     if (currentSeconds >= targetSeconds) break;
-    await new Promise((r) => setTimeout(r, loopDelay));
+    if (isFastTest) {
+      await new Promise((r) => setTimeout(r, loopDelay));
+    }
   }
 
-  let reward = null;
-  let claimed = false;
-  if (options.autoClaim === true) {
+  // Gửi timestamp chốt hạ targetSeconds nếu chưa nhận được completed_at
+  if (!lastServerResponse?.completed_at && !lastServerResponse?.user_status?.completed_at && currentSeconds >= targetSeconds) {
     try {
-      if (!isFastTest) await new Promise((r) => setTimeout(r, 1200));
-      reward = await claimQuestReward(token, questId);
-      claimed = true;
+      const finalRes = await sendVideoProgress(token, questId, targetSeconds);
+      if (finalRes?.completed_at || finalRes?.user_status?.completed_at) {
+        lastServerResponse = finalRes;
+      }
     } catch (e) {}
   }
 
+  const isFinished = currentSeconds >= targetSeconds || !!lastServerResponse?.completed_at || !!lastServerResponse?.user_status?.completed_at;
+
+  if (isFinished) {
+    let reward = null;
+    let claimed = false;
+    if (options.autoClaim === true) {
+      try {
+        if (!isFastTest) await new Promise((r) => setTimeout(r, 1200));
+        reward = await claimQuestReward(token, questId);
+        claimed = true;
+      } catch (e) {}
+    }
+
+    return {
+      questId,
+      questName,
+      type: 'video',
+      completed: true,
+      claimed,
+      readyToClaim: !claimed,
+      currentSeconds: targetSeconds,
+      targetSeconds,
+      progressPercent: 100,
+      reward,
+      message: claimed
+        ? 'Đã hoàn thành 100% video & Nhận thưởng thành công!'
+        : 'Đã hoàn thành 100%! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
+    };
+  }
+
+  const currentPercent = Math.min(100, Math.round((currentSeconds / targetSeconds) * 100));
   return {
     questId,
     questName,
     type: 'video',
-    completed: true,
-    claimed,
-    readyToClaim: !claimed,
-    reward,
-    message: claimed
-      ? 'Đã hoàn thành 100% & Nhận thưởng thành công!'
-      : 'Đã hoàn thành 100%! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
+    enrolled: true,
+    completed: false,
+    claimed: false,
+    currentSeconds,
+    targetSeconds,
+    progressPercent: currentPercent,
+    message: `Tiến độ video: ${currentPercent}% (${Math.round(currentSeconds)}/${targetSeconds}s). Bot sẽ tiếp tục cày trong lần quét tới.`,
   };
 }
 
@@ -563,8 +699,89 @@ class DiscordUserGateway {
   }
 }
 
+function extractQuestTasks(quest) {
+  const taskConfig =
+    quest?.config?.task_config ??
+    quest?.config?.task_config_v2 ??
+    quest?.config?.taskConfig ??
+    quest?.config?.taskConfigV2;
+  return taskConfig?.tasks || {};
+}
+
+function isVideoQuest(quest) {
+  if (!quest) return false;
+  if (quest.config?.video_metadata || quest.config?.videoMetadata) return true;
+  if (quest.config?.quest_type === 1 || quest.config?.quest_type === 'video') return true;
+
+  const tasks = extractQuestTasks(quest);
+  for (const k of Object.keys(tasks)) {
+    const upper = k.toUpperCase();
+    if (upper.includes('VIDEO') || upper.startsWith('WATCH_')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getVideoTaskInfo(quest) {
+  const tasks = extractQuestTasks(quest);
+  let taskKey = null;
+  let targetSeconds = 30;
+
+  if (tasks.WATCH_VIDEO) {
+    taskKey = 'WATCH_VIDEO';
+    if (typeof tasks.WATCH_VIDEO.target === 'number' && tasks.WATCH_VIDEO.target > 0) {
+      targetSeconds = tasks.WATCH_VIDEO.target;
+    }
+  } else {
+    for (const [k, v] of Object.entries(tasks)) {
+      const upper = k.toUpperCase();
+      if (upper.includes('VIDEO') || upper.startsWith('WATCH_')) {
+        taskKey = k;
+        if (typeof v?.target === 'number' && v.target > 0) {
+          targetSeconds = v.target;
+        }
+        break;
+      }
+    }
+  }
+
+  if (!taskKey) {
+    const keys = Object.keys(tasks);
+    if (keys.length > 0) {
+      taskKey = keys[0];
+      if (typeof tasks[taskKey]?.target === 'number' && tasks[taskKey].target > 0) {
+        targetSeconds = tasks[taskKey].target;
+      }
+    } else {
+      taskKey = 'WATCH_VIDEO';
+    }
+  }
+
+  let currentSeconds = 0;
+  if (quest?.user_status?.progress) {
+    const p = quest.user_status.progress;
+    if (typeof p[taskKey]?.value === 'number') {
+      currentSeconds = p[taskKey].value;
+    } else if (typeof p.WATCH_VIDEO?.value === 'number') {
+      currentSeconds = p.WATCH_VIDEO.value;
+    } else {
+      for (const val of Object.values(p)) {
+        if (typeof val?.value === 'number' && val.value > currentSeconds) {
+          currentSeconds = val.value;
+        }
+      }
+    }
+  }
+
+  return { taskKey, targetSeconds, currentSeconds };
+}
+
 function getQuestProgressSeconds(quest) {
   if (!quest?.user_status) return 0;
+  if (isVideoQuest(quest)) {
+    return getVideoTaskInfo(quest).currentSeconds;
+  }
   const status = quest.user_status;
   if (typeof status.stream_progress_seconds === 'number' && status.stream_progress_seconds > 0) {
     return status.stream_progress_seconds;
@@ -581,12 +798,10 @@ function getQuestProgressSeconds(quest) {
 }
 
 function getQuestTargetSeconds(quest, preferredTaskName = null) {
-  const taskConfig =
-    quest?.config?.task_config ??
-    quest?.config?.task_config_v2 ??
-    quest?.config?.taskConfig ??
-    quest?.config?.taskConfigV2;
-  const tasks = taskConfig?.tasks || {};
+  if (isVideoQuest(quest)) {
+    return getVideoTaskInfo(quest).targetSeconds;
+  }
+  const tasks = extractQuestTasks(quest);
 
   if (preferredTaskName && tasks[preferredTaskName]?.target) {
     return tasks[preferredTaskName].target;
@@ -603,12 +818,7 @@ function getQuestTargetSeconds(quest, preferredTaskName = null) {
 }
 
 function getQuestApplicationInfo(quest) {
-  const taskConfig =
-    quest?.config?.task_config ??
-    quest?.config?.task_config_v2 ??
-    quest?.config?.taskConfig ??
-    quest?.config?.taskConfigV2;
-  const tasks = taskConfig?.tasks || {};
+  const tasks = extractQuestTasks(quest);
 
   let appId = null;
   let appName = null;
@@ -671,7 +881,16 @@ async function completeSingleQuest(token, quest, options = {}) {
     } catch (e) {}
   }
 
-  // Luôn đảm bảo chọn nền tảng PC/Desktop (platform: 0) cho nhiệm vụ đa nền tảng
+  // Nếu là Video Quest -> hoàn thành trực tiếp bằng video-progress (KHÔNG gọi select-task-platform)
+  if (isVideoQuest(quest)) {
+    const res = await completeVideoQuest(token, quest, options);
+    return {
+      progressPercent: 100,
+      ...res,
+    };
+  }
+
+  // Luôn đảm bảo chọn nền tảng PC/Desktop (platform: 0) cho nhiệm vụ game đa nền tảng
   try {
     await requestDiscord(`https://discord.com/api/v9/quests/${questId}/select-task-platform`, {
       method: 'POST',
@@ -704,21 +923,7 @@ async function completeSingleQuest(token, quest, options = {}) {
     };
   }
 
-  const tasks = {
-    ...(quest.config?.task_config?.tasks || {}),
-    ...(quest.config?.task_config_v2?.tasks || {}),
-    ...(quest.config?.taskConfig?.tasks || {}),
-    ...(quest.config?.taskConfigV2?.tasks || {}),
-  };
-
-  const isVideo = !!(tasks.WATCH_VIDEO || tasks.WATCH_VIDEO_ON_MOBILE);
-  if (isVideo) {
-    const res = await completeVideoQuest(token, quest, options);
-    return {
-      progressPercent: 100,
-      ...res,
-    };
-  }
+  const tasks = extractQuestTasks(quest);
 
   const isActivity = !!(tasks.PLAY_ACTIVITY || tasks.ACHIEVEMENT_IN_ACTIVITY || tasks.ACHIEVEMENT_IN_GAME);
   const isMobileTask = !!(tasks.PLAY_ON_MOBILE || tasks.WATCH_VIDEO_ON_MOBILE);
@@ -1092,6 +1297,9 @@ module.exports = {
   setFetchImplementation,
   setWebSocketImplementation,
   DiscordUserGateway,
+  extractQuestTasks,
+  isVideoQuest,
+  getVideoTaskInfo,
   getQuestProgressSeconds,
   getQuestTargetSeconds,
   getQuestApplicationInfo,
