@@ -75,7 +75,8 @@ module.exports.execute = async (interaction) => {
     if (typeof interaction.deferReply === 'function') {
       await interaction.deferReply({ flags: 64 });
     }
-    const { getSubscriber, scanUserQuests, buildAutoStatusPayload } = require('../../utils/questScheduler');
+    const { getSubscriber, scanUserQuests, buildAutoStatusPayload, isUserJobRunning } = require('../../utils/questScheduler');
+    const { fetchQuests, enrollQuest, claimQuestReward } = require('../../utils/questTokenWorker');
     const sub = getSubscriber(userId);
     if (!sub || !sub.token) {
       return interaction.editReply({
@@ -87,15 +88,55 @@ module.exports.execute = async (interaction) => {
         content: '⚠️ Token đã lưu của bạn đã hết hạn hoặc không dùng được nữa. Hãy dùng lệnh `/quest action:token` và bấm **Đổi Token Mới** để cập nhật lại nhé!',
       });
     }
-    const res = await scanUserQuests(sub, interaction.client);
-    if (res.actions?.length > 0) {
+
+    if (isUserJobRunning(userId)) {
       return interaction.editReply({
-        content: `🎉 Đã quét xong: Tự động xử lý thành công **${res.actions.length}** nhiệm vụ! Kiểm tra DM để xem chi tiết.`,
+        content: '⏳ **Tiến trình cày quest ngầm đang chạy trên tài khoản của bạn!**\nBot đang kết nối Gateway và gửi tín hiệu định kỳ. Quà ORB sẽ được gửi qua DM khi hoàn thành!',
         ...buildAutoStatusPayload(userId),
       });
     }
+
+    let allQuests = [];
+    try {
+      allQuests = await fetchQuests(sub.token);
+    } catch (err) {
+      return interaction.editReply({
+        content: `❌ Không thể kiểm tra nhiệm vụ: ${err.message}`,
+      });
+    }
+
+    const now = Date.now();
+    const activeQuests = allQuests.filter((q) => {
+      const exp = q.config?.expires_at || q.config?.expiresAt;
+      if (!exp) return true;
+      const expMs = new Date(exp).getTime();
+      return Number.isNaN(expMs) ? true : expMs > now;
+    });
+
+    const pendingQuests = activeQuests.filter((q) => !q.user_status?.claimed_at);
+
+    if (pendingQuests.length === 0) {
+      return interaction.editReply({
+        content: '✅ Đã quét xong: Hiện tại không có nhiệm vụ mới nào trên tài khoản của bạn.',
+        ...buildAutoStatusPayload(userId),
+      });
+    }
+
+    // Tự động enroll trước
+    for (const q of pendingQuests) {
+      if (!q.user_status?.enrolled_at) {
+        try { await enrollQuest(sub.token, q.id); } catch (e) {}
+      }
+      if (q.user_status?.completed_at && !q.user_status?.claimed_at) {
+        try { await claimQuestReward(sub.token, q.id); } catch (e) {}
+      }
+    }
+
+    // Chạy ngầm trong background
+    scanUserQuests(sub, interaction.client).catch((e) => console.error('[SCAN BACKGROUND ERROR]', e));
+
     return interaction.editReply({
-      content: '✅ Đã quét xong: Hiện tại không có nhiệm vụ mới nào trên tài khoản của bạn.',
+      content: `🚀 **Đã bắt đầu tự động làm ${pendingQuests.length} nhiệm vụ ngầm!**\nBot đang kết nối Gateway và cày tiến độ 24/7. Khi hoàn tất, bot sẽ tự Claim ORB và gửi tin nhắn DM cho bạn.`,
       ...buildAutoStatusPayload(userId),
     });
   }

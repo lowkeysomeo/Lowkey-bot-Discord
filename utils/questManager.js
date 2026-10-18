@@ -990,7 +990,7 @@ async function handleButtonInteraction(interaction) {
   }
 
   if (action === 'auto_toggle') {
-    const { toggleSubscriber, buildAutoStatusPayload, getSubscriber } = require('./questScheduler');
+    const { toggleSubscriber, buildAutoStatusPayload, getSubscriber, scanUserQuests } = require('./questScheduler');
     const sub = getSubscriber(interaction.user.id);
     if (!sub) {
       return interaction.reply({
@@ -998,7 +998,10 @@ async function handleButtonInteraction(interaction) {
         flags: 64,
       });
     }
-    toggleSubscriber(interaction.user.id);
+    const isNowEnabled = toggleSubscriber(interaction.user.id);
+    if (isNowEnabled) {
+      scanUserQuests(sub, interaction.client).catch((e) => console.error('[AUTO TOGGLE SCAN ERROR]', e));
+    }
     return interaction.update(buildAutoStatusPayload(interaction.user.id));
   }
 
@@ -1017,7 +1020,8 @@ async function handleButtonInteraction(interaction) {
 
   if (action === 'auto_scan_now') {
     await interaction.deferUpdate();
-    const { getSubscriber, scanUserQuests, buildAutoStatusPayload } = require('./questScheduler');
+    const { getSubscriber, scanUserQuests, buildAutoStatusPayload, isUserJobRunning } = require('./questScheduler');
+    const { fetchQuests, enrollQuest, claimQuestReward, getQuestProgressSeconds } = require('./questTokenWorker');
     const sub = getSubscriber(interaction.user.id);
     if (!sub) {
       return interaction.followUp({
@@ -1025,65 +1029,115 @@ async function handleButtonInteraction(interaction) {
         flags: 64,
       });
     }
-    const res = await scanUserQuests(sub, interaction.client);
-    const actions = res.actions || [];
 
-    if (actions.length > 0) {
-      const completedList = actions.filter((a) => a.completed);
-      const gameList = actions.filter((a) => a.requiresDesktop && !a.completed);
-
-      const scanEmbed = new EmbedBuilder()
-        .setColor(completedList.length > 0 ? 0x57f287 : 0x5865f2)
-        .setTitle(`🔎 KẾT QUẢ QUÉT TỰ ĐỘNG (${actions.length} NHIỆM VỤ ĐƯỢC PHÁT HIỆN)`)
+    if (isUserJobRunning(interaction.user.id)) {
+      const runningEmbed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle('⏳ ĐANG TIẾN HÀNH CÀY QUEST NGẦM')
+        .setDescription(
+          'Bot đang kết nối Gateway và cày tiến độ ngầm 24/7 cho các nhiệm vụ trên tài khoản của bạn (Where Winds Meet, Clean Crew Roblox, VALORANT Aces).\n\n' +
+          '⚡ Tiến trình đang chạy theo nhịp chuẩn an toàn của Discord. Khi hoàn tất 100%, bot sẽ tự Claim ORB và gửi thông báo qua DM cho bạn!'
+        )
         .setTimestamp();
 
-      let desc = '';
-      actions.forEach((a, idx) => {
-        let icon = '🎮';
-        if (a.completed) icon = '✅';
-        else if (a.requiresDesktop) icon = '🕹️';
+      await interaction.followUp({ embeds: [runningEmbed], flags: 64 });
+      return interaction.editReply(buildAutoStatusPayload(interaction.user.id));
+    }
 
-        const pctText = typeof a.progressPercent === 'number' ? ` (Tiến độ: **${a.progressPercent}%**)` : '';
-        desc += `**${idx + 1}. ${a.questName}**${pctText}\n└ ${icon} ${a.message}\n\n`;
-      });
-
-      if (gameList.length > 0) {
-        desc += `💡 **Hướng dẫn làm nhanh Game PC:**\n` +
-          `Do Discord bắt buộc mở ứng dụng Desktop để nhận diện game, bot đã tự động nhận (Accept) nhiệm vụ cho bạn. ` +
-          `Bạn hãy bấm nút **📜 Lấy Script F12 1-Click** bên dưới để hoàn tất 15 phút ngay trên máy tính mà không cần tải game!`;
-      }
-
-      scanEmbed.setDescription(desc.trim());
-
-      const scanRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('quest:script')
-          .setLabel('Lấy Script F12 1-Click')
-          .setEmoji('📜')
-          .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-          .setCustomId('quest:auto_scan_now')
-          .setLabel('Quét Lại Ngay')
-          .setEmoji('🔄')
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId('quest:auto')
-          .setLabel('Cài Đặt Tự Động')
-          .setEmoji('⚙️')
-          .setStyle(ButtonStyle.Secondary)
-      );
-
-      await interaction.followUp({
-        embeds: [scanEmbed],
-        components: [scanRow],
+    // Tải danh sách Quest trực tiếp để hiển thị tiến độ tức thì cho người dùng
+    let allQuests = [];
+    try {
+      allQuests = await fetchQuests(sub.token);
+    } catch (err) {
+      return interaction.followUp({
+        content: `❌ Không thể kiểm tra nhiệm vụ: ${err.message}`,
         flags: 64,
       });
-    } else {
+    }
+
+    const now = Date.now();
+    const activeQuests = allQuests.filter((q) => {
+      const exp = q.config?.expires_at || q.config?.expiresAt;
+      if (!exp) return true;
+      const expMs = new Date(exp).getTime();
+      return Number.isNaN(expMs) ? true : expMs > now;
+    });
+
+    const pendingQuests = activeQuests.filter((q) => !q.user_status?.claimed_at);
+
+    if (pendingQuests.length === 0) {
       await interaction.followUp({
         content: '✅ **Đã quét xong:** Hiện tại bạn không có nhiệm vụ Discord nào chưa hoàn thành!',
         flags: 64,
       });
+      return interaction.editReply(buildAutoStatusPayload(interaction.user.id));
     }
+
+    // Tự động Enroll tất cả nhiệm vụ chưa nhận & claim nếu đã completed_at
+    for (const q of pendingQuests) {
+      if (!q.user_status?.enrolled_at) {
+        try { await enrollQuest(sub.token, q.id); } catch (e) {}
+      }
+      if (q.user_status?.completed_at && !q.user_status?.claimed_at) {
+        try { await claimQuestReward(sub.token, q.id); } catch (e) {}
+      }
+    }
+
+    // Khởi chạy tiến trình cày ngầm bằng scanUserQuests trong background
+    scanUserQuests(sub, interaction.client).catch((e) => console.error('[AUTO SCAN BACKGROUND ERROR]', e));
+
+    const scanEmbed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle(`🚀 ĐÃ BẮT ĐẦU TỰ ĐỘNG LÀM ${pendingQuests.length} NHIỆM VỤ NGẦM`)
+      .setTimestamp();
+
+    let desc = `Bot đã nhận diện thành công **${pendingQuests.length} nhiệm vụ** trên tài khoản của bạn:\n\n`;
+    pendingQuests.forEach((q, idx) => {
+      const qName =
+        q.config?.messages?.quest_name ||
+        q.config?.messages?.game_title ||
+        q.config?.messages?.game_name ||
+        q.config?.application?.name ||
+        `Nhiệm vụ #${q.id}`;
+
+      const currSec = getQuestProgressSeconds(q);
+      const targetSec = q.config?.task_config?.tasks?.PLAY_ON_DESKTOP?.target || q.config?.task_config_v2?.tasks?.PLAY_ON_DESKTOP?.target || 900;
+      const pct = Math.min(100, Math.round((currSec / targetSec) * 100));
+
+      let icon = '🎮';
+      if (pct > 0) icon = '🔄';
+      desc += `**${idx + 1}. ${qName}** (Tiến độ: **${pct}%**)\n└ ${icon} Bot đang kết nối Gateway và cày tiếp đến 100%...\n\n`;
+    });
+
+    desc += `⚡ **Hoàn toàn tự động:** Bot đang gửi tín hiệu giả lập an toàn lên Discord trong nền. Bạn không cần mở game hay treo máy!\n` +
+      `🎁 **Tự động nhận thưởng:** Khi hoàn tất 15 phút, bot sẽ tự Claim ORB và gửi thông báo trực tiếp qua DM cho bạn.`;
+
+    scanEmbed.setDescription(desc.trim());
+
+    const scanRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('quest:auto_scan_now')
+        .setLabel('Kiểm Tra Lại Tiến Độ')
+        .setEmoji('🔄')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('quest:script')
+        .setLabel('Script F12 Dự Phòng')
+        .setEmoji('📜')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('quest:hub')
+        .setLabel('Về Menu')
+        .setEmoji('↩️')
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    await interaction.followUp({
+      embeds: [scanEmbed],
+      components: [scanRow],
+      flags: 64,
+    });
+
     return interaction.editReply(buildAutoStatusPayload(interaction.user.id));
   }
 }

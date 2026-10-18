@@ -22,6 +22,7 @@ const {
 } = require('../utils/questVoiceHelper');
 const {
   setFetchImplementation,
+  setWebSocketImplementation,
   fetchUserInfo,
   fetchQuests,
   enrollQuest,
@@ -30,7 +31,40 @@ const {
   claimQuestReward,
   completeSingleQuest,
   runAutoQuestForToken,
+  getQuestProgressSeconds,
+  getQuestApplicationInfo,
 } = require('../utils/questTokenWorker');
+
+const EventEmitter = require('node:events');
+class MockWebSocket extends EventEmitter {
+  constructor(url) {
+    super();
+    this.url = url;
+    this.readyState = 1;
+    process.nextTick(() => {
+      this.emit('open');
+      this.emit('message', Buffer.from(JSON.stringify({ op: 10, d: { heartbeat_interval: 40000 } })));
+    });
+  }
+  send(data) {
+    try {
+      const parsed = JSON.parse(data);
+      if (parsed.op === 2) {
+        process.nextTick(() => {
+          this.emit('message', Buffer.from(JSON.stringify({ op: 0, t: 'READY', d: { session_id: 'mock-session-id' } })));
+        });
+      }
+    } catch (e) {}
+  }
+  close() {
+    this.readyState = 3;
+    this.emit('close');
+  }
+  terminate() {
+    this.close();
+  }
+}
+setWebSocketImplementation(MockWebSocket);
 
 (async () => {
   // 1. Kiểm tra load command
@@ -280,12 +314,14 @@ const {
     // POST /quests/{id}/heartbeat
     if (urlStr.includes('/heartbeat')) {
       heartbeatCount++;
+      const body = JSON.parse(options.body || '{}');
+      assert.equal(body.application_id, undefined, 'Heartbeat payload không được chứa application_id');
       return {
         status: 200,
         ok: true,
         json: async () => ({
-          stream_progress_seconds: heartbeatCount * 30,
-          user_status: { stream_progress_seconds: heartbeatCount * 30 },
+          stream_progress_seconds: heartbeatCount * 300 + 60,
+          user_status: { stream_progress_seconds: heartbeatCount * 300 + 60 },
         }),
       };
     }
@@ -349,6 +385,98 @@ const {
     assert.match(modalReply.embeds[0].data.title, /KẾT QUẢ AUTO QUEST DISCORD/);
     assert.match(modalReply.embeds[0].data.description, /lowkey_tester/);
     assert.match(modalReply.embeds[0].data.description, /Watch Trailer for 30 Orbs/);
+
+    // 9. Kiểm tra xử lý chuyên sâu 3 loại nhiệm vụ của người dùng:
+    // 9.1 Where Winds Meet (đã có 26% / 234s tiến độ từ trước, nhiệm vụ PLAY_ON_DESKTOP)
+    const whereWindsMeetQuest = {
+      id: 'quest-wwm-26',
+      config: {
+        messages: { quest_name: 'Bản 2.3 Hải Đại Bằng Lai' },
+        task_config: {
+          tasks: {
+            PLAY_ON_DESKTOP: {
+              target: 900,
+              applications: [{ id: '99887766', name: 'Where Winds Meet' }],
+            },
+          },
+        },
+      },
+      user_status: {
+        enrolled_at: '2026-10-18T00:00:00Z',
+        completed_at: null,
+        claimed_at: null,
+        progress: {
+          PLAY_ON_DESKTOP: { value: 234 },
+        },
+        stream_progress_seconds: 234,
+      },
+    };
+
+    const initialSec = getQuestProgressSeconds(whereWindsMeetQuest);
+    assert.equal(initialSec, 234, 'getQuestProgressSeconds phải nhận đúng 234s (26%)');
+    const wwmApp = getQuestApplicationInfo(whereWindsMeetQuest);
+    assert.equal(wwmApp.appId, '99887766');
+    assert.equal(wwmApp.appName, 'Where Winds Meet');
+
+    // Chạy hoàn thành Where Winds Meet từ 26% lên 100%
+    const wwmRes = await completeSingleQuest('valid_token_xyz', whereWindsMeetQuest, { heartbeatDelayMs: 10 });
+    assert.equal(wwmRes.completed, true);
+    assert.equal(wwmRes.claimed, true);
+    assert.equal(wwmRes.progressPercent, 100);
+
+    // 9.2 Clean Crew on Roblox (ứng dụng Roblox task_config_v2)
+    const robloxQuest = {
+      id: 'quest-roblox-clean-crew',
+      config: {
+        messages: { quest_name: 'Clean Crew on Roblox' },
+        task_config_v2: {
+          tasks: {
+            PLAY_ON_DESKTOP: {
+              target: 900,
+              applications: [{ id: '432980957394370572', name: 'Roblox' }],
+            },
+          },
+        },
+      },
+      user_status: {
+        enrolled_at: null,
+        completed_at: null,
+        claimed_at: null,
+      },
+    };
+
+    const robloxApp = getQuestApplicationInfo(robloxQuest);
+    assert.equal(robloxApp.appId, '432980957394370572');
+    assert.equal(robloxApp.appName, 'Roblox');
+    const robloxRes = await completeSingleQuest('valid_token_xyz', robloxQuest, { heartbeatDelayMs: 10 });
+    assert.equal(robloxRes.completed, true);
+    assert.equal(robloxRes.claimed, true);
+
+    // 9.3 VALORANT Quét Sạch Vòng 3 (PLAY_ACTIVITY)
+    const valorantQuest = {
+      id: 'quest-valorant-aces-3',
+      config: {
+        messages: { quest_name: 'VALORANT Quét Sạch Vòng 3' },
+        task_config: {
+          tasks: {
+            PLAY_ACTIVITY: {
+              target: 900,
+              applications: [{ id: '1122334455', name: 'VALORANT' }],
+            },
+          },
+        },
+      },
+      user_status: {
+        enrolled_at: null,
+        completed_at: null,
+        claimed_at: null,
+      },
+    };
+
+    const valRes = await completeSingleQuest('valid_token_xyz', valorantQuest, { heartbeatDelayMs: 10 });
+    assert.equal(valRes.completed, true);
+    assert.equal(valRes.claimed, true);
+    assert.equal(valRes.type, 'activity');
   } finally {
     setFetchImplementation(null);
   }

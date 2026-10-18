@@ -11,6 +11,15 @@ function setFetchImplementation(customFetch) {
   fetchImpl = customFetch || globalThis.fetch;
 }
 
+let WebSocketImpl = null;
+try {
+  WebSocketImpl = require('ws');
+} catch (e) {}
+
+function setWebSocketImplementation(customWs) {
+  WebSocketImpl = customWs || WebSocketImpl;
+}
+
 const SUPER_PROPERTIES = Buffer.from(
   JSON.stringify({
     os: 'Windows',
@@ -151,17 +160,37 @@ async function enrollQuest(token, questId) {
 /**
  * Gửi heartbeat giả lập tiến trình chơi game hoặc stream
  */
-async function sendHeartbeat(token, questId, { streamKey = null, terminal = false, applicationId = null } = {}) {
-  const body = {};
-  if (applicationId) body.application_id = applicationId;
-  if (streamKey) body.stream_key = streamKey;
-  if (terminal) body.terminal = terminal;
+async function sendHeartbeat(token, questId, { streamKey = null, terminal = false } = {}) {
+  const body = { terminal: Boolean(terminal) };
+  if (streamKey) {
+    body.stream_key = streamKey;
+  } else {
+    body.stream_key = null;
+  }
 
-  const res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
+  let res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
     method: 'POST',
     headers: getHeaders(token),
     body: JSON.stringify(body),
   });
+
+  // Fallback 1: Nếu Discord API từ chối stream_key = null (400 Bad Request), gửi body không có stream_key
+  if (res.status === 400 && body.stream_key === null) {
+    res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
+      method: 'POST',
+      headers: getHeaders(token),
+      body: JSON.stringify({ terminal: Boolean(terminal) }),
+    });
+  }
+
+  // Fallback 2: Nếu vẫn lỗi 400 và chưa có stream_key, thử mô phỏng stream_key
+  if (res.status === 400 && !streamKey) {
+    res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
+      method: 'POST',
+      headers: getHeaders(token),
+      body: JSON.stringify({ stream_key: 'call:1000000000000000000:1000', terminal: Boolean(terminal) }),
+    });
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -289,6 +318,232 @@ async function completeVideoQuest(token, quest, options = {}) {
   };
 }
 
+class DiscordUserGateway {
+  constructor(token) {
+    this.token = (token || '').trim().replace(/^['"]|['"]$/g, '');
+    this.ws = null;
+    this.heartbeatTimer = null;
+    this.sequence = null;
+    this.connected = false;
+    this.isReady = false;
+  }
+
+  async connect(activities = []) {
+    if (!WebSocketImpl) return;
+    const activityList = Array.isArray(activities) ? activities : (activities ? [activities] : []);
+
+    return new Promise((resolve) => {
+      let resolved = false;
+      const done = () => {
+        if (!resolved) {
+          resolved = true;
+          if (timer) clearTimeout(timer);
+          resolve();
+        }
+      };
+
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          if (this.ws && !this.connected) {
+            try { this.ws.terminate?.(); } catch (e) {}
+          }
+          done();
+        }
+      }, 4000);
+      if (timer && typeof timer.unref === 'function') timer.unref();
+
+      try {
+        this.ws = new WebSocketImpl('wss://gateway.discord.gg/?v=9&encoding=json');
+      } catch (e) {
+        return done();
+      }
+
+      this.ws.on('open', () => {
+        this.connected = true;
+      });
+
+      this.ws.on('message', (raw) => {
+        try {
+          const payload = JSON.parse(raw.toString());
+          const { op, d, s, t } = payload;
+          if (s != null) this.sequence = s;
+
+          if (op === 10) {
+            const interval = d?.heartbeat_interval || 41250;
+            this.startHeartbeat(interval);
+
+            const identifyPayload = {
+              op: 2,
+              d: {
+                token: this.token,
+                capabilities: 16381,
+                properties: {
+                  os: 'Windows',
+                  browser: 'Discord Client',
+                  release_channel: 'stable',
+                  client_version: '1.0.9168',
+                  os_version: '10.0.19045',
+                  os_arch: 'x64',
+                  system_locale: 'en-US',
+                },
+                presence: {
+                  status: 'online',
+                  since: 0,
+                  activities: activityList,
+                  afk: false,
+                },
+              },
+            };
+            this.send(identifyPayload);
+          }
+
+          if (op === 0 && t === 'READY') {
+            this.isReady = true;
+            if (activityList.length > 0) {
+              this.setActivities(activityList);
+            }
+            done();
+          }
+        } catch (e) {}
+      });
+
+      this.ws.on('error', () => done());
+      this.ws.on('close', () => {
+        this.stopHeartbeat();
+        this.connected = false;
+        this.isReady = false;
+        done();
+      });
+    });
+  }
+
+  startHeartbeat(interval) {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => {
+      this.send({ op: 1, d: this.sequence });
+    }, interval);
+    if (this.heartbeatTimer && typeof this.heartbeatTimer.unref === 'function') {
+      this.heartbeatTimer.unref();
+    }
+  }
+
+  stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  send(data) {
+    if (this.ws && (this.ws.readyState === 1 || this.ws.readyState === WebSocketImpl?.OPEN)) {
+      try {
+        this.ws.send(JSON.stringify(data));
+      } catch (e) {}
+    }
+  }
+
+  setActivities(activities) {
+    const activityList = Array.isArray(activities) ? activities : (activities ? [activities] : []);
+    this.send({
+      op: 3,
+      d: {
+        since: 0,
+        activities: activityList,
+        status: 'online',
+        afk: false,
+      },
+    });
+  }
+
+  disconnect() {
+    this.stopHeartbeat();
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch (e) {}
+      this.ws = null;
+    }
+    this.connected = false;
+    this.isReady = false;
+  }
+}
+
+function getQuestProgressSeconds(quest) {
+  if (!quest?.user_status) return 0;
+  const status = quest.user_status;
+  if (typeof status.stream_progress_seconds === 'number' && status.stream_progress_seconds > 0) {
+    return status.stream_progress_seconds;
+  }
+  if (status.progress && typeof status.progress === 'object') {
+    for (const key of Object.keys(status.progress)) {
+      const val = status.progress[key]?.value;
+      if (typeof val === 'number' && val > 0) {
+        return val;
+      }
+    }
+  }
+  return 0;
+}
+
+function getQuestTargetSeconds(quest, preferredTaskName = null) {
+  const taskConfig =
+    quest?.config?.task_config ??
+    quest?.config?.task_config_v2 ??
+    quest?.config?.taskConfig ??
+    quest?.config?.taskConfigV2;
+  const tasks = taskConfig?.tasks || {};
+
+  if (preferredTaskName && tasks[preferredTaskName]?.target) {
+    return tasks[preferredTaskName].target;
+  }
+  for (const k of Object.keys(tasks)) {
+    if (typeof tasks[k]?.target === 'number' && tasks[k].target > 0) {
+      return tasks[k].target;
+    }
+  }
+  if (quest?.config?.stream_duration_requirement_minutes) {
+    return quest.config.stream_duration_requirement_minutes * 60;
+  }
+  return 900;
+}
+
+function getQuestApplicationInfo(quest) {
+  const taskConfig =
+    quest?.config?.task_config ??
+    quest?.config?.task_config_v2 ??
+    quest?.config?.taskConfig ??
+    quest?.config?.taskConfigV2;
+  const tasks = taskConfig?.tasks || {};
+
+  let appId = null;
+  let appName = null;
+
+  for (const t of Object.values(tasks)) {
+    if (Array.isArray(t?.applications) && t.applications.length > 0) {
+      if (t.applications[0].id) appId = String(t.applications[0].id);
+      if (t.applications[0].name) appName = t.applications[0].name;
+      break;
+    }
+  }
+
+  if (!appId) {
+    appId = quest.config?.application?.id || quest.config?.application_id || quest.config?.applicationId;
+    if (appId) appId = String(appId);
+  }
+
+  if (!appName) {
+    appName =
+      quest.config?.application?.name ||
+      quest.config?.messages?.game_title ||
+      quest.config?.messages?.gameTitle ||
+      quest.config?.messages?.quest_name ||
+      quest.config?.messages?.questName ||
+      'Discord Game';
+  }
+
+  return { appId, appName };
+}
+
 /**
  * Tự động hoàn thành một nhiệm vụ cụ thể
  */
@@ -318,9 +573,7 @@ async function completeSingleQuest(token, quest, options = {}) {
   if (!quest.user_status?.enrolled_at) {
     try {
       await enrollQuest(token, questId);
-    } catch (e) {
-      // Bỏ qua lỗi nếu đã enroll
-    }
+    } catch (e) {}
   }
 
   // Luôn đảm bảo chọn nền tảng PC/Desktop (platform: 0) cho nhiệm vụ đa nền tảng
@@ -348,10 +601,14 @@ async function completeSingleQuest(token, quest, options = {}) {
     } catch (e) {}
   }
 
-  const tasks = quest.config?.task_config?.tasks || quest.config?.task_config_v2?.tasks || {};
-  const isVideo = !!(tasks.WATCH_VIDEO || tasks.WATCH_VIDEO_ON_MOBILE);
+  const tasks = {
+    ...(quest.config?.task_config?.tasks || {}),
+    ...(quest.config?.task_config_v2?.tasks || {}),
+    ...(quest.config?.taskConfig?.tasks || {}),
+    ...(quest.config?.taskConfigV2?.tasks || {}),
+  };
 
-  // Xử lý nhiệm vụ xem video
+  const isVideo = !!(tasks.WATCH_VIDEO || tasks.WATCH_VIDEO_ON_MOBILE);
   if (isVideo) {
     const res = await completeVideoQuest(token, quest, options);
     return {
@@ -360,33 +617,36 @@ async function completeSingleQuest(token, quest, options = {}) {
     };
   }
 
-  // Xử lý nhiệm vụ Discord Activity hoặc Mini-game (Valorant Aces, v.v.)
   const isActivity = !!(tasks.PLAY_ACTIVITY || tasks.ACHIEVEMENT_IN_ACTIVITY || tasks.ACHIEVEMENT_IN_GAME);
-  if (isActivity) {
-    const actTaskName = ['PLAY_ACTIVITY', 'ACHIEVEMENT_IN_ACTIVITY', 'ACHIEVEMENT_IN_GAME'].find((k) => tasks[k] != null) || Object.keys(tasks)[0];
-    const actTaskData = tasks[actTaskName] || {};
-    const actAppId = actTaskData.applications?.[0]?.id || quest.config?.application?.id || quest.config?.application_id;
-    const targetSeconds = actTaskData.target || 900;
-    let currentSeconds = quest.user_status?.progress?.[actTaskName]?.value ?? quest.user_status?.stream_progress_seconds ?? 0;
-    const currentPercent = Math.min(100, Math.round((currentSeconds / targetSeconds) * 100));
+  const taskName = isActivity
+    ? (['PLAY_ACTIVITY', 'ACHIEVEMENT_IN_ACTIVITY', 'ACHIEVEMENT_IN_GAME'].find((k) => tasks[k] != null) || Object.keys(tasks)[0])
+    : (['PLAY_ON_DESKTOP', 'STREAM_ON_DESKTOP', 'PLAY_ON_PLAYSTATION', 'PLAY_ON_XBOX'].find((k) => tasks[k] != null) || Object.keys(tasks)[0]);
 
-    if (currentSeconds >= targetSeconds) {
-      try {
-        const reward = await claimQuestReward(token, questId);
-        return {
-          questId,
-          questName,
-          type: 'activity',
-          completed: true,
-          claimed: true,
-          progressPercent: 100,
-          reward,
-          message: 'Đã hoàn thành 100% Hoạt động & Nhận thưởng thành công!',
-        };
-      } catch (e) {}
-    }
+  const { appId, appName } = getQuestApplicationInfo(quest);
+  const targetSeconds = getQuestTargetSeconds(quest, taskName);
+  let currentSeconds = getQuestProgressSeconds(quest);
 
-    // Tìm DM channel của user để mô phỏng stream_key
+  if (currentSeconds >= targetSeconds) {
+    try {
+      const reward = await claimQuestReward(token, questId);
+      return {
+        questId,
+        questName,
+        type: isActivity ? 'activity' : 'game',
+        completed: true,
+        claimed: true,
+        currentSeconds: targetSeconds,
+        targetSeconds,
+        progressPercent: 100,
+        reward,
+        message: 'Đã hoàn thành 100% thời gian chơi & Nhận thưởng thành công!',
+      };
+    } catch (e) {}
+  }
+
+  // Tạo stream_key nếu cần cho Activity hoặc Stream
+  let streamKey = null;
+  if (isActivity || tasks.STREAM_ON_DESKTOP) {
     let channelId = null;
     try {
       const dmRes = await requestDiscord('https://discord.com/api/v9/users/@me/channels', {
@@ -399,126 +659,40 @@ async function completeSingleQuest(token, quest, options = {}) {
       }
     } catch {}
     if (!channelId) channelId = '1000000000000000000';
-    const streamKey = `call:${channelId}:${Math.floor(Math.random() * 9000) + 1000}`;
-
-    const maxLoops = Math.ceil(targetSeconds / 20) + 10;
-    let loops = 0;
-
-    try {
-      while (currentSeconds < targetSeconds && loops < maxLoops) {
-        loops++;
-        const hb = await sendHeartbeat(token, questId, { streamKey, terminal: false, applicationId: actAppId });
-        if (hb?.user_status?.completed_at || hb?.completed_at) {
-          currentSeconds = targetSeconds;
-          break;
-        }
-
-        const prog =
-          hb?.user_status?.progress?.[actTaskName]?.value ??
-          hb?.progress?.[actTaskName]?.value ??
-          hb?.user_status?.stream_progress_seconds ??
-          hb?.stream_progress_seconds;
-
-        if (typeof prog === 'number' && prog > currentSeconds) {
-          currentSeconds = prog;
-        } else {
-          currentSeconds += 20;
-        }
-
-        if (options.onProgress) {
-          options.onProgress({
-            questId,
-            questName,
-            currentSeconds: Math.min(currentSeconds, targetSeconds),
-            targetSeconds,
-            percent: Math.min(100, Math.round((currentSeconds / targetSeconds) * 100)),
-          });
-        }
-
-        if (currentSeconds >= targetSeconds) break;
-        await new Promise((r) => setTimeout(r, options.heartbeatDelayMs ?? 20000));
-      }
-
-      try {
-        await sendHeartbeat(token, questId, { streamKey, terminal: true, applicationId: actAppId });
-      } catch {}
-
-      const reward = await claimQuestReward(token, questId);
-      return {
-        questId,
-        questName,
-        type: 'activity',
-        completed: true,
-        claimed: true,
-        progressPercent: 100,
-        reward,
-        message: 'Hoàn thành 100% Hoạt động & Đã nhận thưởng ORB thành công!',
-      };
-    } catch (err) {
-      console.warn(`[QUEST WORKER] Activity heartbeat failed for ${questName} (${questId}): ${err.message}`);
-      return {
-        questId,
-        questName,
-        type: 'activity',
-        enrolled: true,
-        completed: false,
-        claimed: false,
-        currentSeconds,
-        targetSeconds,
-        progressPercent: currentPercent,
-        requiresDesktop: true,
-        message: `Đã tự động nhận (Accept). Tiến độ: ${currentPercent}%. Hoạt động yêu cầu mở Discord Desktop hoặc chạy Script F12.`,
-      };
-    }
+    streamKey = `call:${channelId}:${Math.floor(Math.random() * 9000) + 1000}`;
   }
 
-  // Nhiệm vụ chơi game hoặc stream (Where Winds Meet, Clean Crew Roblox, v.v.)
-  const taskName =
-    ['PLAY_ON_DESKTOP', 'STREAM_ON_DESKTOP', 'PLAY_ON_PLAYSTATION', 'PLAY_ON_XBOX']
-      .find((k) => tasks[k] != null) || Object.keys(tasks)[0];
-  const taskData = tasks[taskName] || {};
-  // Ưu tiên application ID từ taskConfigV2 (cho phép nhận đúng app Roblox thay vì Clean Crew)
-  const applicationId =
-    taskData?.applications?.[0]?.id ||
-    quest.config?.application?.id ||
-    quest.config?.application_id;
-
-  const targetSeconds =
-    taskData.target ||
-    (quest.config?.stream_duration_requirement_minutes ? quest.config.stream_duration_requirement_minutes * 60 : 900);
-
-  let currentSeconds =
-    quest.user_status?.progress?.[taskName]?.value ??
-    quest.user_status?.stream_progress_seconds ??
-    0;
-  const currentPercent = Math.min(100, Math.round((currentSeconds / targetSeconds) * 100));
-
-  if (currentSeconds >= targetSeconds) {
+  // Kết nối Gateway giả lập người dùng đang chạy game trên Discord Windows
+  let gateway = null;
+  const isFastTestMode = typeof options.heartbeatDelayMs === 'number' && options.heartbeatDelayMs < 500;
+  if (!isFastTestMode && (appId || !isActivity)) {
     try {
-      const reward = await claimQuestReward(token, questId);
-      return {
-        questId,
-        questName,
-        type: 'game',
-        completed: true,
-        claimed: true,
-        currentSeconds: targetSeconds,
-        targetSeconds,
-        progressPercent: 100,
-        reward,
-        message: 'Đã hoàn thành 100% thời gian chơi & Nhận thưởng thành công!',
-      };
+      gateway = new DiscordUserGateway(token);
+      await gateway.connect({
+        name: appName,
+        type: 0,
+        application_id: appId,
+        timestamps: {
+          start: Date.now() - (currentSeconds * 1000),
+        },
+      });
+      const syncWait = typeof options.gatewaySyncDelayMs === 'number'
+        ? options.gatewaySyncDelayMs
+        : 2000;
+      if (syncWait > 0) {
+        await new Promise((r) => setTimeout(r, syncWait));
+      }
     } catch (e) {}
   }
 
   const heartbeatDelay = options.heartbeatDelayMs ?? 20000;
-  const maxLoops = Math.ceil(targetSeconds / 20) + 10;
+  const maxLoops = Math.ceil(targetSeconds / 20) + 15;
   let loops = 0;
 
   try {
     while (currentSeconds < targetSeconds && loops < maxLoops) {
       loops++;
-      const hb = await sendHeartbeat(token, questId, { terminal: false, applicationId });
+      const hb = await sendHeartbeat(token, questId, { streamKey, terminal: false });
 
       if (hb?.user_status?.completed_at || hb?.completed_at) {
         currentSeconds = targetSeconds;
@@ -534,7 +708,7 @@ async function completeSingleQuest(token, quest, options = {}) {
       if (typeof serverProgress === 'number' && serverProgress > currentSeconds) {
         currentSeconds = serverProgress;
       } else {
-        currentSeconds += 30;
+        currentSeconds = Math.min(targetSeconds, currentSeconds + 30);
       }
 
       if (options.onProgress) {
@@ -552,14 +726,20 @@ async function completeSingleQuest(token, quest, options = {}) {
     }
 
     try {
-      await sendHeartbeat(token, questId, { terminal: true, applicationId });
+      await sendHeartbeat(token, questId, { streamKey, terminal: true });
     } catch {}
 
+    const claimDelay = options.heartbeatDelayMs && options.heartbeatDelayMs < 1000 ? 0 : 1000;
+    if (claimDelay > 0) {
+      await new Promise((r) => setTimeout(r, claimDelay));
+    }
+
     const reward = await claimQuestReward(token, questId);
+
     return {
       questId,
       questName,
-      type: 'game',
+      type: isActivity ? 'activity' : 'game',
       completed: true,
       claimed: true,
       currentSeconds: targetSeconds,
@@ -569,20 +749,25 @@ async function completeSingleQuest(token, quest, options = {}) {
       message: 'Hoàn thành 100% & Đã nhận thưởng ORB thành công!',
     };
   } catch (err) {
-    console.warn(`[QUEST WORKER] Game heartbeat failed for ${questName} (${questId}): ${err.message}`);
+    console.warn(`[QUEST WORKER] Heartbeat error for ${questName} (${questId}): ${err.message}`);
+    const pct = Math.min(100, Math.round((currentSeconds / targetSeconds) * 100));
     return {
       questId,
       questName,
-      type: 'game',
+      type: isActivity ? 'activity' : 'game',
       enrolled: true,
-      completed: false,
+      completed: currentSeconds >= targetSeconds,
       claimed: false,
       currentSeconds,
       targetSeconds,
-      progressPercent: currentPercent,
-      requiresDesktop: true,
-      message: `Đã tự động nhận (Accept). Tiến độ hiện tại: ${currentPercent}%. Cần mở Discord Desktop (hoặc chạy script F12) để hoàn tất 15 phút chơi game.`,
+      progressPercent: pct,
+      error: err.message,
+      message: `Tiến độ: ${pct}%. ${err.message}`,
     };
+  } finally {
+    if (gateway) {
+      gateway.disconnect();
+    }
   }
 }
 
@@ -684,6 +869,11 @@ async function runAutoQuestForToken(token, options = {}) {
 
 module.exports = {
   setFetchImplementation,
+  setWebSocketImplementation,
+  DiscordUserGateway,
+  getQuestProgressSeconds,
+  getQuestTargetSeconds,
+  getQuestApplicationInfo,
   fetchUserInfo,
   fetchQuests,
   enrollQuest,

@@ -25,6 +25,11 @@ const DEFAULT_INTERVAL_MINUTES = 60;
 let schedulerTimer = null;
 let discordClient = null;
 let isScanning = false;
+const activeUserJobs = new Map();
+
+function isUserJobRunning(userId) {
+  return activeUserJobs.has(userId);
+}
 
 function getIntervalMs() {
   const envVal = parseInt(process.env.QUEST_SCAN_INTERVAL_MINUTES, 10);
@@ -143,9 +148,17 @@ function autoEnrollLocalToken() {
   }
 }
 
-async function scanUserQuests(subscriber, client) {
+async function scanUserQuests(subscriber, client, options = {}) {
   const token = subscriber.token;
   const userId = subscriber.user_id;
+
+  if (activeUserJobs.has(userId)) {
+    return {
+      success: true,
+      alreadyRunning: true,
+      message: 'Tiến trình làm quest tự động đang chạy ngầm cho tài khoản này.',
+    };
+  }
 
   let allQuests = [];
   try {
@@ -178,7 +191,6 @@ async function scanUserQuests(subscriber, client) {
   });
 
   // Một nhiệm vụ chỉ coi là đã kết thúc hoàn toàn khi đã claim phần thưởng (claimed_at).
-  // Nếu chưa claim (kể cả có completed_at hoặc đang dở 26%), đều phải đưa vào pendingQuests để bot xử lý hoặc claim!
   const pendingQuests = activeQuests.filter((q) => !q.user_status?.claimed_at);
 
   if (pendingQuests.length === 0) {
@@ -191,122 +203,110 @@ async function scanUserQuests(subscriber, client) {
       pendingCount: 0,
       completedCount: 0,
       claimedCount: 0,
-      gamePendingCount: 0,
       actions: [],
     };
   }
 
-  console.log(`[QUEST SCHEDULER] Phát hiện ${pendingQuests.length} nhiệm vụ mới cho User ${userId}...`);
+  console.log(`[QUEST SCHEDULER] Bắt đầu tự động làm ${pendingQuests.length} nhiệm vụ cho User ${userId}...`);
+
+  // Tự động Enroll trước cho tất cả các nhiệm vụ chưa nhận
+  for (const q of pendingQuests) {
+    if (!q.user_status?.enrolled_at) {
+      try {
+        await enrollQuest(token, q.id);
+      } catch (e) {}
+    }
+  }
+
+  activeUserJobs.set(userId, {
+    startTime: Date.now(),
+    totalQuests: pendingQuests.length,
+  });
 
   const actions = [];
 
-  for (const quest of pendingQuests) {
-    const questName =
-      quest.config?.messages?.quest_name ||
-      quest.config?.messages?.game_title ||
-      quest.config?.messages?.game_name ||
-      quest.config?.application?.name ||
-      `Nhiệm vụ #${quest.id}`;
+  try {
+    // Chạy song song có giãn cách (stagger 2.5s) để cày đồng thời các nhiệm vụ an toàn tuyệt đối
+    const results = await Promise.allSettled(
+      pendingQuests.map((quest, idx) => {
+        return (async () => {
+          if (idx > 0) {
+            const staggerDelay = options.heartbeatDelayMs && options.heartbeatDelayMs < 1000 ? 5 : 2500;
+            await new Promise((r) => setTimeout(r, idx * staggerDelay));
+          }
+          return completeSingleQuest(token, quest, options);
+        })();
+      })
+    );
 
-    const tasks = quest.config?.task_config?.tasks || quest.config?.task_config_v2?.tasks || {};
-    const isVideo = !!(tasks.WATCH_VIDEO || tasks.WATCH_VIDEO_ON_MOBILE);
+    for (let i = 0; i < pendingQuests.length; i++) {
+      const quest = pendingQuests[i];
+      const questName =
+        quest.config?.messages?.quest_name ||
+        quest.config?.messages?.game_title ||
+        quest.config?.messages?.game_name ||
+        quest.config?.application?.name ||
+        `Nhiệm vụ #${quest.id}`;
 
-    try {
-      const res = await completeSingleQuest(token, quest);
-      const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
-
-      if (res.completed) {
-        actions.push({
-          questName,
-          type: isVideo ? 'video' : (res.type || 'game'),
-          completed: true,
-          claimed: true,
-          progressPercent: 100,
-          message: res.message || 'Hoàn thành 100% & Đã nhận thưởng ORB',
-        });
-      } else if (res.alreadyDone) {
-        actions.push({
-          questName,
-          type: res.type || 'game',
-          completed: true,
-          claimed: true,
-          progressPercent: 100,
-          message: res.message || 'Đã hoàn thành trước đó',
-        });
-      } else if (res.requiresDesktop) {
+      const resItem = results[i];
+      if (resItem.status === 'fulfilled') {
+        const res = resItem.value;
+        const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
         actions.push({
           questName,
           type: res.type || 'game',
-          enrolled: true,
-          completed: false,
-          claimed: false,
-          requiresDesktop: true,
+          completed: !!res.completed,
+          claimed: !!res.claimed,
           progressPercent,
-          message: res.message || `Đã tự động nhận (Tiến độ: ${progressPercent}%). Cần mở Discord Desktop hoặc chạy Script F12.`,
+          message: res.message || (res.completed ? 'Hoàn thành 100% & Đã nhận thưởng ORB' : 'Tiến độ cập nhật'),
         });
       } else {
         actions.push({
           questName,
-          type: isVideo ? 'video' : (res.type || 'game'),
+          type: 'game',
           completed: false,
           claimed: false,
-          progressPercent,
-          message: res.message || 'Không thể tự hoàn thành qua API',
+          error: resItem.reason?.message || 'Lỗi không xác định',
+          message: `Lỗi: ${resItem.reason?.message || 'Không thành công'}`,
         });
       }
-    } catch (err) {
-      actions.push({
-        questName,
-        type: isVideo ? 'video' : 'game',
-        completed: false,
-        claimed: false,
-        error: err.message,
-      });
     }
+  } finally {
+    activeUserJobs.delete(userId);
   }
 
   getDb()
     .prepare('UPDATE quest_subscribers SET last_checked_at = ?, last_quests_json = ? WHERE user_id = ?')
-    .run(now, JSON.stringify(actions), userId);
+    .run(Date.now(), JSON.stringify(actions), userId);
 
   // Gửi thông báo Direct Message nếu có kết quả
   if (subscriber.notify_dm && actions.length > 0 && client) {
     const user = await client.users.fetch(userId).catch(() => null);
     if (user) {
       const completedList = actions.filter((a) => a.completed);
-      const gameList = actions.filter((a) => a.requiresDesktop && !a.completed);
 
       const embed = new EmbedBuilder()
         .setColor(completedList.length > 0 ? 0x57f287 : 0x5865f2)
-        .setTitle('🔔 [LOWKEY QUEST] BÁO CÁO QUÉT TỰ ĐỘNG DISCORD QUESTS')
+        .setTitle('🔔 [LOWKEY QUEST] BÁO CÁO TỰ ĐỘNG HOÀN THÀNH DISCORD QUESTS')
         .setDescription(
-          `Hệ thống vừa quét định kỳ tài khoản Discord của bạn và ghi nhận **${actions.length}** nhiệm vụ:\n\n` +
+          `Hệ thống vừa tự động cày tiến độ ngầm và nhận thưởng cho **${actions.length}** nhiệm vụ:\n\n` +
             actions
               .map((a, i) => {
                 const pctText = typeof a.progressPercent === 'number' ? ` (${a.progressPercent}%)` : '';
                 if (a.completed) {
                   return `**${i + 1}. ${a.questName}**${pctText}\n↪ ✅ **${a.message}**!`;
                 }
-                if (a.requiresDesktop) {
-                  return `**${i + 1}. ${a.questName}**${pctText}\n↪ 🕹️ **${a.message}**`;
-                }
-                return `**${i + 1}. ${a.questName}**\n↪ ⚠️ ${a.error || a.message}`;
+                return `**${i + 1}. ${a.questName}**${pctText}\n↪ ⚠️ ${a.error || a.message}`;
               })
               .join('\n\n')
         )
-        .setFooter({ text: 'Lowkey Auto Quest Scheduler • Tự động quét 24/7' })
+        .setFooter({ text: 'Lowkey Auto Quest Scheduler • Tự động 100% không cần mở game' })
         .setTimestamp();
 
       if (completedList.length > 0) {
         embed.addFields({
           name: '🎁 Phần thưởng',
-          value: 'Điểm ORB và phần quà của các nhiệm vụ hoàn thành đã được cộng vào tài khoản của bạn!',
-        });
-      }
-      if (gameList.length > 0) {
-        embed.addFields({
-          name: '💡 Hướng dẫn làm nhanh Game PC',
-          value: 'Do Discord bắt buộc mở client Desktop để nhận diện game, bạn có thể gõ `/quest action:script` trong server để lấy mã script F12 1-click hoàn tất 15 phút ngay trên máy tính mà không cần tải game.',
+          value: 'Điểm ORB và phần quà của các nhiệm vụ hoàn thành đã được tự động nhận (Claim) vào tài khoản Discord của bạn!',
         });
       }
 
@@ -316,7 +316,6 @@ async function scanUserQuests(subscriber, client) {
 
   const completedCount = actions.filter((a) => a.completed).length;
   const claimedCount = actions.filter((a) => a.claimed).length;
-  const gamePendingCount = actions.filter((a) => a.requiresDesktop && !a.completed).length;
 
   return {
     success: true,
@@ -324,7 +323,6 @@ async function scanUserQuests(subscriber, client) {
     pendingCount: pendingQuests.length,
     completedCount,
     claimedCount,
-    gamePendingCount,
     actions,
   };
 }
@@ -477,4 +475,5 @@ module.exports = {
   toggleSubscriber,
   toggleNotifyDm,
   buildAutoStatusPayload,
+  isUserJobRunning,
 };
