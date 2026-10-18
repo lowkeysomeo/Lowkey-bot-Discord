@@ -105,7 +105,8 @@ function initializeDatabase() {
       status TEXT NOT NULL DEFAULT 'pending',
       requested_at INTEGER NOT NULL DEFAULT 0,
       approved_at INTEGER NOT NULL DEFAULT 0,
-      approved_by TEXT
+      approved_by TEXT,
+      expires_at INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS quest_shop_config (
@@ -133,8 +134,29 @@ function initializeDatabase() {
 
   try { db.prepare("ALTER TABLE quest_subscribers ADD COLUMN package_type TEXT NOT NULL DEFAULT 'monthly'").run(); } catch {}
   try { db.prepare("ALTER TABLE quest_subscribers ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0").run(); } catch {}
+  try { db.prepare("ALTER TABLE quest_permissions ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0").run(); } catch {}
   try { db.prepare("ALTER TABLE quest_orders ADD COLUMN check_count INTEGER NOT NULL DEFAULT 0").run(); } catch {}
   try { db.prepare("ALTER TABLE quest_orders ADD COLUMN checked_at INTEGER NOT NULL DEFAULT 0").run(); } catch {}
+
+  // Chuẩn hóa: Chỉ Admin (Owner) mới được dùng gói Vô thời hạn (expires_at = 0).
+  // Thành viên thường có expires_at = 0 hoặc NULL sẽ được chuyển sang gói trải nghiệm 10 ngày.
+  try {
+    const ownerId = process.env.BOT_OWNER_ID || '604729446649298963';
+    const tenDaysMs = 10 * 24 * 60 * 60 * 1000;
+    const defaultNonOwnerExpiry = Date.now() + tenDaysMs;
+
+    db.prepare(`
+      UPDATE quest_subscribers
+      SET expires_at = ?
+      WHERE (expires_at = 0 OR expires_at IS NULL) AND user_id != ?
+    `).run(defaultNonOwnerExpiry, ownerId);
+
+    db.prepare(`
+      UPDATE quest_permissions
+      SET expires_at = ?
+      WHERE (expires_at = 0 OR expires_at IS NULL) AND status = 'approved' AND user_id != ?
+    `).run(defaultNonOwnerExpiry, ownerId);
+  } catch (e) {}
 
   migrateLegacyJsonIfNeeded();
   repairLegacyUserIds(db);

@@ -1075,18 +1075,39 @@ function questShopPage() {
           </thead>
           <tbody>
             ${subscribers.map(s => {
-              const isExpired = s.expires_at && s.expires_at < Date.now();
+              const isAdmin = Boolean(s.is_admin);
+              const isExpired = !isAdmin && s.expires_at && s.expires_at < Date.now();
+              let expiryHtml = '';
+              if (isAdmin) {
+                if (!s.expires_at || s.expires_at === 0) {
+                  expiryHtml = '<span class="badge purple" style="font-size:11px;">👑 Vô thời hạn (Admin)</span>';
+                } else {
+                  expiryHtml = `<span style="color:var(--green)">👑 Admin (${new Date(s.expires_at).toLocaleDateString('vi-VN')})</span>`;
+                }
+              } else {
+                if (!s.expires_at || s.expires_at <= 0 || isExpired) {
+                  expiryHtml = `<span style="color:var(--red); font-weight:600;">${s.expires_at ? new Date(s.expires_at).toLocaleDateString('vi-VN') : ''} (Hết hạn)</span>`;
+                } else {
+                  const daysLeft = Math.ceil((s.expires_at - Date.now()) / (24 * 60 * 60 * 1000));
+                  expiryHtml = `<span style="color:var(--green); font-weight:600;">${new Date(s.expires_at).toLocaleDateString('vi-VN')} <small style="opacity:0.85;">(Còn ${daysLeft} ngày)</small></span>`;
+                }
+              }
+
               return `
               <tr>
-                <td><b>${h(s.username || s.user_id)}</b><br><small class="subtle">ID: ${h(s.user_id)} · Token: ${h(s.token)}</small></td>
+                <td><b>${h(s.username || s.user_id)}</b> ${isAdmin ? '<span class="badge purple" style="font-size:10px; margin-left:4px;">Admin</span>' : ''}<br><small class="subtle">ID: ${h(s.user_id)} · Token: ${h(s.token)}</small></td>
                 <td><span class="badge purple">${s.package_type === 'monthly' ? 'Gói Tháng' : 'Quest Lẻ'}</span></td>
-                <td>${s.expires_at ? `<span style="color:${isExpired ? 'var(--red)' : 'var(--green)'}">${new Date(s.expires_at).toLocaleDateString('vi-VN')} ${isExpired ? '(Hết hạn)' : ''}</span>` : 'Vô thời hạn'}</td>
+                <td>${expiryHtml}</td>
                 <td>${s.enabled ? '<span class="badge">Đang Bật</span>' : '<span class="badge amber">Đã Tắt</span>'}</td>
                 <td><small>${s.last_checked_at ? new Date(s.last_checked_at).toLocaleString('vi-VN') : 'Chưa quét'}</small></td>
-                <td style="text-align:right;">
-                  <button type="button" class="secondary" style="min-height:30px; padding:3px 8px; font-size:12px;" data-qsub-action="extend" data-qsub-id="${h(s.user_id)}">+30 Ngày</button>
-                  <button type="button" class="secondary" style="min-height:30px; padding:3px 8px; font-size:12px;" data-qsub-action="toggle" data-qsub-id="${h(s.user_id)}">${s.enabled ? 'Tạm Dừng' : 'Bật Lại'}</button>
-                  <button type="button" class="text-button danger" style="min-height:30px; padding:3px 8px; font-size:12px;" data-qsub-action="delete" data-qsub-id="${h(s.user_id)}">Xóa</button>
+                <td style="text-align:right; white-space:nowrap;">
+                  <button type="button" class="secondary" style="min-height:28px; padding:2px 7px; font-size:11px;" data-qsub-action="extend" data-qsub-days="30" data-qsub-id="${h(s.user_id)}" title="Cộng thêm 30 ngày">+30N</button>
+                  <button type="button" class="secondary" style="min-height:28px; padding:2px 7px; font-size:11px;" data-qsub-action="extend" data-qsub-days="10" data-qsub-id="${h(s.user_id)}" title="Cộng thêm 10 ngày">+10N</button>
+                  <button type="button" class="secondary" style="min-height:28px; padding:2px 7px; font-size:11px; color:#f87171; border-color:rgba(239,68,68,0.35);" data-qsub-action="reduce" data-qsub-days="10" data-qsub-id="${h(s.user_id)}" title="Trừ bớt 10 ngày">-10N</button>
+                  <button type="button" class="secondary" style="min-height:28px; padding:2px 7px; font-size:11px;" data-qsub-action="custom" data-qsub-id="${h(s.user_id)}" title="Nhập số ngày cộng hoặc trừ tùy chọn">± Ngày</button>
+                  ${isAdmin ? `<button type="button" class="secondary" style="min-height:28px; padding:2px 7px; font-size:11px; border-color:#8b5cf6; color:#a78bfa;" data-qsub-action="set_unlimited" data-qsub-id="${h(s.user_id)}" title="Đặt gói vô thời hạn cho Admin">Vô Hạn</button>` : ''}
+                  <button type="button" class="secondary" style="min-height:28px; padding:2px 7px; font-size:11px;" data-qsub-action="toggle" data-qsub-id="${h(s.user_id)}">${s.enabled ? 'Tạm Dừng' : 'Bật Lại'}</button>
+                  <button type="button" class="text-button danger" style="min-height:28px; padding:2px 7px; font-size:11px;" data-qsub-action="delete" data-qsub-id="${h(s.user_id)}">Xóa</button>
                 </td>
               </tr>
               `;
@@ -1113,7 +1134,7 @@ function questShopPage() {
           <label for="qshop-new-username">Tên gợi nhớ (Tùy chọn)</label>
           <input id="qshop-new-username" name="username" type="text" placeholder="Ví dụ: Tên hiển thị...">
         </div>
-        <button type="submit" class="primary" style="white-space:nowrap;">+ Cấp Quyền Phê Duyệt</button>
+        <button type="submit" class="primary" style="white-space:nowrap;">+ Cấp Quyền Phê Duyệt (10N)</button>
       </form>
       ${!permissions.length ? '<p class="subtle">Chưa có ai trong danh sách kiểm duyệt.</p>' : `
       <div class="table-wrap">
@@ -1128,15 +1149,27 @@ function questShopPage() {
             </tr>
           </thead>
           <tbody>
-            ${permissions.map(p => `
+            ${permissions.map(p => {
+              const isAdmin = Boolean(p.is_admin);
+              let expInfo = '';
+              if (p.status === 'approved') {
+                if (isAdmin) {
+                  expInfo = '<br><small style="color:var(--purple);">👑 Vô hạn (Admin)</small>';
+                } else if (p.expires_at) {
+                  const isExp = p.expires_at < Date.now();
+                  const daysLeft = Math.ceil((p.expires_at - Date.now()) / (24 * 60 * 60 * 1000));
+                  expInfo = `<br><small style="color:${isExp ? 'var(--red)' : 'var(--green)'};">Hạn: ${new Date(p.expires_at).toLocaleDateString('vi-VN')} ${isExp ? '(Hết)' : `(${daysLeft}N)`}</small>`;
+                }
+              }
+              return `
             <tr>
               <td><code>${h(p.user_id)}</code></td>
-              <td><b>${h(p.username || '—')}</b></td>
-              <td>${permBadges[p.status] || h(p.status)}</td>
+              <td><b>${h(p.username || '—')}</b> ${isAdmin ? '<span class="badge purple" style="font-size:10px; margin-left:4px;">Admin</span>' : ''}</td>
+              <td>${permBadges[p.status] || h(p.status)}${expInfo}</td>
               <td><small>${p.requested_at ? new Date(p.requested_at).toLocaleString('vi-VN') : '—'}</small></td>
               <td style="text-align:right;">
                 ${p.status !== 'approved' ? `
-                  <button type="button" class="primary" style="min-height:30px; padding:3px 10px; font-size:12px; background:#10b981;" data-qperm-action="approve" data-qperm-id="${h(p.user_id)}">Phê Duyệt</button>
+                  <button type="button" class="primary" style="min-height:30px; padding:3px 10px; font-size:12px; background:#10b981;" data-qperm-action="approve" data-qperm-id="${h(p.user_id)}">Phê Duyệt (10N)</button>
                 ` : ''}
                 ${p.status !== 'rejected' ? `
                   <button type="button" class="secondary" style="min-height:30px; padding:3px 8px; font-size:12px;" data-qperm-action="reject" data-qperm-id="${h(p.user_id)}">Từ Chối</button>
@@ -1144,7 +1177,8 @@ function questShopPage() {
                 <button type="button" class="text-button danger" style="min-height:30px; padding:3px 8px; font-size:12px;" data-qperm-action="delete" data-qperm-id="${h(p.user_id)}">Xóa</button>
               </td>
             </tr>
-            `).join('')}
+            `;
+            }).join('')}
           </tbody>
         </table>
       </div>`}
@@ -1331,16 +1365,34 @@ function attachQuestShopEvents() {
     btn.onclick = async () => {
       const userId = btn.dataset.qsubId;
       const action = btn.dataset.qsubAction;
-      const confirmText = action === 'extend'
-        ? `Gia hạn thêm 30 ngày cho thành viên ${userId}?`
-        : action === 'delete'
-        ? `Xóa thành viên ${userId} khỏi danh sách tự động cày quest?`
-        : `Đổi trạng thái bật/tắt cho thành viên ${userId}?`;
-      if (!confirm(confirmText)) return;
+      const days = btn.dataset.qsubDays ? parseInt(btn.dataset.qsubDays, 10) : undefined;
+      let payload = { userId, action, days };
+
+      if (action === 'extend') {
+        const d = days || 30;
+        if (!confirm(`Gia hạn thêm ${d} ngày cho thành viên ${userId}?`)) return;
+      } else if (action === 'reduce') {
+        const d = days || 10;
+        if (!confirm(`Trừ ${d} ngày sử dụng của thành viên ${userId}?`)) return;
+      } else if (action === 'custom') {
+        const inputDays = prompt(`Nhập số ngày muốn thay đổi cho user ${userId}:\n(Ví dụ: nhập 15 để cộng 15 ngày, nhập -5 để trừ 5 ngày)`, '10');
+        if (inputDays === null) return;
+        const num = parseInt(inputDays, 10);
+        if (isNaN(num) || num === 0) {
+          return notify('Số ngày nhập vào không hợp lệ.');
+        }
+        payload = { userId, action: 'custom', days: num };
+      } else if (action === 'set_unlimited') {
+        if (!confirm(`Đặt gói Vô Thời Hạn cho Admin ${userId}?`)) return;
+      } else if (action === 'delete') {
+        if (!confirm(`Xóa thành viên ${userId} khỏi danh sách tự động cày quest?`)) return;
+      } else if (action === 'toggle') {
+        if (!confirm(`Đổi trạng thái bật/tắt cho thành viên ${userId}?`)) return;
+      }
 
       btn.disabled = true;
       try {
-        const res = await api('/api/quest-shop/subscriber-action', { userId, action });
+        const res = await api('/api/quest-shop/subscriber-action', payload);
         notify(res.message || 'Thao tác thành công.');
         const updated = await api('/api/quest-shop/data');
         state.questShopData = updated;

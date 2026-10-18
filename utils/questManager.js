@@ -512,8 +512,9 @@ async function handleButtonInteraction(interaction) {
       return interaction.reply({ content: '❌ Chỉ Admin mới có quyền phê duyệt.', flags: 64 });
     }
     await approveUser(targetUserId, interaction.user.id, interaction.client);
+    const isTargetAdmin = isOwner(targetUserId);
     return interaction.update({
-      content: `✅ **ĐÃ PHÊ DUYỆT:** Bạn đã cấp quyền sử dụng Auto Quest cho thành viên <@${targetUserId}>!`,
+      content: `✅ **ĐÃ PHÊ DUYỆT:** Bạn đã cấp quyền sử dụng Auto Quest cho thành viên <@${targetUserId}> (${isTargetAdmin ? 'Gói Vô thời hạn - Admin' : 'Gói trải nghiệm 10 ngày'})!`,
       components: [],
     });
   }

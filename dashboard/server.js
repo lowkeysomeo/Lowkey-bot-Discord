@@ -258,7 +258,13 @@ function createDashboard(client, options = {}) {
             const stats = {
               totalOrders: db.prepare('SELECT COUNT(*) AS c FROM quest_orders').get()?.c || 0,
               pendingOrders: db.prepare("SELECT COUNT(*) AS c FROM quest_orders WHERE status = 'pending'").get()?.c || 0,
-              activeSubscribers: db.prepare("SELECT COUNT(*) AS c FROM quest_subscribers WHERE enabled = 1 AND (expires_at = 0 OR expires_at > ?)").get(Date.now())?.c || 0,
+              activeSubscribers: db.prepare(`
+                SELECT COUNT(*) AS c FROM quest_subscribers
+                WHERE enabled = 1 AND (
+                  (user_id = ? AND (expires_at = 0 OR expires_at IS NULL))
+                  OR (expires_at > ?)
+                )
+              `).get(questAuth.OWNER_ID, Date.now())?.c || 0,
               totalApproved: db.prepare("SELECT COUNT(*) AS c FROM quest_permissions WHERE status = 'approved'").get()?.c || 0,
             };
 
@@ -282,8 +288,12 @@ function createDashboard(client, options = {}) {
               subscribers: subscribers.map(s => ({
                 ...s,
                 token: s.token ? `••••••••${s.token.slice(-4)}` : '',
+                is_admin: questAuth.isOwner(s.user_id),
               })),
-              permissions,
+              permissions: permissions.map(p => ({
+                ...p,
+                is_admin: questAuth.isOwner(p.user_id),
+              })),
             });
           }
 
@@ -377,17 +387,60 @@ function createDashboard(client, options = {}) {
 
           if (route === '/api/quest-shop/subscriber-action' && req.method === 'POST') {
             const input = await body(req);
-            const { userId, action } = input || {};
+            const { userId, action, days } = input || {};
             if (!userId || !action) fail(400, 'Thiếu thông tin thành viên hoặc thao tác.');
 
             const row = db.prepare('SELECT * FROM quest_subscribers WHERE user_id = ?').get(String(userId));
             if (!row) fail(404, 'Không tìm thấy thành viên đăng ký.');
 
+            const isAdmin = questAuth.isOwner(userId);
+            const now = Date.now();
+
             if (action === 'extend') {
-              const currentExpiry = (row.expires_at && row.expires_at > Date.now()) ? row.expires_at : Date.now();
-              const newExpiry = currentExpiry + (30 * 24 * 60 * 60 * 1000);
+              const numDays = Math.max(1, parseInt(days, 10) || 30);
+              const currentExpiry = (row.expires_at && row.expires_at > now) ? row.expires_at : now;
+              const newExpiry = currentExpiry + (numDays * 24 * 60 * 60 * 1000);
               db.prepare('UPDATE quest_subscribers SET expires_at = ?, enabled = 1 WHERE user_id = ?').run(newExpiry, String(userId));
-              return json(res, 200, { ok: true, message: `Đã gia hạn thêm 30 ngày cho user ${userId}!` });
+              db.prepare('UPDATE quest_permissions SET expires_at = ? WHERE user_id = ?').run(newExpiry, String(userId));
+              return json(res, 200, { ok: true, message: `Đã gia hạn thêm ${numDays} ngày cho user ${userId}!` });
+            } else if (action === 'reduce') {
+              const numDays = Math.max(1, parseInt(days, 10) || 10);
+              if (isAdmin && (!row.expires_at || row.expires_at === 0)) {
+                fail(400, 'Tài khoản Admin đang dùng gói Vô thời hạn. Không thể trừ ngày khi chưa đặt hạn cụ thể.');
+              }
+              const currentExpiry = (row.expires_at && row.expires_at > now) ? row.expires_at : now;
+              const newExpiry = Math.max(now - (86400 * 1000), currentExpiry - (numDays * 24 * 60 * 60 * 1000));
+              db.prepare('UPDATE quest_subscribers SET expires_at = ? WHERE user_id = ?').run(newExpiry, String(userId));
+              db.prepare('UPDATE quest_permissions SET expires_at = ? WHERE user_id = ?').run(newExpiry, String(userId));
+              return json(res, 200, { ok: true, message: `Đã trừ ${numDays} ngày của user ${userId}!` });
+            } else if (action === 'custom') {
+              const numDays = parseInt(days, 10);
+              if (isNaN(numDays) || numDays === 0) fail(400, 'Số ngày thay đổi không hợp lệ.');
+              if (numDays > 0) {
+                const currentExpiry = (row.expires_at && row.expires_at > now) ? row.expires_at : now;
+                const newExpiry = currentExpiry + (numDays * 24 * 60 * 60 * 1000);
+                db.prepare('UPDATE quest_subscribers SET expires_at = ?, enabled = 1 WHERE user_id = ?').run(newExpiry, String(userId));
+                db.prepare('UPDATE quest_permissions SET expires_at = ? WHERE user_id = ?').run(newExpiry, String(userId));
+                return json(res, 200, { ok: true, message: `Đã cộng thêm ${numDays} ngày cho user ${userId}!` });
+              } else {
+                const absDays = Math.abs(numDays);
+                if (isAdmin && (!row.expires_at || row.expires_at === 0)) {
+                  fail(400, 'Tài khoản Admin đang dùng gói Vô thời hạn. Không thể trừ ngày.');
+                }
+                const currentExpiry = (row.expires_at && row.expires_at > now) ? row.expires_at : now;
+                const newExpiry = Math.max(now - (86400 * 1000), currentExpiry - (absDays * 24 * 60 * 60 * 1000));
+                db.prepare('UPDATE quest_subscribers SET expires_at = ? WHERE user_id = ?').run(newExpiry, String(userId));
+                db.prepare('UPDATE quest_permissions SET expires_at = ? WHERE user_id = ?').run(newExpiry, String(userId));
+                return json(res, 200, { ok: true, message: `Đã trừ ${absDays} ngày của user ${userId}!` });
+              }
+            } else if (action === 'set_unlimited') {
+              // CHỈ ADMIN MỚI ĐƯỢC TÙY CHỈNH GÓI VÔ THỜI HẠN
+              if (!isAdmin) {
+                fail(403, '❌ Chỉ tài khoản Admin / Owner mới được phép sở hữu gói Vô thời hạn!');
+              }
+              db.prepare('UPDATE quest_subscribers SET expires_at = 0, enabled = 1 WHERE user_id = ?').run(String(userId));
+              db.prepare('UPDATE quest_permissions SET expires_at = 0 WHERE user_id = ?').run(String(userId));
+              return json(res, 200, { ok: true, message: `Đã thiết lập gói Vô thời hạn cho Admin ${userId}!` });
             } else if (action === 'toggle') {
               const newEnabled = row.enabled ? 0 : 1;
               db.prepare('UPDATE quest_subscribers SET enabled = ? WHERE user_id = ?').run(newEnabled, String(userId));
@@ -405,11 +458,15 @@ function createDashboard(client, options = {}) {
             if (!userId || !action) fail(400, 'Thiếu thông tin người dùng hoặc thao tác.');
 
             if (action === 'approve') {
-              await questAuth.approveUser(userId, value.user.id, client);
+              await questAuth.approveUser(userId, value.user.id, client, 10);
               if (username) {
                 db.prepare('UPDATE quest_permissions SET username = ? WHERE user_id = ?').run(String(username), String(userId));
               }
-              return json(res, 200, { ok: true, message: `Đã phê duyệt quyền Auto Quest cho user ${userId}!` });
+              const isTargetAdmin = questAuth.isOwner(userId);
+              return json(res, 200, {
+                ok: true,
+                message: `Đã phê duyệt quyền Auto Quest cho user ${userId} (${isTargetAdmin ? 'Gói Vô thời hạn - Admin' : 'Gói trải nghiệm 10 ngày'})!`
+              });
             } else if (action === 'reject') {
               await questAuth.rejectUser(userId, value.user.id, client);
               return json(res, 200, { ok: true, message: `Đã từ chối quyền Auto Quest cho user ${userId}.` });

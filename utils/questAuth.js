@@ -17,8 +17,20 @@ function isOwner(userId) {
 function getUserStatus(userId) {
   if (isOwner(userId)) return 'approved';
   const db = getDb();
-  const row = db.prepare('SELECT status FROM quest_permissions WHERE user_id = ?').get(String(userId));
-  return row ? row.status : 'unregistered';
+  const row = db.prepare('SELECT status, expires_at FROM quest_permissions WHERE user_id = ?').get(String(userId));
+  if (!row) return 'unregistered';
+  if (row.status !== 'approved') return row.status;
+
+  // Kiểm tra thời hạn nếu là thành viên thông thường
+  const sub = db.prepare('SELECT expires_at FROM quest_subscribers WHERE user_id = ?').get(String(userId));
+  const effectiveExpiry = Math.max(row.expires_at || 0, sub?.expires_at || 0);
+  const now = Date.now();
+
+  if (effectiveExpiry > 0 && effectiveExpiry < now) {
+    return 'expired';
+  }
+
+  return 'approved';
 }
 
 function isApproved(userId) {
@@ -54,7 +66,7 @@ async function requestAccess(user, client) {
               `👤 **Người dùng:** <@${userId}> (\`${username}\`)\n` +
               `🆔 **User ID:** \`${userId}\`\n` +
               `🕒 **Thời gian:** <t:${Math.floor(now / 1000)}:F>\n\n` +
-              `👉 *Hãy bấm nút bên dưới để Phê duyệt hoặc Từ chối.*`
+              `👉 *Hãy bấm nút bên dưới để Phê duyệt (gói trải nghiệm 10 ngày) hoặc Từ chối.*`
           )
           .setFooter({ text: 'Hệ thống kiểm duyệt Lowkey Quest' })
           .setTimestamp();
@@ -62,7 +74,7 @@ async function requestAccess(user, client) {
         const row = new ActionRowBuilder().addComponents(
           new ButtonBuilder()
             .setCustomId(`quest:approve_${userId}`)
-            .setLabel('Phê Duyệt Cho Dùng')
+            .setLabel('Phê Duyệt (10 Ngày)')
             .setEmoji('✅')
             .setStyle(ButtonStyle.Success),
           new ButtonBuilder()
@@ -82,29 +94,51 @@ async function requestAccess(user, client) {
   return true;
 }
 
-async function approveUser(userId, approverId, client) {
+async function approveUser(userId, approverId, client, days = 10) {
   const db = getDb();
   const now = Date.now();
+  const isAdmin = isOwner(userId);
+  const durationMs = (parseInt(days, 10) || 10) * 24 * 60 * 60 * 1000;
+
+  // CHỈ ADMIN MỚI ĐƯỢC GÓI VÔ THỜI HẠN (expires_at = 0).
+  // Admin duyệt người dùng thì chỉ được gói 10 ngày (hoặc số ngày admin chỉ định, mặc định 10).
+  const expiresAt = isAdmin ? 0 : (now + durationMs);
 
   db.prepare(`
-    INSERT INTO quest_permissions (user_id, username, status, requested_at, approved_at, approved_by)
-    VALUES (?, ?, 'approved', ?, ?, ?)
+    INSERT INTO quest_permissions (user_id, username, status, requested_at, approved_at, approved_by, expires_at)
+    VALUES (?, ?, 'approved', ?, ?, ?, ?)
     ON CONFLICT(user_id) DO UPDATE SET
       status = 'approved',
       approved_at = excluded.approved_at,
-      approved_by = excluded.approved_by
-  `).run(String(userId), String(userId), now, now, String(approverId));
+      approved_by = excluded.approved_by,
+      expires_at = excluded.expires_at
+  `).run(String(userId), String(userId), now, now, String(approverId), expiresAt);
+
+  // Cập nhật hoặc đồng bộ vào bảng subscribers nếu người dùng đã có tài khoản
+  const sub = db.prepare('SELECT * FROM quest_subscribers WHERE user_id = ?').get(String(userId));
+  if (sub) {
+    db.prepare(`
+      UPDATE quest_subscribers
+      SET expires_at = ?, enabled = 1
+      WHERE user_id = ?
+    `).run(expiresAt, String(userId));
+  }
 
   // Gửi thông báo DM cho người dùng
   if (client) {
     try {
       const targetUser = await client.users.fetch(userId).catch(() => null);
       if (targetUser) {
+        const expDesc = isAdmin
+          ? '👑 **Gói:** Vô thời hạn (Admin)'
+          : `🎁 **Thời hạn gói:** 10 ngày trải nghiệm (Hết hạn vào <t:${Math.floor(expiresAt / 1000)}:D>)`;
+
         const embed = new EmbedBuilder()
           .setColor(0x57f287)
           .setTitle('🎉 [LOWKEY QUEST] YÊU CẦU CỦA BẠN ĐÃ ĐƯỢC PHÊ DUYỆT!')
           .setDescription(
             `Admin <@${approverId}> đã **phê duyệt** cho phép bạn sử dụng hệ thống **Auto Quest & Săn điểm ORB**!\n\n` +
+              `${expDesc}\n\n` +
               `👉 Bạn có thể vào máy chủ gõ lệnh **\`/quest\`** (hoặc \`/autoquest\`) để:\n` +
               `• Nhập Token tự động cày nhiệm vụ.\n` +
               `• Bật chế độ quét định kỳ nhận thưởng 24/7.\n` +
@@ -195,6 +229,34 @@ function buildAccessGatePayload(user) {
       new ButtonBuilder()
         .setCustomId('quest:request_access')
         .setLabel('Gửi Lại Yêu Cầu')
+        .setEmoji('📨')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('quest:hub')
+        .setLabel('Quay lại Menu')
+        .setEmoji('↩️')
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    return { embeds: [embed], components: [row] };
+  }
+
+  if (status === 'expired') {
+    const embed = new EmbedBuilder()
+      .setColor(0xed4245)
+      .setTitle('⌛ GÓI AUTO QUEST CỦA BẠN ĐÃ HẾT HẠN')
+      .setDescription(
+        `Gói trải nghiệm / sử dụng tính năng **Auto Quest & ORB** của bạn đã hết hạn.\n\n` +
+          `• Vui lòng liên hệ Admin <@${OWNER_ID}> để được gia hạn thêm.\n` +
+          `• Hoặc bạn có thể bấm nút bên dưới để gửi yêu cầu xin gia hạn tới Admin!`
+      )
+      .setFooter({ text: 'Lowkey Auto Quest • Hết hạn sử dụng' })
+      .setTimestamp();
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('quest:request_access')
+        .setLabel('Xin Gia Hạn Thêm')
         .setEmoji('📨')
         .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()

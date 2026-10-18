@@ -71,20 +71,51 @@ function listSubscribers(onlyEnabled = true) {
   const rows = onlyEnabled
     ? db.prepare('SELECT * FROM quest_subscribers WHERE enabled = 1').all()
     : db.prepare('SELECT * FROM quest_subscribers').all();
-  const { isApproved } = require('./questAuth');
+  const { isApproved, isOwner } = require('./questAuth');
   const now = Date.now();
   return rows.filter((r) => {
     if (!isApproved(r.user_id)) return false;
-    if (r.expires_at && r.expires_at > 0 && r.expires_at < now) {
-      return false;
+    // CHỈ ADMIN MỚI ĐƯỢC GÓI VÔ THỜI HẠN (expires_at = 0)
+    if (!isOwner(r.user_id)) {
+      if (!r.expires_at || r.expires_at <= 0 || r.expires_at < now) {
+        return false;
+      }
     }
     return true;
   });
 }
 
-function registerSubscriber(userId, token, username = null, notifyDm = 1, packageType = 'monthly', expiresAt = 0) {
+function registerSubscriber(userId, token, username = null, notifyDm = 1, packageType = 'monthly', expiresAt = null) {
   const db = getDb();
   const now = Date.now();
+  const { isOwner } = require('./questAuth');
+  const isAdmin = isOwner(userId);
+
+  // CHỈ ADMIN MỚI ĐƯỢC GÓI VÔ THỜI HẠN (expires_at = 0).
+  // Thành viên thông thường: Không được phép có expires_at = 0.
+  let finalExpiresAt;
+  if (isAdmin) {
+    finalExpiresAt = (expiresAt !== null && expiresAt !== undefined) ? expiresAt : 0;
+  } else {
+    if (expiresAt && expiresAt > 0) {
+      finalExpiresAt = expiresAt;
+    } else {
+      // Giữ nguyên hạn nếu tài khoản đang có hạn còn hiệu lực
+      const existing = db.prepare('SELECT expires_at FROM quest_subscribers WHERE user_id = ?').get(String(userId));
+      if (existing && existing.expires_at && existing.expires_at > now) {
+        finalExpiresAt = existing.expires_at;
+      } else {
+        const perm = db.prepare('SELECT expires_at FROM quest_permissions WHERE user_id = ?').get(String(userId));
+        if (perm && perm.expires_at && perm.expires_at > now) {
+          finalExpiresAt = perm.expires_at;
+        } else {
+          // Mặc định gói trải nghiệm 10 ngày cho thành viên thường
+          finalExpiresAt = now + (10 * 24 * 60 * 60 * 1000);
+        }
+      }
+    }
+  }
+
   db.prepare(`
     INSERT INTO quest_subscribers (user_id, token, username, notify_dm, enabled, package_type, expires_at, created_at)
     VALUES (?, ?, ?, ?, 1, ?, ?, ?)
@@ -93,14 +124,13 @@ function registerSubscriber(userId, token, username = null, notifyDm = 1, packag
       username = coalesce(excluded.username, quest_subscribers.username),
       notify_dm = excluded.notify_dm,
       package_type = coalesce(excluded.package_type, quest_subscribers.package_type),
-      expires_at = case when excluded.expires_at > 0 then excluded.expires_at else quest_subscribers.expires_at end,
+      expires_at = excluded.expires_at,
       enabled = 1
-  `).run(userId, token.trim(), username, notifyDm ? 1 : 0, packageType, expiresAt, now);
+  `).run(String(userId), token.trim(), username, notifyDm ? 1 : 0, packageType, finalExpiresAt, now);
 
   // Đồng bộ file cache nếu là bot Owner
   try {
-    const { isOwner } = require('./questAuth');
-    if (isOwner(userId)) {
+    if (isAdmin) {
       const dir = path.dirname(TOKEN_CACHE_PATH);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(TOKEN_CACHE_PATH, token.trim(), 'utf8');

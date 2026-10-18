@@ -194,16 +194,65 @@ async function loginAs(user, base, request) {
     assert.equal(subRow.enabled, 1);
     assert(subRow.expires_at > Date.now() + 20 * 86400000);
 
-    // 8. Test quản lý Phê duyệt (Permissions / Whitelist Action)
+    // Trừ thời gian subscriber (-10 ngày)
+    const prevExpiry = subRow.expires_at;
+    const reduceRes = await request('/api/quest-shop/subscriber-action', {
+      method: 'POST',
+      headers: ownerPostHeaders,
+      body: JSON.stringify({ userId: '888999111', action: 'reduce', days: 10 }),
+    });
+    assert.equal(reduceRes.status, 200);
+    subRow = db.prepare('SELECT expires_at FROM quest_subscribers WHERE user_id = ?').get('888999111');
+    assert.equal(subRow.expires_at, prevExpiry - (10 * 86400000), 'Phải trừ đúng 10 ngày');
+
+    // Tùy chỉnh cộng/trừ ngày (action: custom)
+    const customAddRes = await request('/api/quest-shop/subscriber-action', {
+      method: 'POST',
+      headers: ownerPostHeaders,
+      body: JSON.stringify({ userId: '888999111', action: 'custom', days: 5 }),
+    });
+    assert.equal(customAddRes.status, 200);
+    const customMinusRes = await request('/api/quest-shop/subscriber-action', {
+      method: 'POST',
+      headers: ownerPostHeaders,
+      body: JSON.stringify({ userId: '888999111', action: 'custom', days: -3 }),
+    });
+    assert.equal(customMinusRes.status, 200);
+
+    // Chặn thành viên thông thường không được set gói Vô thời hạn (403)
+    const rejectUnlimitedRes = await request('/api/quest-shop/subscriber-action', {
+      method: 'POST',
+      headers: ownerPostHeaders,
+      body: JSON.stringify({ userId: '888999111', action: 'set_unlimited' }),
+    });
+    assert.equal(rejectUnlimitedRes.status, 403, 'User thường không được dùng gói Vô thời hạn');
+
+    // Admin/Owner được phép set gói Vô thời hạn
+    db.prepare(`
+      INSERT INTO quest_subscribers (user_id, token, username, notify_dm, enabled, package_type, expires_at, created_at)
+      VALUES (?, 'adm-tok', 'AdminUser', 1, 1, 'monthly', 12345, ?)
+      ON CONFLICT(user_id) DO UPDATE SET enabled = 1
+    `).run(OWNER_ID, Date.now());
+    const acceptUnlimitedRes = await request('/api/quest-shop/subscriber-action', {
+      method: 'POST',
+      headers: ownerPostHeaders,
+      body: JSON.stringify({ userId: OWNER_ID, action: 'set_unlimited' }),
+    });
+    assert.equal(acceptUnlimitedRes.status, 200);
+    const adminSub = db.prepare('SELECT expires_at FROM quest_subscribers WHERE user_id = ?').get(OWNER_ID);
+    assert.equal(adminSub.expires_at, 0, 'Admin được phép sở hữu gói vô thời hạn (expires_at = 0)');
+
+    // 8. Test quản lý Phê duyệt (Admin duyệt người dùng thì chỉ được gói 10 ngày)
     const approvePermRes = await request('/api/quest-shop/permission-action', {
       method: 'POST',
       headers: ownerPostHeaders,
       body: JSON.stringify({ userId: '555666777', action: 'approve', username: 'AllowedGuy' }),
     });
     assert.equal(approvePermRes.status, 200);
-    const permRow = db.prepare('SELECT status, username FROM quest_permissions WHERE user_id = ?').get('555666777');
+    const permRow = db.prepare('SELECT status, username, expires_at FROM quest_permissions WHERE user_id = ?').get('555666777');
     assert.equal(permRow.status, 'approved');
     assert.equal(permRow.username, 'AllowedGuy');
+    assert(permRow.expires_at >= Date.now() + 9 * 86400000 && permRow.expires_at <= Date.now() + 11 * 86400000, 'Duyệt thành viên thường phải được gói 10 ngày');
 
     // 9. Test đăng / publish panel
     const pubRes = await request('/api/quest-shop/publish-panel', {
