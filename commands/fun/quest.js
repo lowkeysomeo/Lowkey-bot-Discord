@@ -76,7 +76,7 @@ module.exports.execute = async (interaction) => {
       await interaction.deferReply({ flags: 64 });
     }
     const { getSubscriber, scanUserQuests, buildAutoStatusPayload, isUserJobRunning } = require('../../utils/questScheduler');
-    const { fetchQuests, enrollQuest, claimQuestReward } = require('../../utils/questTokenWorker');
+    const { fetchQuests, enrollQuest, claimQuestReward, isQuestActive } = require('../../utils/questTokenWorker');
     const sub = getSubscriber(userId);
     if (!sub || !sub.token) {
       return interaction.editReply({
@@ -105,13 +105,7 @@ module.exports.execute = async (interaction) => {
       });
     }
 
-    const now = Date.now();
-    const activeQuests = allQuests.filter((q) => {
-      const exp = q.config?.expires_at || q.config?.expiresAt;
-      if (!exp) return true;
-      const expMs = new Date(exp).getTime();
-      return Number.isNaN(expMs) ? true : expMs > now;
-    });
+    const activeQuests = allQuests.filter(isQuestActive);
 
     const pendingQuests = activeQuests.filter((q) => !q.user_status?.claimed_at);
 

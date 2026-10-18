@@ -10,480 +10,26 @@ const {
   TextInputStyle,
   AttachmentBuilder,
 } = require('discord.js');
+const fs = require('node:fs');
+const path = require('node:path');
 const { startQuestStream, stopQuestStream, getQuestStreamStatus } = require('./questVoiceHelper');
-const { runAutoQuestForToken } = require('./questTokenWorker');
-
-const QUEST_SCRIPT = `(async () => {
-  delete window.$;
-  
-  // 0. BẢO VỆ NATIVE MODULES (Chống lỗi Cannot read properties of undefined reading 'nativeModules')
-  const safeNativeProxy = new Proxy({}, {
-    get: (target, prop) => {
-      return (...args) => {
-        const cb = args.find(a => typeof a === 'function');
-        if (cb) {
-          try { cb(0); } catch (e) {}
-        }
-        return 0;
-      };
-    }
-  });
-
-  try {
-    if (typeof window.DiscordNative === 'undefined') {
-      window.DiscordNative = {
-        nativeModules: {
-          requireModule: () => safeNativeProxy
-        }
-      };
-    } else if (!window.DiscordNative.nativeModules) {
-      window.DiscordNative.nativeModules = {
-        requireModule: () => safeNativeProxy
-      };
-    } else if (!window.DiscordNative.nativeModules.requireModule) {
-      window.DiscordNative.nativeModules.requireModule = () => safeNativeProxy;
-    }
-  } catch (e) {}
-
-  let wpRequire = null, QuestsStore = null, RunningGameStore = null, ApplicationStreamingStore = null, ChannelStore = null, GuildChannelStore = null, FluxDispatcher = null, api = null;
-
-  function findFallback(pred) {
-    if (!wpRequire?.c) return null;
-    for (let mod of Object.values(wpRequire.c)) {
-      if (!mod?.exports) continue;
-      if (pred(mod.exports)) return mod.exports;
-      for (let k of Object.keys(mod.exports)) {
-        let s = mod.exports[k];
-        if (s && pred(s)) return s;
-        if (s?.__proto__ && pred(s.__proto__)) return s;
-      }
-    }
-    return null;
-  }
-
-  for (let attempt = 0; attempt < 20; attempt++) {
-    try {
-      if (typeof webpackChunkdiscord_app !== 'undefined') {
-        wpRequire = webpackChunkdiscord_app.push([[Symbol()], {}, r => r]);
-        webpackChunkdiscord_app.pop();
-
-        QuestsStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getQuest)?.exports?.Z
-          || Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getQuest)?.exports?.A
-          || findFallback(x => typeof x?.getQuest === 'function' || x?.quests instanceof Map);
-
-        RunningGameStore = Object.values(wpRequire.c).find(x => x?.exports?.ZP?.getRunningGames)?.exports?.ZP
-          || Object.values(wpRequire.c).find(x => x?.exports?.Ay?.getRunningGames)?.exports?.Ay
-          || findFallback(x => typeof x?.getRunningGames === 'function');
-
-        ApplicationStreamingStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getStreamerActiveStreamMetadata)?.exports?.Z
-          || Object.values(wpRequire.c).find(x => x?.exports?.A?.__proto__?.getStreamerActiveStreamMetadata)?.exports?.A
-          || findFallback(x => typeof x?.getStreamerActiveStreamMetadata === 'function');
-
-        ChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getSortedPrivateChannels)?.exports?.Z
-          || findFallback(x => typeof x?.getSortedPrivateChannels === 'function' || typeof x?.getDMChannelIds === 'function');
-
-        GuildChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.ZP?.__proto__?.getAllGuilds)?.exports?.ZP
-          || findFallback(x => typeof x?.getAllGuilds === 'function');
-
-        FluxDispatcher = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.flushWaitQueue)?.exports?.Z
-          || Object.values(wpRequire.c).find(x => x?.exports?.h?.__proto__?.flushWaitQueue)?.exports?.h
-          || findFallback(x => typeof x?.dispatch === 'function' && typeof x?.subscribe === 'function');
-
-        api = Object.values(wpRequire.c).find(x => x?.exports?.tn?.get)?.exports?.tn
-          || Object.values(wpRequire.c).find(x => x?.exports?.Bo?.get)?.exports?.Bo
-          || findFallback(x => typeof x?.get === 'function' && typeof x?.post === 'function');
-      }
-    } catch (e) {}
-
-    if (QuestsStore && FluxDispatcher) break;
-    await new Promise(r => setTimeout(r, 1000));
-  }
-
-  if (!QuestsStore || !FluxDispatcher) {
-    console.error("%c[Lowkey Quest]%c Không thể kết nối Discord Webpack stores. Hãy đảm bảo bạn đang dùng Discord Desktop!", "color: red; font-weight: bold", "color: #ffaa00");
-    window.__LOWKEY_QUEST_FINISHED__ = true;
-    return;
-  }
-
-  if (api) {
-    try { await api.get({ url: "/quests/@me" }); } catch (e) {}
-  }
-  if (FluxDispatcher) {
-    try { FluxDispatcher.dispatch({ type: "QUESTS_FETCH_CURRENT_QUESTS" }); } catch (e) {}
-  }
-  await new Promise(r => setTimeout(r, 800));
-
-  console.log("%c[Lowkey Quest]%c Đang tải danh sách nhiệm vụ...", "color: #5865F2; font-weight: bold", "color: #00ffff");
-
-  let allQuests = [...QuestsStore.quests.values()].filter(x => new Date(x.config.expiresAt).getTime() > Date.now() && !x.userStatus?.claimedAt);
-
-  // 1. TỰ ĐỘNG NHẬN (AUTO ENROLL) VÀ TỰ ĐỘNG CLAIM CÁC QUESTS ĐÃ XONG TIẾN ĐỘ
-  for (let q of allQuests) {
-    if (q.userStatus?.completedAt && !q.userStatus?.claimedAt) {
-      if (api) {
-        try {
-          await api.post({ url: \`/quests/\${q.id}/claim-reward\`, body: { platform: 0 } });
-          console.log(\`%c[NHẬN THƯỞNG THÀNH CÔNG]%c \${q.config.messages.questName || q.config.messages.gameTitle}\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
-        } catch (e) {}
-      }
-      continue;
-    }
-
-    if (!q.userStatus?.enrolledAt) {
-      console.log(\`%c[TỰ NHẬN]%c Đang nhận nhiệm vụ: \${q.config.messages.questName || q.config.messages.gameTitle}...\`, "color: #FAA61A; font-weight: bold", "color: #FFFFFF");
-      if (api) {
-        try {
-          await api.post({ url: \`/quests/\${q.id}/enroll\`, body: { location: 1, platform: 0 } });
-          try { await api.post({ url: \`/quests/\${q.id}/select-task-platform\`, body: { platform: 0 } }); } catch (e) {}
-          console.log(\`%c[TỰ NHẬN THÀNH CÔNG]%c \${q.config.messages.questName || q.config.messages.gameTitle}\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
-        } catch (e) {}
-      }
-    } else {
-      if (api) {
-        try { await api.post({ url: \`/quests/\${q.id}/select-task-platform\`, body: { platform: 0 } }); } catch (e) {}
-      }
-    }
-  }
-
-  allQuests = [...QuestsStore.quests.values()].filter(x => new Date(x.config.expiresAt).getTime() > Date.now() && !x.userStatus?.claimedAt && !x.userStatus?.completedAt);
-
-  let videoQuests = [];
-  let gameQuests = [];
-  let activityQuests = [];
-
-  for (let quest of allQuests) {
-    const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
-    const tasks = taskConfig?.tasks || {};
-
-    if (tasks.WATCH_VIDEO != null || tasks.WATCH_VIDEO_ON_MOBILE != null) {
-      videoQuests.push(quest);
-    } else if (tasks.PLAY_ON_DESKTOP != null || tasks.STREAM_ON_DESKTOP != null || tasks.PLAY_ON_PLAYSTATION != null || tasks.PLAY_ON_XBOX != null) {
-      gameQuests.push(quest);
-    } else if (tasks.ACHIEVEMENT_IN_ACTIVITY != null || tasks.PLAY_ACTIVITY != null || tasks.ACHIEVEMENT_IN_GAME != null) {
-      activityQuests.push(quest);
-    } else {
-      gameQuests.push(quest);
-    }
-  }
-
-  console.log(\`%c[Lowkey Quest]%c Tìm thấy \${videoQuests.length} nhiệm vụ Video, \${gameQuests.length} nhiệm vụ Game PC\${activityQuests.length > 0 ? \` và \${activityQuests.length} nhiệm vụ Hoạt động\` : ''}. Bắt đầu tự động làm và nhận thưởng!\`, "color: #5865F2; font-weight: bold", "color: #57F287");
-
-  // 2. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ VIDEO (chuẩn nhịp timestamp không bị 400/429)
-  for (let [idx, quest] of videoQuests.entries()) {
-    let questName = quest.config.messages.questName || quest.config.messages.gameTitle;
-    console.log(\`%c[Video \${idx + 1}/\${videoQuests.length}]%c Đang làm: \${questName}...\`, "color: #5865F2; font-weight: bold", "color: #FAA61A");
-    const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
-    const taskName = ["WATCH_VIDEO", "WATCH_VIDEO_ON_MOBILE"].find(x => taskConfig?.tasks?.[x] != null);
-    const secondsNeeded = taskConfig?.tasks?.[taskName]?.target || 30;
-    let secondsDone = quest.userStatus?.progress?.[taskName]?.value ?? 0;
-    const enrolledAt = quest.userStatus?.enrolledAt ? new Date(quest.userStatus.enrolledAt).getTime() : Date.now();
-    
-    if (api) {
-      while (secondsDone < secondsNeeded) {
-        const maxAllowed = Math.floor((Date.now() - enrolledAt) / 1000) + 10;
-        const speed = 7;
-        const timestamp = Math.min(secondsNeeded, secondsDone + speed);
-        if (maxAllowed >= timestamp) {
-          try {
-            await api.post({ url: \`/quests/\${quest.id}/video-progress\`, body: { timestamp: Math.min(secondsNeeded, timestamp + Math.random()) } });
-            secondsDone = timestamp;
-            console.log(\`  ↪ [Tiến độ video] \${secondsDone}/\${secondsNeeded}s\`);
-          } catch (e) {
-            break;
-          }
-        }
-        if (secondsDone >= secondsNeeded) break;
-        await new Promise(r => setTimeout(r, 1000));
-      }
-      try {
-        await api.post({ url: \`/quests/\${quest.id}/claim-reward\`, body: { platform: 0 } });
-        console.log(\`%c[HOÀN TẤT]%c Đã hoàn thành & nhận thưởng Video Quest: \${questName}!\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
-      } catch {}
-    }
-  }
-
-  // 3. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ HOẠT ĐỘNG DISCORD (Valorant Aces, mini-game Discord)
-  for (let [idx, quest] of activityQuests.entries()) {
-    const questName = quest.config.messages.questName || quest.config.messages.gameTitle;
-    console.log(\`\\n%c[Hoạt động \${idx + 1}/\${activityQuests.length}]%c Bắt đầu làm nhiệm vụ: \${questName}...\`, "color: #5865F2; font-weight: bold", "color: #57F287");
-    const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
-    const tasks = taskConfig?.tasks || {};
-    const taskName = ["PLAY_ACTIVITY", "ACHIEVEMENT_IN_ACTIVITY", "ACHIEVEMENT_IN_GAME"].find(x => tasks[x] != null) || Object.keys(tasks)[0];
-    const taskData = tasks[taskName] || {};
-    const secondsNeeded = taskData.target || 900;
-    let secondsDone = quest.userStatus?.progress?.[taskName]?.value ?? 0;
-
-    let chan = ChannelStore?.getSortedPrivateChannels?.()?.[0]?.id ||
-      (typeof ChannelStore?.getDMChannelIds === 'function' ? ChannelStore.getDMChannelIds()[0] : null) ||
-      Object.values(GuildChannelStore?.getAllGuilds?.() ?? {}).find(g => g?.VOCAL?.length)?.VOCAL?.[0]?.channel?.id;
-
-    if (!chan && api) {
-      try {
-        const dmList = await api.get({ url: '/users/@me/channels' });
-        if (Array.isArray(dmList?.body) && dmList.body.length > 0) chan = dmList.body[0].id;
-      } catch (e) {}
-    }
-    if (!chan) chan = "1000000000000000000";
-
-    const streamKey = \`call:\${chan}:\${Math.floor(Math.random() * 9000) + 1000}\`;
-    console.log(\`%c[Mô phỏng Activity]%c Đang phát tín hiệu cho \${questName}...\`, "color: #5865F2", "color: #FAA61A");
-
-    const maxLoops = Math.ceil(secondsNeeded / 20) + 10;
-    let loopCount = 0;
-
-    if (api) {
-      while (secondsDone < secondsNeeded && loopCount < maxLoops) {
-        loopCount++;
-        try {
-          const res = await api.post({
-            url: \`/quests/\${quest.id}/heartbeat\`,
-            body: { stream_key: streamKey, terminal: false }
-          });
-          const serverProgress = res?.body?.progress?.[taskName]?.value ?? res?.body?.userStatus?.progress?.[taskName]?.value;
-          if (typeof serverProgress === 'number' && serverProgress > secondsDone) {
-            secondsDone = serverProgress;
-          } else {
-            secondsDone = Math.min(secondsNeeded, secondsDone + 20);
-          }
-          let pct = Math.min(100, Math.round((secondsDone / secondsNeeded) * 100));
-          console.log(\`%c[Tiến độ \${questName}]%c \${Math.min(secondsDone, secondsNeeded)}/\${secondsNeeded}s (\${pct}%)\`, "color: #5865F2", "color: #57F287; font-weight: bold");
-          if (secondsDone >= secondsNeeded) break;
-        } catch (e) {
-          break;
-        }
-        await new Promise(r => setTimeout(r, 20000));
-      }
-
-      try {
-        await api.post({ url: \`/quests/\${quest.id}/heartbeat\`, body: { stream_key: streamKey, terminal: true } });
-      } catch (e) {}
-
-      try {
-        await api.post({ url: \`/quests/\${quest.id}/claim-reward\`, body: { platform: 0 } });
-        console.log(\`%c[HOÀN TẤT]%c Đã hoàn thành & nhận thưởng nhiệm vụ: \${questName}!\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
-      } catch (err) {
-        console.log(\`%c[LƯU Ý]%c Có thể vào tab Quests bấm Claim cho \${questName}.\`, "color: #FAA61A", "color: #FFFFFF");
-      }
-    }
-  }
-
-  // 4. TỰ ĐỘNG LÀM & NHẬN THƯỞNG CÁC NHIỆM VỤ GAME (Where Winds Meet, Clean Crew Roblox, v.v.)
-  for (let [idx, quest] of gameQuests.entries()) {
-    const questName = quest.config.messages.questName || quest.config.messages.gameTitle;
-    const taskConfig = quest.config.taskConfig ?? quest.config.taskConfigV2;
-    const tasks = taskConfig?.tasks || {};
-
-    const taskName = ["PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ON_PLAYSTATION", "PLAY_ON_XBOX"].find(x => tasks[x] != null) || Object.keys(tasks)[0];
-
-    console.log(\`\\n%c[Game \${idx + 1}/\${gameQuests.length}]%c Bắt đầu làm nhiệm vụ: \${questName}...\`, "color: #5865F2; font-weight: bold", "color: #57F287");
-
-    const taskData = tasks[taskName] || {};
-    // Ưu tiên taskConfigV2 applications ID (cho phép nhận diện đúng Roblox thay vì app quảng cáo)
-    const applicationId = taskData.applications?.[0]?.id ?? quest.config.application?.id ?? quest.config.applicationId;
-    const applicationName = taskData.applications?.[0]?.name ?? quest.config.application?.name ?? quest.config.messages.gameTitle ?? "Target Game";
-    const secondsNeeded = taskData.target || (quest.config.streamDurationRequirementMinutes ? quest.config.streamDurationRequirementMinutes * 60 : 900);
-    let secondsDone = quest.userStatus?.progress?.[taskName]?.value ?? quest.userStatus?.streamProgressSeconds ?? 0;
-
-    const pid = Math.floor(Math.random() * 30000) + 1000;
-
-    let realStreamFunc = null;
-    if (ApplicationStreamingStore) {
-      realStreamFunc = ApplicationStreamingStore.getStreamerActiveStreamMetadata;
-      ApplicationStreamingStore.getStreamerActiveStreamMetadata = () => ({ id: applicationId, pid, sourceName: null });
-    }
-
-    let realGames = RunningGameStore ? RunningGameStore.getRunningGames() : [];
-    let realGetRunningGames = RunningGameStore ? RunningGameStore.getRunningGames : null;
-    let realGetGameForPID = RunningGameStore ? RunningGameStore.getGameForPID : null;
-    let realGetVisibleGame = RunningGameStore ? RunningGameStore.getVisibleGame : null;
-    let realGetVisibleRunningGames = RunningGameStore ? RunningGameStore.getVisibleRunningGames : null;
-    let realGetCandidateGames = RunningGameStore ? RunningGameStore.getCandidateGames : null;
-    let realGetRunningDiscordApplicationIds = RunningGameStore ? RunningGameStore.getRunningDiscordApplicationIds : null;
-
-    let appData = null;
-    if (api && applicationId) {
-      try {
-        let res = await api.get({ url: \`/applications/public?application_ids=\${applicationId}\` });
-        appData = res.body?.[0];
-      } catch (e) {}
-    }
-
-    let win32Executables = (appData?.executables || [])
-      .filter(x => x?.os === 'win32' && typeof x?.name === 'string' && x.name.length > 0)
-      .map(x => x.name.replace('>', '').replace(/\\\\/g, '/'));
-
-    let exeName = null;
-    if (win32Executables.length > 0) {
-      const chosen = win32Executables.sort((a, b) => {
-        const score = n => (/launcher/i.test(n) ? 1 : 0) + (n.includes('/') ? 1 : 0);
-        return score(a) - score(b);
-      })[0];
-      const parts = chosen.split('/').filter(Boolean);
-      exeName = parts[parts.length - 1];
-    }
-
-    if (!exeName) {
-      if (/roblox/i.test(applicationName) || /roblox/i.test(questName) || applicationId === '432980957394370572') {
-        exeName = 'RobloxPlayerBeta.exe';
-      } else {
-        exeName = \`\${applicationName.replace(/[^a-zA-Z0-9]/g, '')}.exe\`;
-      }
-    }
-
-    const fakeGame = {
-      cmdLine: \`C:\\\\Program Files\\\\\${applicationName}\\\\\${exeName}\`,
-      exeName,
-      exePath: \`c:/program files/\${applicationName.toLowerCase()}/\${exeName}\`,
-      hidden: false,
-      isLauncher: false,
-      id: applicationId,
-      name: applicationName,
-      pid,
-      pidPath: [pid],
-      processName: applicationName,
-      start: Date.now()
-    };
-
-    const applyStoreHooks = () => {
-      if (!RunningGameStore) return;
-      RunningGameStore.getRunningGames = () => [fakeGame];
-      RunningGameStore.getGameForPID = (p) => (Number(p) === Number(pid) ? fakeGame : null);
-      if (typeof realGetVisibleGame === 'function') RunningGameStore.getVisibleGame = () => fakeGame;
-      if (typeof realGetVisibleRunningGames === 'function') RunningGameStore.getVisibleRunningGames = () => [fakeGame];
-      if (typeof realGetCandidateGames === 'function') RunningGameStore.getCandidateGames = () => [fakeGame];
-      if (typeof realGetRunningDiscordApplicationIds === 'function') {
-        RunningGameStore.getRunningDiscordApplicationIds = () => new Set([String(applicationId)]);
-      }
-    };
-
-    applyStoreHooks();
-
-    const dispatchEvents = () => {
-      if (!FluxDispatcher) return;
-      FluxDispatcher.dispatch({ type: "RUNNING_GAMES_CHANGE", removed: [], added: [fakeGame], games: [fakeGame] });
-      FluxDispatcher.dispatch({
-        type: "LOCAL_ACTIVITY_UPDATE",
-        socketId: null,
-        pid,
-        activity: {
-          application_id: applicationId,
-          name: applicationName,
-          type: 0,
-          timestamps: { start: fakeGame.start }
-        }
-      });
-    };
-
-    const cleanup = () => {
-      if (RunningGameStore) {
-        if (realGetRunningGames) RunningGameStore.getRunningGames = realGetRunningGames;
-        if (realGetGameForPID) RunningGameStore.getGameForPID = realGetGameForPID;
-        if (realGetVisibleGame) RunningGameStore.getVisibleGame = realGetVisibleGame;
-        if (realGetVisibleRunningGames) RunningGameStore.getVisibleRunningGames = realGetVisibleRunningGames;
-        if (realGetCandidateGames) RunningGameStore.getCandidateGames = realGetCandidateGames;
-        if (realGetRunningDiscordApplicationIds) RunningGameStore.getRunningDiscordApplicationIds = realGetRunningDiscordApplicationIds;
-      }
-      if (ApplicationStreamingStore && realStreamFunc) ApplicationStreamingStore.getStreamerActiveStreamMetadata = realStreamFunc;
-      if (FluxDispatcher) {
-        FluxDispatcher.dispatch({ type: "RUNNING_GAMES_CHANGE", removed: [fakeGame], added: [], games: [] });
-        FluxDispatcher.dispatch({ type: "LOCAL_ACTIVITY_UPDATE", socketId: null, pid, activity: null });
-      }
-    };
-
-    dispatchEvents();
-
-    console.log(\`%c[Giả lập]%c Đang chạy game \${applicationName} (\${Math.round(secondsDone / 60)}/\${Math.round(secondsNeeded / 60)} phút)...\`, "color: #5865F2; font-weight: bold", "color: #FAA61A");
-
-    await new Promise((resolve) => {
-      let resolved = false;
-      let lastHeartbeatTime = Date.now();
-      let heartbeatCount = 0;
-      const startTime = Date.now();
-      const maxBudget = 25 * 60 * 1000; // 25 phút runtime budget
-
-      const safeResolve = () => {
-        if (resolved) return;
-        resolved = true;
-        clearInterval(interval);
-        clearInterval(watchdogTimer);
-        FluxDispatcher.unsubscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", fn);
-        FluxDispatcher.unsubscribe("QUESTS_SEND_HEARTBEAT_FAILURE", failFn);
-        cleanup();
-        resolve();
-      };
-
-      const watchdogTimer = setInterval(() => {
-        if (resolved) return;
-        const elapsedSinceBeat = Date.now() - lastHeartbeatTime;
-        const totalElapsed = Date.now() - startTime;
-
-        // Nếu vượt quá ngân sách 25 phút thì mới kết thúc
-        if (totalElapsed > maxBudget) {
-          console.log(\`%c[HẾT GIỜ]%c Nhiệm vụ "\${questName}" đã hết thời gian chờ tối đa (25 phút).\`, "color: #ED4245; font-weight: bold", "color: #FAA61A");
-          safeResolve();
-          return;
-        }
-
-        // Nếu tín hiệu bị ngưng trệ > 45s, tự động re-hook và kích hoạt lại
-        if (elapsedSinceBeat > 45000) {
-          applyStoreHooks();
-          dispatchEvents();
-          lastHeartbeatTime = Date.now(); // Reset để thử lại chu kỳ tiếp theo
-        }
-      }, 5000);
-
-      let interval = setInterval(() => {
-        if (resolved) return;
-        applyStoreHooks();
-        dispatchEvents();
-      }, 15000);
-
-      let failFn = (errData) => {
-        if (errData?.questId === quest.id) {
-          console.log(\`%c[Lỗi Heartbeat]%c Discord báo lỗi: \${errData?.error?.message || "Tín hiệu thất bại"}\`, "color: #ED4245", "color: #FFFFFF");
-        }
-      };
-
-      let fn = async (data) => {
-        if (resolved) return;
-        if (data?.questId && data.questId !== quest.id) return;
-
-        lastHeartbeatTime = Date.now();
-        heartbeatCount++;
-
-        let progress = quest.config.configVersion === 1
-          ? data?.userStatus?.streamProgressSeconds
-          : (data?.userStatus?.progress?.[taskName]?.value ?? data?.userStatus?.streamProgressSeconds ?? (secondsDone + 30));
-
-        if (typeof progress === 'number' && progress > secondsDone) secondsDone = progress;
-        else secondsDone += 30;
-
-        let pct = Math.min(100, Math.round((secondsDone / secondsNeeded) * 100));
-        console.log(\`%c[Tiến độ \${questName}]%c \${Math.min(secondsDone, secondsNeeded)}/\${secondsNeeded}s (\${pct}%)\`, "color: #5865F2", "color: #57F287; font-weight: bold");
-
-        if (secondsDone >= secondsNeeded) {
-          console.log(\`%c[HOÀN TẤT 100%]%c Đã hoàn thành xong: \${questName}! Đang tự động nhận thưởng...\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
-          if (api) {
-            try {
-              await api.post({ url: \`/quests/\${quest.id}/claim-reward\`, body: { platform: 0 } });
-              console.log(\`%c[NHẬN THƯỞNG THÀNH CÔNG]%c Đã cộng điểm ORB/Quà cho \${questName}!\`, "color: #57F287; font-weight: bold", "color: #FAA61A");
-            } catch (err) {
-              console.log(\`%c[LƯU Ý]%c Bạn có thể vào Cài đặt -> Quests để bấm Claim nếu cần.\`, "color: #FAA61A", "color: #FFFFFF");
-            }
-          }
-          safeResolve();
-        }
-      };
-
-      FluxDispatcher.subscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", fn);
-      FluxDispatcher.subscribe("QUESTS_SEND_HEARTBEAT_FAILURE", failFn);
-    });
-  }
-
-  console.log("%c[CHÚC MỪNG]%c Đã hoàn tất 100% tất cả các nhiệm vụ Discord Quests và nhận trọn vẹn điểm ORB!", "color: #57F287; font-weight: bold; font-size: 14px", "color: #FFFFFF; font-size: 14px");
-  window.__LOWKEY_QUEST_FINISHED__ = true;
-})();
-`;
+const {
+  runAutoQuestForToken,
+  fetchQuests,
+  enrollQuest,
+  claimQuestReward,
+  isQuestActive,
+  getQuestProgressSeconds,
+  getQuestTargetSeconds,
+} = require('./questTokenWorker');
+
+const SCRIPT_PATH = path.join(__dirname, '..', 'scripts', 'quest_desktop_script.js');
+let QUEST_SCRIPT = '';
+try {
+  QUEST_SCRIPT = fs.readFileSync(SCRIPT_PATH, 'utf8');
+} catch (e) {
+  console.warn('[QUEST MANAGER] Không thể nạp scripts/quest_desktop_script.js:', e.message);
+}
 
 function buildTokenModal() {
   const modal = new ModalBuilder()
@@ -1021,7 +567,14 @@ async function handleButtonInteraction(interaction) {
   if (action === 'auto_scan_now') {
     await interaction.deferUpdate();
     const { getSubscriber, scanUserQuests, buildAutoStatusPayload, isUserJobRunning } = require('./questScheduler');
-    const { fetchQuests, enrollQuest, claimQuestReward, getQuestProgressSeconds } = require('./questTokenWorker');
+    const {
+      fetchQuests,
+      enrollQuest,
+      claimQuestReward,
+      getQuestProgressSeconds,
+      getQuestTargetSeconds,
+      isQuestActive,
+    } = require('./questTokenWorker');
     const sub = getSubscriber(interaction.user.id);
     if (!sub) {
       return interaction.followUp({
@@ -1055,13 +608,7 @@ async function handleButtonInteraction(interaction) {
       });
     }
 
-    const now = Date.now();
-    const activeQuests = allQuests.filter((q) => {
-      const exp = q.config?.expires_at || q.config?.expiresAt;
-      if (!exp) return true;
-      const expMs = new Date(exp).getTime();
-      return Number.isNaN(expMs) ? true : expMs > now;
-    });
+    const activeQuests = allQuests.filter(isQuestActive);
 
     const pendingQuests = activeQuests.filter((q) => !q.user_status?.claimed_at);
 
@@ -1101,7 +648,7 @@ async function handleButtonInteraction(interaction) {
         `Nhiệm vụ #${q.id}`;
 
       const currSec = getQuestProgressSeconds(q);
-      const targetSec = q.config?.task_config?.tasks?.PLAY_ON_DESKTOP?.target || q.config?.task_config_v2?.tasks?.PLAY_ON_DESKTOP?.target || 900;
+      const targetSec = getQuestTargetSeconds(q);
       const pct = Math.min(100, Math.round((currSec / targetSec) * 100));
 
       let icon = '🎮';

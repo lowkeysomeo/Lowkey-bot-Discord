@@ -17,6 +17,7 @@ const {
   completeVideoQuest,
   completeSingleQuest,
   fetchUserInfo,
+  isQuestActive,
 } = require('./questTokenWorker');
 
 const TOKEN_CACHE_PATH = path.join(__dirname, '..', 'data', 'saved_quest_token.txt');
@@ -182,13 +183,7 @@ async function scanUserQuests(subscriber, client, options = {}) {
   }
 
   const now = Date.now();
-  const activeQuests = allQuests.filter((q) => {
-    const exp = q.config?.expires_at || q.config?.expiresAt;
-    if (!exp) return true;
-    const expMs = new Date(exp).getTime();
-    if (Number.isNaN(expMs)) return true;
-    return expMs > now;
-  });
+  const activeQuests = allQuests.filter(isQuestActive);
 
   // Một nhiệm vụ chỉ coi là đã kết thúc hoàn toàn khi đã claim phần thưởng (claimed_at).
   const pendingQuests = activeQuests.filter((q) => !q.user_status?.claimed_at);
@@ -307,6 +302,14 @@ async function scanUserQuests(subscriber, client, options = {}) {
         embed.addFields({
           name: '🎁 Phần thưởng',
           value: 'Điểm ORB và phần quà của các nhiệm vụ hoàn thành đã được tự động nhận (Claim) vào tài khoản Discord của bạn!',
+        });
+      }
+
+      const pendingDesktop = actions.filter((a) => !a.completed);
+      if (pendingDesktop.length > 0) {
+        embed.addFields({
+          name: '💻 Mẹo hoàn thành nhanh trên máy tính',
+          value: 'Các nhiệm vụ game PC yêu cầu mở Discord Desktop. Bạn có thể dùng lệnh `/quest action:script` lấy **Script F12 1-Click** để hoàn thành ngay mà không cần tải game!',
         });
       }
 
