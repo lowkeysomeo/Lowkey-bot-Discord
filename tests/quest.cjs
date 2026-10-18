@@ -249,6 +249,8 @@ setWebSocketImplementation(MockWebSocket);
   let videoProgressSent = false;
   let enrollCalled = false;
   let claimCalled = false;
+  let lastPlatformSelected = null;
+  const heartbeatBodies = [];
 
   const mockQuests = [
     {
@@ -314,10 +316,18 @@ setWebSocketImplementation(MockWebSocket);
       return { status: 200, ok: true, json: async () => ({ completed: true }) };
     }
 
+    // POST /quests/{id}/select-task-platform
+    if (urlStr.includes('/select-task-platform')) {
+      const body = JSON.parse(options.body || '{}');
+      lastPlatformSelected = body.platform;
+      return { status: 200, ok: true, json: async () => ({}) };
+    }
+
     // POST /quests/{id}/heartbeat
     if (urlStr.includes('/heartbeat')) {
       heartbeatCount++;
       const body = JSON.parse(options.body || '{}');
+      heartbeatBodies.push(body);
       if (body.application_id !== undefined) {
         assert.equal(typeof body.application_id, 'string', 'application_id nếu có phải là chuỗi');
       }
@@ -430,6 +440,7 @@ setWebSocketImplementation(MockWebSocket);
     assert.equal(wwmRes.claimed, false);
     assert.equal(wwmRes.readyToClaim, true);
     assert.equal(wwmRes.progressPercent, 100);
+    assert.equal(wwmRes.requiresDesktop, false, 'Game quest không được yêu cầu desktop');
 
     // 9.2 Clean Crew on Roblox (ứng dụng Roblox task_config_v2)
     const robloxQuest = {
@@ -459,6 +470,8 @@ setWebSocketImplementation(MockWebSocket);
     assert.equal(robloxRes.completed, true);
     assert.equal(robloxRes.claimed, false);
     assert.equal(robloxRes.readyToClaim, true);
+    assert.equal(robloxRes.requiresDesktop, false, 'Roblox quest không được yêu cầu desktop');
+    assert.equal(lastPlatformSelected, 0, 'Roblox PLAY_ON_DESKTOP phải chọn platform: 0');
 
     // 9.3 VALORANT Quét Sạch Vòng 3 (PLAY_ACTIVITY)
     const valorantQuest = {
@@ -486,6 +499,7 @@ setWebSocketImplementation(MockWebSocket);
     assert.equal(valRes.claimed, false);
     assert.equal(valRes.readyToClaim, true);
     assert.equal(valRes.type, 'activity');
+    assert.equal(valRes.requiresDesktop, false);
 
     // Kiểm tra chế độ opt-in autoClaim: true vẫn hoạt động nếu được chỉ định
     const optInRes = await completeSingleQuest('valid_token_xyz', valorantQuest, { autoClaim: true, heartbeatDelayMs: 10 });
@@ -512,6 +526,9 @@ setWebSocketImplementation(MockWebSocket);
     const mobileRes = await completeSingleQuest('valid_token_xyz', mobileGameQuest, { heartbeatDelayMs: 10 });
     assert.equal(mobileRes.completed, true);
     assert.equal(mobileRes.type, 'game');
+    assert.equal(mobileRes.requiresDesktop, false);
+    assert.equal(lastPlatformSelected, 2, 'PLAY_ON_MOBILE phải chọn platform: 2 (mobile)');
+    assert(heartbeatBodies.some(b => b.application_id === '55667788'), 'Heartbeat phải kèm application_id');
 
     const mobileVideoQuest = {
       id: 'quest-mobile-video',

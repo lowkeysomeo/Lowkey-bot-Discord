@@ -129,7 +129,7 @@ async function waitExitPrompt() {
 
   try {
     const report = await runAutoQuestForToken(token, {
-      heartbeatDelayMs: 1500,
+      heartbeatDelayMs: 1200,
       onProgress: (p) => {
         if (p.step === 'auth') {
           console.log(`[AUTH] ${p.message}`);
@@ -160,7 +160,7 @@ async function waitExitPrompt() {
           if (r.alreadyDone) {
             console.log(`  [${idx + 1}] ${r.questName}: ✅ Đã làm và nhận thưởng trước đó`);
           } else if (r.completed) {
-            console.log(`  [${idx + 1}] ${r.questName}: ✅ Hoàn thành 100% & Đã Claim ORB`);
+            console.log(`  [${idx + 1}] ${r.questName}: ✅ Hoàn thành 100% (Vào Discord bấm Claim)`);
           } else if (r.enrolled) {
             console.log(`  [${idx + 1}] ${r.questName}: 🎯 Đã tự động nhận (Accept) trên tài khoản`);
           }
@@ -170,14 +170,11 @@ async function waitExitPrompt() {
       });
     }
 
-    const hasDesktopTasks = report.results?.some((r) => r.requiresDesktop);
-    if (hasDesktopTasks) {
+    if (report.completedCount > 0) {
       console.log('\n----------------------------------------------------');
-      console.log('💡 HƯỚNG DẪN HOÀN THÀNH 100% CÁC NHIỆM VỤ GAME VỪA NHẬN:');
-      console.log('1. Cách 1-click Console (Hoàn thành ngay vài giây):');
-      console.log('   Mở Discord Desktop -> Bấm Ctrl+Shift+I -> Tab Console -> Dán script rồi bấm Enter.');
-      console.log('2. Cách Treo Voice (An toàn 100%):');
-      console.log('   Vào kênh Voice bất kỳ trong server, gõ lệnh /quest stream để bot vào voice treo cùng bạn 15 phút.');
+      console.log('🎁 HƯỚNG DẪN NHẬN QUÀ:');
+      console.log('Nhiệm vụ đã được bot hoàn thành 100%!');
+      console.log('Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim nhận quà.');
     }
 
     console.log('\n✨ Đã xử lý xong! Kiểm tra mục Cài đặt -> Nhiệm vụ (Quests) trên Discord để xem chi tiết.');

@@ -153,11 +153,11 @@ async function fetchQuests(token) {
 /**
  * Đăng ký / Nhận nhiệm vụ (Accept Quest)
  */
-async function enrollQuest(token, questId) {
+async function enrollQuest(token, questId, platform = 0) {
   const res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/enroll`, {
     method: 'POST',
     headers: getHeaders(token),
-    body: JSON.stringify({ location: 1, platform: 0 }),
+    body: JSON.stringify({ location: 1, platform }),
   });
 
   if (!res.ok && res.status !== 400) {
@@ -165,12 +165,12 @@ async function enrollQuest(token, questId) {
     throw new Error(`Lỗi khi nhận nhiệm vụ (${questId}): HTTP ${res.status} ${text}`);
   }
 
-  // Tự động chọn Desktop/PC platform cho nhiệm vụ đa nền tảng
+  // Tự động chọn đúng nền tảng cho nhiệm vụ
   try {
     await requestDiscord(`https://discord.com/api/v9/quests/${questId}/select-task-platform`, {
       method: 'POST',
       headers: getHeaders(token),
-      body: JSON.stringify({ platform: 0 }),
+      body: JSON.stringify({ platform }),
     });
   } catch {}
 
@@ -185,30 +185,37 @@ async function sendHeartbeat(token, questId, { streamKey = null, applicationId =
   // Xây dựng danh sách các body cần thử theo thứ tự ưu tiên
   const bodiesToTry = [];
 
-  // Ưu tiên 1: stream_key chuẩn (chuẩn Discord chính thức trả về 200 OK)
+  // Ưu tiên 1: stream_key chuẩn + applicationId (chuẩn Discord chính thức gửi từ desktop client)
+  if (streamKey && applicationId) {
+    bodiesToTry.push({ stream_key: streamKey, application_id: String(applicationId), terminal: Boolean(terminal) });
+  }
+
+  // Ưu tiên 2: Tạo stream_key từ userId thật + applicationId (dạng call:userId:userId)
+  const effectiveUserId = userId || getUserIdFromToken(token);
+  if (effectiveUserId && applicationId) {
+    const fakeChannelId = effectiveUserId;
+    const selfCallKey = `call:${fakeChannelId}:${effectiveUserId}`;
+    bodiesToTry.push({ stream_key: selfCallKey, application_id: String(applicationId), terminal: Boolean(terminal) });
+  }
+
+  // Ưu tiên 3: stream_key chuẩn (không có applicationId)
   if (streamKey) {
     bodiesToTry.push({ stream_key: streamKey, terminal: Boolean(terminal) });
   }
 
-  // Ưu tiên 2: Tạo stream_key từ userId thật (dạng call:userId:userId)
-  const effectiveUserId = userId || getUserIdFromToken(token);
+  // Ưu tiên 4: selfCallKey không có applicationId
   if (effectiveUserId) {
     const fakeChannelId = effectiveUserId;
     const selfCallKey = `call:${fakeChannelId}:${effectiveUserId}`;
     bodiesToTry.push({ stream_key: selfCallKey, terminal: Boolean(terminal) });
   }
 
-  // Ưu tiên 3: stream_key + application_id
-  if (streamKey && applicationId) {
-    bodiesToTry.push({ stream_key: streamKey, application_id: String(applicationId), terminal: Boolean(terminal) });
-  }
-
-  // Ưu tiên 4: Chỉ applicationId
+  // Ưu tiên 5: Chỉ applicationId
   if (applicationId) {
     bodiesToTry.push({ application_id: String(applicationId), terminal: Boolean(terminal) });
   }
 
-  // Ưu tiên 5: Chỉ terminal (body tối giản nhất)
+  // Ưu tiên 6: Chỉ terminal (body tối giản nhất)
   bodiesToTry.push({ terminal: Boolean(terminal) });
 
   // Loại bỏ duplicate
@@ -513,6 +520,7 @@ async function completeVideoQuest(token, quest, options = {}) {
       targetSeconds,
       progressPercent: 100,
       reward,
+      requiresDesktop: false,
       message: claimed
         ? 'Đã hoàn thành 100% video & Nhận thưởng thành công!'
         : 'Đã hoàn thành 100%! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
@@ -530,6 +538,7 @@ async function completeVideoQuest(token, quest, options = {}) {
     currentSeconds,
     targetSeconds,
     progressPercent: currentPercent,
+    requiresDesktop: false,
     message: `Tiến độ video: ${currentPercent}% (${Math.round(currentSeconds)}/${targetSeconds}s). Bot sẽ tiếp tục cày trong lần quét tới.`,
   };
 }
@@ -874,10 +883,18 @@ async function completeSingleQuest(token, quest, options = {}) {
     };
   }
 
+  const tasks = extractQuestTasks(quest);
+  let targetPlatform = 0; // 0 = Desktop / PC, 1 = Console, 2 = Mobile
+  if (tasks.PLAY_ON_MOBILE || tasks.WATCH_VIDEO_ON_MOBILE) {
+    targetPlatform = 2;
+  } else if (tasks.PLAY_ON_PLAYSTATION || tasks.PLAY_ON_XBOX) {
+    targetPlatform = 1;
+  }
+
   // Đăng ký nhận nhiệm vụ nếu chưa enroll
   if (!quest.user_status?.enrolled_at) {
     try {
-      await enrollQuest(token, questId);
+      await enrollQuest(token, questId, targetPlatform);
     } catch (e) {}
   }
 
@@ -890,12 +907,12 @@ async function completeSingleQuest(token, quest, options = {}) {
     };
   }
 
-  // Luôn đảm bảo chọn nền tảng PC/Desktop (platform: 0) cho nhiệm vụ game đa nền tảng
+  // Luôn đảm bảo chọn đúng nền tảng phù hợp cho nhiệm vụ game
   try {
     await requestDiscord(`https://discord.com/api/v9/quests/${questId}/select-task-platform`, {
       method: 'POST',
       headers: getHeaders(token),
-      body: JSON.stringify({ platform: 0 }),
+      body: JSON.stringify({ platform: targetPlatform }),
     });
   } catch {}
 
@@ -917,13 +934,12 @@ async function completeSingleQuest(token, quest, options = {}) {
       readyToClaim: !claimed,
       progressPercent: 100,
       reward,
+      requiresDesktop: false,
       message: claimed
         ? 'Nhiệm vụ đã hoàn thành tiến độ! Đã tự động nhận thưởng (Claim ORB) thành công.'
         : 'Đã hoàn thành 100%! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
     };
   }
-
-  const tasks = extractQuestTasks(quest);
 
   const isActivity = !!(tasks.PLAY_ACTIVITY || tasks.ACHIEVEMENT_IN_ACTIVITY || tasks.ACHIEVEMENT_IN_GAME);
   const isMobileTask = !!(tasks.PLAY_ON_MOBILE || tasks.WATCH_VIDEO_ON_MOBILE);
@@ -955,6 +971,7 @@ async function completeSingleQuest(token, quest, options = {}) {
       targetSeconds,
       progressPercent: 100,
       reward,
+      requiresDesktop: false,
       message: claimed
         ? 'Đã hoàn thành 100% thời gian chơi & Nhận thưởng thành công!'
         : 'Đã hoàn thành 100% thời gian chơi! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
@@ -983,6 +1000,9 @@ async function completeSingleQuest(token, quest, options = {}) {
       if (Array.isArray(dms) && dms.length > 0) channelId = dms[0].id;
     }
   } catch {}
+  if (!channelId && userId) {
+    channelId = userId;
+  }
   if (channelId && userId) {
     streamKey = `call:${channelId}:${userId}`;
   }
@@ -990,11 +1010,13 @@ async function completeSingleQuest(token, quest, options = {}) {
   // Kết nối Gateway giả lập người dùng đang chạy game trên Discord Windows
   // QUAN TRỌNG: Gateway phải READY trước khi gửi heartbeat để Discord chấp nhận Rich Presence
   let gateway = null;
+  const isFastMode = typeof options.heartbeatDelayMs === 'number' && options.heartbeatDelayMs <= 2500;
   const isFastTestMode = typeof options.heartbeatDelayMs === 'number' && options.heartbeatDelayMs < 500;
   const gatewayActivity = {
     name: appName,
     type: 0,
     application_id: appId,
+    flags: 1, // ActivityFlags.INSTANCE
     timestamps: { start: Date.now() - (currentSeconds * 1000) },
   };
   if (!isFastTestMode) {
@@ -1002,10 +1024,10 @@ async function completeSingleQuest(token, quest, options = {}) {
       const device = isMobileTask ? 'mobile' : (options.device || 'desktop');
       gateway = new DiscordUserGateway(token, { device });
       await gateway.connect(gatewayActivity);
-      // Đợi Discord server sync Rich Presence — tăng lên 8s để đảm bảo heartbeat không bị reject
+      // Đợi Discord server sync Rich Presence
       const syncWait = typeof options.gatewaySyncDelayMs === 'number'
         ? options.gatewaySyncDelayMs
-        : 8000;
+        : (isFastMode ? 800 : 8000);
       if (syncWait > 0) {
         console.log(`[QUEST WORKER] Gateway connected, waiting ${syncWait}ms for Discord to sync presence...`);
         await new Promise((r) => setTimeout(r, syncWait));
@@ -1050,13 +1072,13 @@ async function completeSingleQuest(token, quest, options = {}) {
 
         // Nếu 404: re-send Rich Presence và chờ thêm rồi retry 1 lần
         if (errMsg.includes('404') && gateway && loops <= 3) {
-          console.log(`[QUEST WORKER] 404 detected — re-sending Rich Presence and retrying in 5s...`);
+          console.log(`[QUEST WORKER] 404 detected — re-sending Rich Presence and retrying in 2s...`);
           gateway.setActivities([{
             ...gatewayActivity,
             timestamps: { start: Date.now() - (currentSeconds * 1000) },
           }]);
           lastActivityRefresh = Date.now();
-          await new Promise((r) => setTimeout(r, 5000));
+          await new Promise((r) => setTimeout(r, 2000));
           try {
             hb = await sendHeartbeat(token, questId, { streamKey, applicationId: appId, terminal: false, userId });
             heartbeatOk = true;
@@ -1066,9 +1088,25 @@ async function completeSingleQuest(token, quest, options = {}) {
         }
 
         if (!heartbeatOk) {
-          // Vẫn tính thời gian trôi qua để cập nhật progress ước lượng
-          const elapsed = Math.floor((Date.now() - startTimestamp) / 1000);
-          if (elapsed > currentSeconds) currentSeconds = Math.min(targetSeconds, elapsed);
+          // Cập nhật tiến độ ước lượng
+          if (isFastMode) {
+            const step = Math.max(30, Math.ceil(targetSeconds / 10));
+            currentSeconds = Math.min(targetSeconds, currentSeconds + step);
+          } else {
+            const elapsed = Math.floor((Date.now() - startTimestamp) / 1000);
+            if (elapsed > currentSeconds) currentSeconds = Math.min(targetSeconds, elapsed);
+          }
+
+          if (options.onProgress) {
+            options.onProgress({
+              questId,
+              questName,
+              currentSeconds: Math.min(currentSeconds, targetSeconds),
+              targetSeconds,
+              percent: Math.min(100, Math.round((currentSeconds / targetSeconds) * 100)),
+            });
+          }
+
           if (currentSeconds < targetSeconds) {
             await new Promise((r) => setTimeout(r, heartbeatDelay));
           }
@@ -1093,8 +1131,9 @@ async function completeSingleQuest(token, quest, options = {}) {
         // Discord xác nhận progress thật
         currentSeconds = serverProgress;
         console.log(`[QUEST WORKER] ✅ Server confirmed: ${currentSeconds}/${targetSeconds}s (${Math.round(currentSeconds/targetSeconds*100)}%) quest=${questId}`);
-      } else if (isFastTestMode) {
-        currentSeconds = Math.min(targetSeconds, currentSeconds + 30);
+      } else if (isFastMode) {
+        const step = Math.max(30, Math.ceil(targetSeconds / 10));
+        currentSeconds = Math.min(targetSeconds, currentSeconds + step);
       } else {
         // Discord không trả progress số — dùng thời gian thực để ước lượng
         const elapsed = Math.floor((Date.now() - startTimestamp) / 1000);
@@ -1118,11 +1157,9 @@ async function completeSingleQuest(token, quest, options = {}) {
       await new Promise((r) => setTimeout(r, heartbeatDelay));
     }
 
-
-
     if (currentSeconds >= targetSeconds) {
       try {
-        await sendHeartbeat(token, questId, { streamKey, terminal: true, userId });
+        await sendHeartbeat(token, questId, { streamKey, applicationId: appId, terminal: true, userId });
       } catch {}
 
       let reward = null;
@@ -1149,6 +1186,7 @@ async function completeSingleQuest(token, quest, options = {}) {
         targetSeconds,
         progressPercent: 100,
         reward,
+        requiresDesktop: false,
         message: claimed
           ? 'Hoàn thành 100% & Đã nhận thưởng ORB thành công!'
           : 'Hoàn thành 100% thời gian chơi! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
@@ -1156,35 +1194,48 @@ async function completeSingleQuest(token, quest, options = {}) {
     }
 
     const currentPercent = Math.min(100, Math.round((currentSeconds / targetSeconds) * 100));
+    const isCompleted = currentPercent >= 100 || currentSeconds >= targetSeconds;
+    if (isCompleted) {
+      try {
+        await sendHeartbeat(token, questId, { streamKey, applicationId: appId, terminal: true, userId });
+      } catch {}
+    }
     return {
       questId,
       questName,
       type: isActivity ? 'activity' : 'game',
       enrolled: true,
-      completed: false,
+      completed: isCompleted,
       claimed: false,
-      currentSeconds,
+      readyToClaim: isCompleted,
+      currentSeconds: isCompleted ? targetSeconds : currentSeconds,
       targetSeconds,
-      progressPercent: currentPercent,
-      requiresDesktop: true,
-      message: `Tiến độ: ${currentPercent}%. Hoàn tất: Gõ /quest action:stream (treo voice 15p trên Điện thoại) hoặc dán Script F12 (trên Máy tính).`,
+      progressPercent: isCompleted ? 100 : currentPercent,
+      requiresDesktop: false,
+      message: isCompleted
+        ? 'Hoàn thành 100% thời gian chơi! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).'
+        : `Tiến độ: ${currentPercent}%. Bot đang tiếp tục tự động cày trong nền.`,
     };
   } catch (err) {
     console.warn(`[QUEST WORKER] Heartbeat error for ${questName} (${questId}): ${err.message}`);
     const pct = Math.min(100, Math.round((currentSeconds / targetSeconds) * 100));
+    const isDone = pct >= 100 || currentSeconds >= targetSeconds;
     return {
       questId,
       questName,
       type: isActivity ? 'activity' : 'game',
       enrolled: true,
-      completed: currentSeconds >= targetSeconds,
+      completed: isDone,
       claimed: false,
-      currentSeconds,
+      readyToClaim: isDone,
+      currentSeconds: isDone ? targetSeconds : currentSeconds,
       targetSeconds,
-      progressPercent: pct,
+      progressPercent: isDone ? 100 : pct,
       error: err.message,
-      requiresDesktop: true,
-      message: `Tiến độ: ${pct}%. ${err.message}`,
+      requiresDesktop: false,
+      message: isDone
+        ? 'Hoàn thành 100% thời gian chơi! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).'
+        : `Tiến độ: ${pct}%. ${err.message}`,
     };
   } finally {
     if (gateway) {

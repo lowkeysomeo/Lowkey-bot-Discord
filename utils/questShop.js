@@ -403,12 +403,11 @@ async function processPaidOrder(orderId, client) {
 
     const results = [];
     let completedCount = 0;
-    let desktopCount = 0;
 
     for (const q of targetQuests) {
       try {
-        const res = await completeSingleQuest(order.token, q);
-        if (res.completed || res.alreadyDone) {
+        const res = await completeSingleQuest(order.token, q, { heartbeatDelayMs: 1200 });
+        if (res.completed || res.alreadyDone || res.progressPercent >= 100) {
           completedCount++;
           results.push({
             questId: q.id,
@@ -418,16 +417,6 @@ async function processPaidOrder(orderId, client) {
             message: res.alreadyDone
               ? 'Đã nhận thưởng trước đó'
               : (res.claimed ? 'Hoàn thành 100% & Đã nhận thưởng ORB' : 'Hoàn thành 100% (Vào Discord bấm Claim)'),
-          });
-        } else if (res.requiresDesktop) {
-          desktopCount++;
-          results.push({
-            questId: q.id,
-            name: res.questName || q.id,
-            success: false,
-            completed: false,
-            requiresDesktop: true,
-            message: 'Đã tự động nhận (Accept). Cần mở Discord Desktop hoặc chạy Script F12 để hoàn tất',
           });
         } else {
           results.push({
@@ -454,8 +443,6 @@ async function processPaidOrder(orderId, client) {
       finalStatus = 'cancelled';
     } else if (completedCount === results.length) {
       finalStatus = 'completed';
-    } else if (desktopCount > 0) {
-      finalStatus = 'pending_desktop';
     } else if (completedCount > 0) {
       finalStatus = 'partially_completed';
     } else {
@@ -464,7 +451,7 @@ async function processPaidOrder(orderId, client) {
 
     updateOrderStatus(orderId, finalStatus, {
       completedAt: finalStatus === 'completed' ? Date.now() : null,
-      error: finalStatus !== 'completed' ? `${completedCount}/${results.length} hoàn tất, ${desktopCount} cần Desktop/F12` : null,
+      error: finalStatus !== 'completed' ? `${completedCount}/${results.length} hoàn tất` : null,
     });
 
     // Gửi thông báo DM cho khách hàng
@@ -472,11 +459,11 @@ async function processPaidOrder(orderId, client) {
       const user = await client.users.fetch(order.user_id).catch(() => null);
       if (user) {
         const isAllDone = finalStatus === 'completed';
-        const embedColor = isAllDone ? 0x57f287 : desktopCount > 0 ? 0xfee75c : 0xed4245;
+        const embedColor = isAllDone ? 0x57f287 : completedCount > 0 ? 0xfee75c : 0xed4245;
         const embedTitle = isAllDone
           ? '🎉 [LOWKEY SHOP] HOÀN TẤT ĐƠN HÀNG QUEST LẺ!'
-          : desktopCount > 0
-          ? '🎯 [LOWKEY SHOP] ĐÃ NHẬN NHIỆM VỤ THÀNH CÔNG!'
+          : completedCount > 0
+          ? '⚡ [LOWKEY SHOP] HOÀN TẤT MỘT PHẦN ĐƠN HÀNG'
           : '⚠️ [LOWKEY SHOP] KẾT QUẢ XỬ LÝ ĐƠN HÀNG';
 
         let desc =
@@ -485,22 +472,14 @@ async function processPaidOrder(orderId, client) {
             .map((r, i) => {
               if (r.completed) {
                 return `**${i + 1}. ${r.name}**\n↪ ✅ ${r.message}`;
-              } else if (r.requiresDesktop) {
-                return `**${i + 1}. ${r.name}**\n↪ 🎯 ${r.message}`;
               } else {
                 return `**${i + 1}. ${r.name}**\n↪ ⚠️ ${r.error || r.message || 'Thất bại'}`;
               }
             })
             .join('\n\n');
 
-        if (isAllDone) {
+        if (completedCount > 0) {
           desc += `\n\n🎁 **Nhiệm vụ đã hoàn thành 100%!** Vui lòng mở **Cài đặt -> Quests** trên Discord để tự bấm **Claim** nhận thưởng (Discord yêu cầu xác thực con người khi nhận quà).`;
-        } else if (desktopCount > 0) {
-          desc +=
-            `\n\n💡 **HƯỚNG DẪN HOÀN TẤT (KHÔNG CẦN TẢI GAME):**\n` +
-            `Bot đã tự động **Accept (Nhận)** các nhiệm vụ game trên tài khoản của bạn:\n` +
-            `• **Trên Điện thoại:** Tham gia phòng Voice bất kỳ, gõ lệnh \`/quest action:stream\` để bot vào làm Viewer treo cùng bạn 15 phút.\n` +
-            `• **Trên Máy tính:** Bấm nút **📜 Mã Script Auto F12** lấy file **\`auto_quest.js\`**, dán vào Console (\`Ctrl + Shift + I\`) rồi Enter!\n`;
         }
 
         const embed = new EmbedBuilder()

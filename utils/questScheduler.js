@@ -335,13 +335,11 @@ async function scanUserQuests(subscriber, client, options = {}) {
         });
       }
 
-      const pendingDesktop = actions.filter((a) => !a.completed);
-      if (pendingDesktop.length > 0) {
+      const pendingQuestsList = actions.filter((a) => !a.completed);
+      if (pendingQuestsList.length > 0) {
         embed.addFields({
-          name: '📱 Cách hoàn thành trên Điện thoại & Máy tính',
-          value:
-            '• **Trên Điện thoại:** Vào phòng Voice bất kỳ, dùng lệnh `/quest action:stream` để bot vào làm Viewer treo cùng bạn 15 phút.\n' +
-            '• **Trên Máy tính:** Dùng lệnh `/quest action:script` lấy mã **Script F12 1-Click** để hoàn thành ngay mà không cần tải game!',
+          name: '🔄 Tiến trình tự động',
+          value: 'Bot đang tiếp tục tự động cày các nhiệm vụ còn lại trong nền ở chu kỳ quét kế tiếp (20 phút/lần).',
         });
       }
 

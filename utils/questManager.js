@@ -711,7 +711,7 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
 
   try {
     const report = await runAutoQuestForToken(token, {
-      heartbeatDelayMs: 1500,
+      heartbeatDelayMs: 1200,
       onProgress: (p) => {
         if (p.step === 'auth' || p.step === 'fetch') {
           updateProgress(`🔄 ${p.message}`);
@@ -725,7 +725,6 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
       },
     });
 
-    const hasDesktopQuests = report.results.some((r) => r.requiresDesktop);
     const isAllCompleted = report.totalQuests > 0 && report.completedCount === report.totalQuests;
 
     let desc =
@@ -738,39 +737,35 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
         ? '**Chi tiết từng nhiệm vụ:**\n' +
           report.results
             .map((r, i) => {
-              if (r.completed || r.alreadyDone) {
+              if (r.completed || r.alreadyDone || r.progressPercent >= 100) {
                 const state = r.alreadyDone
                   ? 'Đã làm trước đó'
                   : r.claimed
                   ? 'Hoàn thành 100% & Đã Claim ORB'
                   : 'Hoàn thành 100% (Vào Discord bấm Claim)';
                 return `**${i + 1}. ${r.questName}**: ✅ ${state}`;
-              } else if (r.requiresDesktop) {
-                return `**${i + 1}. ${r.questName}**: 🎯 Đã tự động nhận (Accept)\n  ↳ *(Điện thoại: Dùng \`/quest action:stream\` treo voice 15p | Máy tính: Dán script F12)*`;
               }
               return `**${i + 1}. ${r.questName}**: ⚠️ Chưa xong (${r.error || r.message || 'Thất bại'})`;
             })
             .join('\n')
         : 'Không có nhiệm vụ nào cần thực hiện.');
 
-    if (hasDesktopQuests) {
+    if (report.completedCount > 0) {
       desc +=
-        `\n\n💡 **Cách hoàn thành các nhiệm vụ Game/Activity (không cần tải game):**\n` +
-        `• **Trên Điện thoại:** Tham gia phòng Voice bất kỳ, gõ lệnh \`/quest action:stream\` để bot vào làm Viewer treo cùng bạn 15 phút.\n` +
-        `• **Trên Máy tính:** Bấm **📜 Mã Script Auto F12** lấy file **\`auto_quest.js\`**, dán vào Console (\`Ctrl + Shift + I\`) rồi Enter!\n`;
+        `\n\n🎁 **HƯỚNG DẪN NHẬN QUÀ:**\n` +
+        `Các nhiệm vụ đã được cày **100% hoàn tất**!\n` +
+        `Vui lòng vào **Cài đặt người dùng (User Settings) ➔ Quests (Nhiệm vụ)** trên Discord để bấm nút **Claim** nhận phần thưởng (Discord yêu cầu xác thực con người khi nhận quà).`;
     }
 
     const resultEmbed = new EmbedBuilder()
-      .setColor(isAllCompleted ? 0x57f287 : hasDesktopQuests ? 0xfee75c : 0x5865f2)
+      .setColor(isAllCompleted ? 0x57f287 : 0x5865f2)
       .setTitle(
         isAllCompleted
           ? '🎉 KẾT QUẢ AUTO QUEST DISCORD (100% HOÀN TẤT)'
-          : hasDesktopQuests
-          ? '🎯 KẾT QUẢ AUTO QUEST (ĐÃ ACCEPT NHIỆM VỤ)'
           : '⚡ KẾT QUẢ AUTO QUEST DISCORD'
       )
       .setDescription(desc)
-      .setFooter({ text: 'Lowkey Auto Quest • Mở Cài đặt -> Quests để kiểm tra quà ORB' })
+      .setFooter({ text: 'Lowkey Auto Quest • Mở Cài đặt -> Quests để bấm Claim nhận quà' })
       .setTimestamp();
 
     try {
@@ -783,20 +778,7 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
         .setCustomId('quest:hub')
         .setLabel('Menu Chính')
         .setEmoji('🔮')
-        .setStyle(ButtonStyle.Primary)
-    );
-
-    if (hasDesktopQuests) {
-      resultRow.addComponents(
-        new ButtonBuilder()
-          .setCustomId('quest:script')
-          .setLabel('Script Console F12')
-          .setEmoji('⚡')
-          .setStyle(ButtonStyle.Success)
-      );
-    }
-
-    resultRow.addComponents(
+        .setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId('quest:change_token')
         .setLabel('Đổi Token Khác')
