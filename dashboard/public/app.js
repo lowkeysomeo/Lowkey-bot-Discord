@@ -572,10 +572,10 @@ function rrChoice(){
 }
 function rrPage(){
  const rows=state.data.reactionroles;
- return heading('VAI TRÒ · KẾT NỐI','Reaction role','Member bấm nút để nhận hoặc bỏ role. Mỗi bảng có thể chọn nhiều role.')+
+ return heading('VAI TRÒ · KẾT NỐI','Reaction role','Member bấm nút để nhận hoặc bỏ role.')+
  '<form id="rr-form"><datalist id="rr-emojis">'+(state.data.emojis||[]).map(e=>'<option value="'+h('<'+(e.animated?'a':'')+':'+e.name+':'+e.id+'>')+'">'+h(e.name)+'</option>').join('')+'</datalist>'+panel('Tạo bảng nhận role','Dùng role sở thích, game hoặc thông báo. Các role có quyền điều hành sẽ bị chặn.',
  '<div class="form-grid"><div class="field"><label for="rr-title">Tiêu đề</label><input id="rr-title" name="title" maxlength="150" value="✨ Chọn vai trò của bạn" required></div>'+field('rr-channel','Kênh đăng bảng','channel','')+
- '<div class="field"><label for="rr-description">Lời giới thiệu</label><textarea id="rr-description" name="description" maxlength="2000" required>Chọn những điều bạn quan tâm để kết nối cùng mọi người. Bấm nút bên dưới để nhận role, bấm lại nếu muốn bỏ nhé!</textarea></div></div>'+
+ '<div class="field full"><label for="rr-description">Lời giới thiệu</label><textarea id="rr-description" name="description" maxlength="2000" required>Chọn những điều bạn quan tâm để kết nối cùng mọi người. Bấm nút bên dưới để nhận role, bấm lại nếu muốn bỏ nhé!</textarea></div><div class="field full"><label><input type="checkbox" id="rr-single-choice" checked> <strong>Chỉ cho phép chọn 1 role trong bảng</strong> (nếu chọn role khác, member phải bỏ role cũ trước)</label></div></div>'+
  '<div id="rr-choices">'+rrChoice()+'</div><button type="button" class="secondary" id="rr-add">+ Thêm role</button>')+
  '<div class="note">Bot cần Manage Roles và role của bot phải nằm trên các role tự nhận. Role này được member tự do nhận/bỏ, nên dùng role riêng với role thưởng level và top tháng.</div><div class="savebar"><span>Tối đa 10 role/bảng · 20 bảng đang hoạt động.</span><button class="primary" type="submit">Đăng bảng nhận role</button></div><div id="rr-result"></div></form>'+
  panel('Các bảng đã đăng','Đóng bảng sẽ ngừng nhận/bỏ role qua bảng đó; giữ nguyên role đã cấp.',rows===undefined?'<p>Đang tải danh sách…</p>':!rows.length?'<p>Chưa có bảng nhận role.</p>':rows.map(r=>'<article class="giveaway-item"><div><h3>'+h(r.title)+'</h3><p>'+h(r.active?'Đang hoạt động':'Đã đóng')+' · '+r.choices.length+' role</p><small>ID: '+h(r.id)+'</small></div><div class="giveaway-actions">'+(r.messageUrl?'<a class="secondary" target="_blank" rel="noopener noreferrer" href="'+h(r.messageUrl)+'">Xem bảng ↗</a>':'')+(r.active?'<button class="secondary" data-rr-disable="'+h(r.id)+'">Đóng bảng</button>':'')+'</div></article>').join(''));
@@ -585,7 +585,8 @@ async function rrSubmit(event){
  const form=event.currentTarget,id=state.guild.id,requestId=state.requestId;
  const choices=[...form.querySelectorAll('[data-rr-choice]')].map(row=>({roleId:row.querySelector('select').value,label:row.querySelector('[data-rr-label]').value.trim(),emoji:row.querySelector('[data-rr-emoji]').value.trim()})).filter(c=>c.roleId);
  if(!choices.length)return notify('Chọn ít nhất một role.');
- const input={action:'create',title:form.elements.title.value,description:form.elements.description.value,channelId:form.querySelector('#rr-channel').value,choices};
+ const singleChoice=form.querySelector('#rr-single-choice')?form.querySelector('#rr-single-choice').checked:true;
+ const input={action:'create',title:form.elements.title.value,description:form.elements.description.value,channelId:form.querySelector('#rr-channel').value,singleChoice,choices};
  state.saving=true;form.querySelector('button[type=submit]').disabled=true;
  try{const result=await api(`/api/guilds/${id}/reaction-roles`,input);if(state.requestId!==requestId)return;state.dirty=false;state.data.reactionroles=[{...input,...result,active:1},...(state.data.reactionroles||[])];render();document.querySelector('#rr-result').innerHTML='<p>✅ Đã đăng bảng nhận role.</p><a class="secondary" target="_blank" rel="noopener noreferrer" href="'+h(result.messageUrl)+'">Mở bảng trên Discord ↗</a>';notify('Bảng nhận role đã sẵn sàng!');}
  catch(e){notify(e.message);}finally{state.saving=false;form.querySelector('button[type=submit]').disabled=false;}

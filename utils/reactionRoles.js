@@ -5,7 +5,7 @@ const {getDb}=require('./database');
 const {getPickLimit,isPickExpired}=require('./rolePickLimits');
 const locks=new Map();
 async function serial(key,fn){const task=(locks.get(key)||Promise.resolve()).catch(()=>{}).then(fn);locks.set(key,task);try{return await task;}finally{if(locks.get(key)===task)locks.delete(key);}}
-function db(){const d=getDb();d.exec(`CREATE TABLE IF NOT EXISTS reaction_role_panels(id TEXT PRIMARY KEY,guild_id TEXT NOT NULL,channel_id TEXT NOT NULL,message_id TEXT,title TEXT NOT NULL,description TEXT NOT NULL,choices TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 0);`);return d;}
+function db(){const d=getDb();d.exec(`CREATE TABLE IF NOT EXISTS reaction_role_panels(id TEXT PRIMARY KEY,guild_id TEXT NOT NULL,channel_id TEXT NOT NULL,message_id TEXT,title TEXT NOT NULL,description TEXT NOT NULL,choices TEXT NOT NULL,active INTEGER NOT NULL DEFAULT 0,single_choice INTEGER NOT NULL DEFAULT 1);`);try{d.exec(`ALTER TABLE reaction_role_panels ADD COLUMN single_choice INTEGER NOT NULL DEFAULT 1;`);}catch(e){}return d;}
 function fail(message){throw Object.assign(new Error(message),{status:400});}
 const dangerous=['Administrator','ManageGuild','ManageRoles','ManageChannels','ManageWebhooks','KickMembers','BanMembers','ModerateMembers','ManageMessages','MentionEveryone','ManageThreads','ManageEvents','MuteMembers','DeafenMembers','MoveMembers'].reduce((a,k)=>a|(P[k]||0n),0n);
 async function checkedRole(guild,id,me){
@@ -33,8 +33,9 @@ async function create(guild,input){return serial(`panel:${guild.id}`,async()=>{
  for(const c of input.choices){if(!c||typeof c.roleId!=='string'||!/^\d{17,20}$/.test(c.roleId)||seen.has(c.roleId))fail('Chọn các role khác nhau cho mỗi nút.');seen.add(c.roleId);const role=await checkedRole(guild,c.roleId,me);choices.push(await require('./reactionRoleEmoji').normalizeChoice(guild,c,role));}
  const channel=await guild.channels.fetch(input.channelId);
  if(!channel||![0,5].includes(channel.type)||!channel.permissionsFor(me)?.has([P.ViewChannel,P.SendMessages,P.EmbedLinks]))fail('Bot cần quyền xem kênh, gửi tin và nhúng liên kết tại kênh đã chọn.');
- const row={id:randomBytes(8).toString('hex'),guild_id:guild.id,channel_id:channel.id,title:input.title.trim(),description:input.description.trim(),choices,active:0};
- db().prepare('INSERT INTO reaction_role_panels(id,guild_id,channel_id,title,description,choices) VALUES (?,?,?,?,?,?)').run(row.id,guild.id,channel.id,row.title,row.description,JSON.stringify(choices));
+ const singleChoice=input.singleChoice===false||input.singleChoice===0?0:1;
+ const row={id:randomBytes(8).toString('hex'),guild_id:guild.id,channel_id:channel.id,title:input.title.trim(),description:input.description.trim(),choices,active:0,single_choice:singleChoice};
+ db().prepare('INSERT INTO reaction_role_panels(id,guild_id,channel_id,title,description,choices,single_choice) VALUES (?,?,?,?,?,?,?)').run(row.id,guild.id,channel.id,row.title,row.description,JSON.stringify(choices),singleChoice);
  try{const message=await channel.send(payload(row));db().prepare('UPDATE reaction_role_panels SET message_id=? WHERE id=?').run(message.id,row.id);await message.edit(payload({...row,active:1}));db().prepare('UPDATE reaction_role_panels SET active=1 WHERE id=?').run(row.id);return {id:row.id,messageUrl:`https://discord.com/channels/${guild.id}/${channel.id}/${message.id}`};}
  catch{fail('Chưa hoàn tất đăng bảng. Bảng chưa được kích hoạt; kiểm tra quyền bot rồi thử lại.');}
  });}
@@ -50,9 +51,10 @@ async function handleButton(i){
  return serial(`panel:${i.guildId}`,()=>serial(`member:${i.guildId}:${i.user.id}`,async()=>{
  const row=db().prepare('SELECT * FROM reaction_role_panels WHERE id=? AND guild_id=?').get(match[1],i.guildId);
  if(!row||!row.active||row.channel_id!==i.channelId||row.message_id!==i.message.id||i.message.author.id!==i.client.user.id)return i.editReply('Bảng này đã đóng hoặc không còn hợp lệ.');
- const choice=JSON.parse(row.choices)[Number(match[2])];if(!choice)return i.editReply('Role không hợp lệ.');
+ const choices=JSON.parse(row.choices);
+ const choice=choices[Number(match[2])];if(!choice)return i.editReply('Role không hợp lệ.');
  if(isPickExpired(i.guildId,choice.roleId))return replyExpired(i,row);
- try{const me=await i.guild.members.fetchMe();const role=await checkedRole(i.guild,choice.roleId,me);const member=await i.guild.members.fetch({user:i.user.id,force:true});const has=member.roles.cache.has(role.id);if(isPickExpired(i.guildId,choice.roleId))return replyExpired(i,row);if(has)await member.roles.remove(role.id,'Member tự bỏ role');else await member.roles.add(role.id,'Member tự nhận role');return i.editReply({content:has?`Đã bỏ role **${choice.label}**. Bạn có thể nhận lại bất cứ lúc nào nhé.`:`✨ Bạn đã nhận role **${choice.label}**. Chào mừng bạn đến với nhóm!`,allowedMentions:{parse:[]}});}
+ try{const me=await i.guild.members.fetchMe();const role=await checkedRole(i.guild,choice.roleId,me);const member=await i.guild.members.fetch({user:i.user.id,force:true});const has=member.roles.cache.has(role.id);if(isPickExpired(i.guildId,choice.roleId))return replyExpired(i,row);if(has){await member.roles.remove(role.id,'Member tự bỏ role');}else{const isSingle=row.single_choice!==0;if(isSingle){const existingChoices=choices.filter(c=>c.roleId!==choice.roleId&&!isPickExpired(i.guildId,c.roleId)&&member.roles.cache.has(c.roleId));if(existingChoices.length>0){const currentLabels=existingChoices.map(c=>`**${c.label}**`).join(', ');return i.editReply({content:`⚠️ Bạn chỉ được chọn 1 role trong bảng này thôi (hiện bạn đang có ${currentLabels}). Hãy bấm lại vào nút ${currentLabels} để bỏ role trước khi chọn role khác nhé!`,allowedMentions:{parse:[]}});}}await member.roles.add(role.id,'Member tự nhận role');}return i.editReply({content:has?`Đã bỏ role **${choice.label}**. Bạn có thể nhận lại bất cứ lúc nào nhé.`:`✨ Bạn đã nhận role **${choice.label}**. Chào mừng bạn đến với nhóm!`,allowedMentions:{parse:[]}});}
  catch(error){return i.editReply(error.status?error.message:'Chưa thay đổi được role. Vui lòng nhờ admin kiểm tra quyền và vị trí role của bot.');}
  }));
 }
