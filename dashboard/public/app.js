@@ -3,6 +3,7 @@ const toast = document.querySelector('#toast');
 const state = { session: null, guilds: [], guild: null, data: null, page: 'overview', loading: false, dirty: false, saving: false, requestId: 0 };
 const h = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const number = value => Number(value || 0).toLocaleString('vi-VN', { maximumFractionDigits: 1 });
+const formatVnd = value => Number(value || 0).toLocaleString('vi-VN') + ' đ';
 let toastTimer;
 function notify(message) { toast.textContent = message; toast.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.style.display = 'none'; }, 5500); }
 async function api(route, data) {
@@ -411,16 +412,19 @@ async function changePage(page) {
       state.page = state.guild ? 'overview' : '';
       return render();
     }
-    const requestId = state.requestId;
+    const requestId = ++state.requestId;
     try {
       const qData = await api('/api/quest-shop/data');
       if (state.requestId === requestId) {
         state.questShopData = qData;
-        if (state.page === page) { state.loading = false; render(); }
       }
     } catch (err) {
-      if (state.requestId === requestId && state.page === page) { state.loading = false; render(); }
       notify(err.message);
+    } finally {
+      if (state.requestId === requestId && state.page === page) {
+        state.loading = false;
+        render();
+      }
     }
     return;
   }
@@ -835,7 +839,13 @@ async function sendTicketPanelDashboard() {
 
 function questShopPage() {
   const data = state.questShopData;
-  if (!data) return '<div class="loading">Đang tải cấu hình Auto Quest Shop…</div>';
+  if (!data) {
+    return `<div class="card empty">
+      <h2>⚠️ Chưa tải được dữ liệu Quest Shop</h2>
+      <p>Hệ thống chưa nhận được phản hồi từ máy chủ.</p>
+      <button type="button" class="primary" id="qshop-retry-btn" style="margin-top:12px;">🔄 Thử tải lại</button>
+    </div>`;
+  }
 
   const cfg = data.config || {};
   const stats = data.stats || {};
@@ -1104,6 +1114,9 @@ function attachQuestShopEvents() {
 
   const refreshBtn = document.querySelector('#qshop-refresh-btn');
   if (refreshBtn) refreshBtn.onclick = () => changePage('questshop');
+
+  const retryBtn = document.querySelector('#qshop-retry-btn');
+  if (retryBtn) retryBtn.onclick = () => changePage('questshop');
 
   const configForm = document.querySelector('#qshop-config-form');
   if (configForm) {

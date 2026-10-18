@@ -5,6 +5,7 @@ const {
   buildScriptPayload,
   buildInfoPayload,
   buildTokenModal,
+  buildSavedTokenPayload,
   buildTokenGuidePayload,
 } = require('../../utils/questManager');
 const { startQuestStream, stopQuestStream } = require('../../utils/questVoiceHelper');
@@ -97,6 +98,10 @@ module.exports.execute = async (interaction) => {
   if (action === 'token') {
     if (!isApproved(userId)) {
       return interaction.reply({ flags: 64, ...buildAccessGatePayload(userObj) });
+    }
+    const saved = buildSavedTokenPayload(userId);
+    if (saved) {
+      return interaction.reply({ flags: 64, ...saved });
     }
     if (typeof interaction.showModal === 'function') {
       return interaction.showModal(buildTokenModal());

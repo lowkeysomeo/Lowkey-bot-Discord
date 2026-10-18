@@ -114,7 +114,7 @@ async function enrollQuest(token, questId) {
   const res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/enroll`, {
     method: 'POST',
     headers: getHeaders(token),
-    body: JSON.stringify({ location: 1 }),
+    body: JSON.stringify({ location: 1, platform: 0 }),
   });
 
   if (!res.ok && res.status !== 400) {
@@ -122,14 +122,24 @@ async function enrollQuest(token, questId) {
     throw new Error(`Lỗi khi nhận nhiệm vụ (${questId}): HTTP ${res.status} ${text}`);
   }
 
+  // Tự động chọn Desktop/PC platform cho nhiệm vụ đa nền tảng
+  try {
+    await requestDiscord(`https://discord.com/api/v9/quests/${questId}/select-task-platform`, {
+      method: 'POST',
+      headers: getHeaders(token),
+      body: JSON.stringify({ platform: 0 }),
+    });
+  } catch {}
+
   return true;
 }
 
 /**
  * Gửi heartbeat giả lập tiến trình chơi game hoặc stream
  */
-async function sendHeartbeat(token, questId, { streamKey = null, terminal = false } = {}) {
+async function sendHeartbeat(token, questId, { streamKey = null, terminal = false, applicationId = null } = {}) {
   const body = {};
+  if (applicationId) body.application_id = applicationId;
   if (streamKey) body.stream_key = streamKey;
   if (terminal) body.terminal = terminal;
 
@@ -296,6 +306,15 @@ async function completeSingleQuest(token, quest, options = {}) {
     }
   }
 
+  // Luôn đảm bảo chọn nền tảng PC/Desktop (platform: 0) cho nhiệm vụ đa nền tảng
+  try {
+    await requestDiscord(`https://discord.com/api/v9/quests/${questId}/select-task-platform`, {
+      method: 'POST',
+      headers: getHeaders(token),
+      body: JSON.stringify({ platform: 0 }),
+    });
+  } catch {}
+
   const tasks = quest.config?.task_config?.tasks || quest.config?.task_config_v2?.tasks || {};
   const isVideo = !!(tasks.WATCH_VIDEO || tasks.WATCH_VIDEO_ON_MOBILE);
 
@@ -317,6 +336,18 @@ async function completeSingleQuest(token, quest, options = {}) {
   }
 
   // Nhiệm vụ chơi game hoặc stream
+  const taskData =
+    tasks.PLAY_ON_DESKTOP ||
+    tasks.STREAM_ON_DESKTOP ||
+    tasks.PLAY_ON_PLAYSTATION ||
+    tasks.PLAY_ON_XBOX ||
+    tasks.PLAY_ACTIVITY ||
+    {};
+  const applicationId =
+    quest.config?.application?.id ||
+    taskData?.applications?.[0]?.id ||
+    quest.config?.application_id;
+
   const targetSeconds =
     tasks.PLAY_ON_DESKTOP?.target ||
     tasks.STREAM_ON_DESKTOP?.target ||
@@ -331,7 +362,7 @@ async function completeSingleQuest(token, quest, options = {}) {
     try {
       while (currentSeconds < targetSeconds && loops < maxLoops) {
         loops++;
-        const hb = await sendHeartbeat(token, questId, { terminal: false });
+        const hb = await sendHeartbeat(token, questId, { terminal: false, applicationId });
 
         if (hb?.user_status?.completed_at || hb?.completed_at) {
           currentSeconds = targetSeconds;
@@ -361,7 +392,7 @@ async function completeSingleQuest(token, quest, options = {}) {
       }
 
       try {
-        await sendHeartbeat(token, questId, { terminal: true });
+        await sendHeartbeat(token, questId, { terminal: true, applicationId });
       } catch {}
 
       const reward = await claimQuestReward(token, questId);

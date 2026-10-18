@@ -191,7 +191,15 @@ function createDashboard(client, options = {}) {
           const matched = pendingOrders.find(o => {
             const oId = String(o.order_id).toUpperCase();
             const cleanOId = oId.replace(/[^A-Z0-9]/g, '');
-            return (content.includes(oId) || cleanContent.includes(cleanOId)) && amount >= o.amount;
+            const sevqrOId = `SEVQR${cleanOId}`;
+            const directCode = String(payload.code || payload.order_code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+            return (
+              (content.includes(oId) ||
+               cleanContent.includes(cleanOId) ||
+               cleanContent.includes(sevqrOId) ||
+               directCode.includes(cleanOId)) &&
+              amount >= o.amount
+            );
           });
 
           if (matched) {
@@ -251,12 +259,18 @@ function createDashboard(client, options = {}) {
               banks: questShop.BANK_NAMES,
               channels,
               stats,
-              orders: orders.map(o => ({
-                ...o,
-                token: o.token ? `••••••••${o.token.slice(-4)}` : '',
-                quest_ids: o.quest_ids_json ? JSON.parse(o.quest_ids_json) : [],
-                quest_names: o.quest_names_json ? JSON.parse(o.quest_names_json) : [],
-              })),
+              orders: orders.map(o => {
+                let qIds = [];
+                let qNames = [];
+                try { if (o.quest_ids_json) qIds = JSON.parse(o.quest_ids_json); } catch {}
+                try { if (o.quest_names_json) qNames = JSON.parse(o.quest_names_json); } catch {}
+                return {
+                  ...o,
+                  token: o.token ? `••••••••${o.token.slice(-4)}` : '',
+                  quest_ids: qIds,
+                  quest_names: qNames,
+                };
+              }),
               subscribers: subscribers.map(s => ({
                 ...s,
                 token: s.token ? `••••••••${s.token.slice(-4)}` : '',

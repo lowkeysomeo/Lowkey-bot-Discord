@@ -116,9 +116,14 @@ const QUEST_SCRIPT = `(async () => {
       console.log(\`%c[TỰ NHẬN]%c Đang nhận nhiệm vụ: \${q.config.messages.questName || q.config.messages.gameTitle}...\`, "color: #FAA61A; font-weight: bold", "color: #FFFFFF");
       if (api) {
         try {
-          await api.post({ url: \`/quests/\${q.id}/enroll\`, body: { location: 1 } });
+          await api.post({ url: \`/quests/\${q.id}/enroll\`, body: { location: 1, platform: 0 } });
+          try { await api.post({ url: \`/quests/\${q.id}/select-task-platform\`, body: { platform: 0 } }); } catch (e) {}
           console.log(\`%c[TỰ NHẬN THÀNH CÔNG]%c \${q.config.messages.questName || q.config.messages.gameTitle}\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
         } catch (e) {}
+      }
+    } else {
+      if (api) {
+        try { await api.post({ url: \`/quests/\${q.id}/select-task-platform\`, body: { platform: 0 } }); } catch (e) {}
       }
     }
   }
@@ -355,6 +360,50 @@ function buildTokenModal() {
   return modal;
 }
 
+function buildSavedTokenPayload(userId) {
+  const { getSubscriber } = require('./questScheduler');
+  const sub = getSubscriber(userId);
+  if (!sub || !sub.token || sub.token.length < 20) return null;
+
+  const maskedToken = sub.token.length > 8 ? `••••••••${sub.token.slice(-4)}` : '••••••••';
+  const embed = new EmbedBuilder()
+    .setColor(0x57f287)
+    .setTitle('⚡ TÀI KHOẢN AUTO QUEST ĐÃ LƯU')
+    .setDescription(
+      `Hệ thống đã ghi nhớ Discord User Token của bạn (**\`${maskedToken}\`** — \`${sub.username || 'User'}\`).\n\n` +
+      `• Bấm **▶️ Chạy Ngay (Token Đã Lưu)** để bot cày 100% tự động ngay lập tức mà không cần nhập lại token.\n` +
+      `• Bấm **🔄 Đổi Token Mới** nếu bạn vừa đổi mật khẩu Discord hoặc muốn chuyển tài khoản.\n` +
+      `• Bấm **🗑️ Xóa Token** nếu bạn muốn gỡ tài khoản khỏi hệ thống bot.`
+    )
+    .setFooter({ text: 'Lowkey Auto Quest • Token được bảo mật và mã hóa trên máy chủ' })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('quest:run_saved_token')
+      .setLabel('Chạy Ngay (Token Đã Lưu)')
+      .setEmoji('▶️')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId('quest:change_token')
+      .setLabel('Đổi Token Mới')
+      .setEmoji('🔄')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('quest:delete_token')
+      .setLabel('Xóa Token')
+      .setEmoji('🗑️')
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId('quest:hub')
+      .setLabel('Về Menu Chính')
+      .setEmoji('↩️')
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  return { embeds: [embed], components: [row] };
+}
+
 function buildTokenGuidePayload() {
   const embed = new EmbedBuilder()
     .setColor(0x00b0f4)
@@ -574,7 +623,43 @@ async function handleButtonInteraction(interaction) {
       if (interaction.message?.flags?.has?.(64)) return interaction.update(gate);
       return interaction.reply({ flags: 64, ...gate });
     }
+    const saved = buildSavedTokenPayload(userId);
+    if (saved) {
+      if (interaction.message?.flags?.has?.(64)) return interaction.update(saved);
+      return interaction.reply({ flags: 64, ...saved });
+    }
     return interaction.showModal(buildTokenModal());
+  }
+
+  if (action === 'change_token') {
+    return interaction.showModal(buildTokenModal());
+  }
+
+  if (action === 'delete_token') {
+    try {
+      const { getDb } = require('./database');
+      getDb().prepare('DELETE FROM quest_subscribers WHERE user_id = ?').run(userId);
+    } catch (e) {}
+    const deletedRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('quest:change_token').setLabel('Nhập Token Mới').setEmoji('🔑').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('quest:hub').setLabel('Về Menu Chính').setEmoji('↩️').setStyle(ButtonStyle.Secondary)
+    );
+    return interaction.update({
+      content: '✅ **Đã xóa Token đã lưu của bạn khỏi hệ thống!**\nKhi cần cày quest, bạn có thể bấm nút bên dưới để nhập token mới bất cứ lúc nào.',
+      embeds: [],
+      components: [deletedRow],
+    });
+  }
+
+  if (action === 'run_saved_token') {
+    const { getSubscriber } = require('./questScheduler');
+    const sub = getSubscriber(userId);
+    if (!sub || !sub.token || sub.token.length < 20) {
+      return interaction.showModal(buildTokenModal());
+    }
+    await interaction.deferReply({ flags: 64 });
+    const username = interaction.user?.tag || interaction.member?.user?.tag || sub.username || 'User';
+    return executeAutoQuestFlow(interaction, sub.token, userId, username);
   }
 
   if (action === 'token_guide') {
@@ -740,26 +825,7 @@ async function handleButtonInteraction(interaction) {
   }
 }
 
-async function handleModalInteraction(interaction) {
-  if (interaction.customId !== 'quest:modal_submit') return;
-
-  await interaction.deferReply({ flags: 64 });
-  const token = interaction.fields?.getTextInputValue?.('discord_token')?.trim();
-
-  if (!token) {
-    return interaction.editReply({ content: '❌ Token không được để trống.' });
-  }
-
-  const userId = interaction.user?.id || interaction.member?.id || 'unknown';
-  const username = interaction.user?.tag || interaction.member?.user?.tag || 'User';
-
-  const { isApproved } = require('./questAuth');
-  if (!isApproved(userId)) {
-    return interaction.editReply({
-      content: '❌ Bạn chưa được Admin (ID: 604729446649298963) phê duyệt sử dụng tính năng này.',
-    });
-  }
-
+async function executeAutoQuestFlow(interaction, token, userId, username) {
   try {
     const { registerSubscriber } = require('./questScheduler');
     registerSubscriber(userId, token, username, 1);
@@ -819,19 +885,83 @@ async function handleModalInteraction(interaction) {
 
     return interaction.editReply({ content: null, embeds: [resultEmbed] });
   } catch (err) {
+    const isTokenExpired =
+      err.message &&
+      (err.message.includes('401') ||
+        err.message.includes('Token không hợp lệ') ||
+        err.message.includes('hết hạn'));
+
+    if (isTokenExpired) {
+      try {
+        const { getDb } = require('./database');
+        getDb().prepare('UPDATE quest_subscribers SET enabled = 0 WHERE user_id = ?').run(userId);
+      } catch (e) {}
+
+      const expiredEmbed = new EmbedBuilder()
+        .setColor(0xed4245)
+        .setTitle('❌ TOKEN CỦA BẠN ĐÃ HẾT HẠN HOẶC KHÔNG HỢP LỆ')
+        .setDescription(
+          `Token Discord của bạn không thể xác thực (lỗi 401 Unauthorized).\n\n` +
+          `• **Nguyên nhân:** Có thể bạn vừa đổi mật khẩu Discord, đổi mã bảo mật 2FA hoặc đăng xuất khỏi Discord Web/Desktop.\n` +
+          `• Vui lòng bấm **🔄 Đổi Token Mới** bên dưới để cập nhật lại token mới nhé!`
+        )
+        .setFooter({ text: 'Lowkey Auto Quest • Tự động phát hiện token lỗi' })
+        .setTimestamp();
+
+      const changeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('quest:change_token')
+          .setLabel('Đổi Token Mới')
+          .setEmoji('🔑')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('quest:hub')
+          .setLabel('Về Menu Chính')
+          .setEmoji('↩️')
+          .setStyle(ButtonStyle.Secondary)
+      );
+
+      return interaction.editReply({ content: null, embeds: [expiredEmbed], components: [changeRow] });
+    }
+
     return interaction.editReply({
       content: `❌ **Lỗi thực hiện Auto Quest:** ${err.message}`,
     });
   }
 }
 
+async function handleModalInteraction(interaction) {
+  if (interaction.customId !== 'quest:modal_submit') return;
+
+  await interaction.deferReply({ flags: 64 });
+  const token = interaction.fields?.getTextInputValue?.('discord_token')?.trim();
+
+  if (!token) {
+    return interaction.editReply({ content: '❌ Token không được để trống.' });
+  }
+
+  const userId = interaction.user?.id || interaction.member?.id || 'unknown';
+  const username = interaction.user?.tag || interaction.member?.user?.tag || 'User';
+
+  const { isApproved } = require('./questAuth');
+  if (!isApproved(userId)) {
+    return interaction.editReply({
+      content: '❌ Bạn chưa được Admin (ID: 604729446649298963) phê duyệt sử dụng tính năng này.',
+    });
+  }
+
+  return executeAutoQuestFlow(interaction, token, userId, username);
+}
+
 module.exports = {
   QUEST_SCRIPT,
   buildTokenModal,
+  buildSavedTokenPayload,
   buildTokenGuidePayload,
   buildMainHubPayload,
   buildScriptPayload,
   buildInfoPayload,
   handleButtonInteraction,
   handleModalInteraction,
+  executeAutoQuestFlow,
 };

@@ -76,10 +76,15 @@ function setBankConfig(key, value) {
 }
 
 function getVietQrUrl(bankId, bankAccount, amount, memo, accountName) {
+  let cleanMemo = (memo || '').trim();
+  // Đảm bảo nội dung chuyển khoản luôn bắt đầu bằng tiền tố SEVQR để SePay nhận diện
+  if (!cleanMemo.toUpperCase().startsWith('SEVQR')) {
+    cleanMemo = `SEVQR ${cleanMemo}`.trim();
+  }
   const safeBank = encodeURIComponent((bankId || 'MB').trim().toUpperCase());
   const safeAcc = encodeURIComponent((bankAccount || '').trim());
   const safeAmount = Math.max(0, parseInt(amount, 10) || 0);
-  const safeMemo = encodeURIComponent((memo || '').trim());
+  const safeMemo = encodeURIComponent(cleanMemo);
   const safeName = encodeURIComponent((accountName || '').trim());
   return `https://img.vietqr.io/image/${safeBank}-${safeAcc}-compact2.png?amount=${safeAmount}&addInfo=${safeMemo}&accountName=${safeName}`;
 }
@@ -217,6 +222,7 @@ function matchTransactionWithOrder(transactions, order) {
 
   const orderId = String(order.order_id).toUpperCase();
   const cleanOrderId = orderId.replace(/[^A-Z0-9]/g, '');
+  const sevqrOrderId = `SEVQR${cleanOrderId}`;
   const expectedAmount = Math.round(parseFloat(order.amount || 0));
 
   return transactions.find((t) => {
@@ -238,9 +244,15 @@ function matchTransactionWithOrder(transactions, order) {
     ).toUpperCase();
 
     const cleanContent = rawContent.replace(/[^A-Z0-9]/g, '');
+    const directCode = String(t.code || t.order_code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-    // Khớp mã đơn hàng (hỗ trợ cả trường hợp bank thêm khoảng trắng, dấu gạch, hay prefix mã GD)
-    return rawContent.includes(orderId) || cleanContent.includes(cleanOrderId);
+    // Khớp mã đơn hàng (hỗ trợ cả trường hợp có SEVQR ở đầu, khoảng trắng, dấu gạch, hay prefix mã GD)
+    return (
+      rawContent.includes(orderId) ||
+      cleanContent.includes(cleanOrderId) ||
+      cleanContent.includes(sevqrOrderId) ||
+      directCode.includes(cleanOrderId)
+    );
   });
 }
 
@@ -457,12 +469,63 @@ function buildShopPanelPayload() {
 }
 
 /**
+ * Màn hình nhắc dùng Token đã lưu cho khách hàng trong Shop
+ */
+function buildSavedTokenShopPayload(userId, packageType) {
+  const sub = getSubscriber(userId);
+  if (!sub || !sub.token || sub.token.length < 20) return null;
+
+  const maskedToken = sub.token.length > 8 ? `••••••••${sub.token.slice(-4)}` : '••••••••';
+  const isMonthly = packageType === 'monthly';
+  const pkgName = isMonthly ? '👑 Gói Tháng (40.000đ / 30 Ngày)' : '🎯 Quest Lẻ (4.000đ / nv)';
+
+  const embed = new EmbedBuilder()
+    .setColor(0x57f287)
+    .setTitle('⚡ TÀI KHOẢN DISCORD ĐÃ ĐƯỢC LƯU')
+    .setDescription(
+      `Chào bạn! Hệ thống nhận thấy bạn đã có tài khoản Discord lưu sẵn:\n` +
+      `• **Tài khoản:** \`${sub.username || 'User'}\` (**\`${maskedToken}\`**)\n` +
+      `• **Dịch vụ đang chọn:** **${pkgName}**\n\n` +
+      `Bạn có muốn tiếp tục sử dụng tài khoản này không?\n\n` +
+      `• Bấm **▶️ Dùng Token Đã Lưu** để tiếp tục ngay (không cần nhập lại token).\n` +
+      `• Bấm **🔄 Nhập Token Khác** nếu bạn muốn mua cho tài khoản Discord khác hoặc token cũ đã đổi mật khẩu.\n` +
+      `• Bấm **❌ Hủy** để đóng thông báo.`
+    )
+    .setFooter({ text: 'Lowkey Quest Shop • Token được ghi nhớ an toàn' })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`qshop:use_saved:${packageType}`)
+      .setLabel('Dùng Token Đã Lưu')
+      .setEmoji('▶️')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`qshop:prompt_token:${packageType}`)
+      .setLabel('Nhập Token Khác')
+      .setEmoji('🔄')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('qshop:cancel_prompt')
+      .setLabel('Hủy')
+      .setEmoji('❌')
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  return { embeds: [embed], components: [row] };
+}
+
+/**
  * Modal nạp Token cho khách hàng
  */
 function buildTokenModal(packageType = 'single') {
+  let title = 'Nạp Token Mua Quest Lẻ';
+  if (packageType === 'monthly') title = 'Nạp Token Cho Gói Tháng';
+  if (packageType === 'update') title = 'Cập Nhật Discord User Token';
+
   const modal = new ModalBuilder()
     .setCustomId(`qshop:modal_token:${packageType}`)
-    .setTitle(packageType === 'monthly' ? 'Nạp Token Cho Gói Tháng' : 'Nạp Token Mua Quest Lẻ');
+    .setTitle(title);
 
   const tokenInput = new TextInputBuilder()
     .setCustomId('user_token')
@@ -622,7 +685,8 @@ function buildPaymentPayload(order) {
 
   const bank = getBankConfig();
   const bankNameFull = BANK_NAMES[bank.bankId] || bank.bankId;
-  const qrUrl = getVietQrUrl(bank.bankId, bank.bankAccount, order.amount, order.order_id, bank.bankName);
+  const transferMemo = `SEVQR ${order.order_id}`;
+  const qrUrl = getVietQrUrl(bank.bankId, bank.bankAccount, order.amount, transferMemo, bank.bankName);
 
   const isMonthly = order.package_type === 'monthly';
   const isChecking = (order.check_count || 0) > 0;
@@ -638,10 +702,11 @@ function buildPaymentPayload(order) {
       `• **Ngân hàng:** **${bank.bankId}** (${bankNameFull})\n` +
       `• **Số tài khoản:** \`${bank.bankAccount || '(Chưa cấu hình)'}\`\n` +
       `• **Chủ tài khoản:** **${bank.bankName || '(Chưa cấu hình)'}**\n` +
-      `• **Nội dung chuyển khoản (BẮT BUỘC):** \`${order.order_id}\`\n` +
+      `• **Nội dung chuyển khoản (BẮT BUỘC):** \`${transferMemo}\`\n` +
+      `👉 *Bấm giữ để sao chép nội dung CK:*\n\`\`\`\n${transferMemo}\n\`\`\`\n` +
       `• ⏳ **Hạn thanh toán (10 phút):** Hết hạn <t:${Math.floor(expiresAt / 1000)}:R> lúc <t:${Math.floor(expiresAt / 1000)}:T>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `⚠️ **Lưu ý quan trọng:** Ghi đúng nội dung \`${order.order_id}\`. Sau 10 phút chưa thanh toán, đơn sẽ tự động hủy!` +
+      `⚠️ **Lưu ý quan trọng:** Ghi đúng nội dung \`${transferMemo}\`. Sau 10 phút chưa thanh toán, đơn sẽ tự động hủy!` +
       (isChecking ? `\n\n⏳ *Hệ thống đang tự động kiểm tra SePay mỗi 15 giây... Vui lòng không bấm liên tục.*` : '')
     )
     .setImage(qrUrl)
@@ -770,14 +835,128 @@ async function buildStatusPayload(userId) {
 async function handleShopInteraction(interaction, client) {
   const customId = interaction.customId || '';
 
-  // 1. Mua Quest Lẻ: Mở Modal Token
+  // 1. Mua Quest Lẻ
   if (customId === 'qshop:buy_single') {
+    const savedPrompt = buildSavedTokenShopPayload(interaction.user.id, 'single');
+    if (savedPrompt) {
+      return interaction.reply({ flags: 64, ...savedPrompt });
+    }
     return interaction.showModal(buildTokenModal('single'));
   }
 
-  // 2. Mua Gói Tháng: Mở Modal Token
+  // 2. Mua Gói Tháng
   if (customId === 'qshop:buy_monthly') {
+    const savedPrompt = buildSavedTokenShopPayload(interaction.user.id, 'monthly');
+    if (savedPrompt) {
+      return interaction.reply({ flags: 64, ...savedPrompt });
+    }
     return interaction.showModal(buildTokenModal('monthly'));
+  }
+
+  // Khách chọn nhập Token khác / mới
+  if (customId.startsWith('qshop:prompt_token:')) {
+    const packageType = customId.split(':')[2] || 'single';
+    return interaction.showModal(buildTokenModal(packageType));
+  }
+
+  // Hủy thao tác dùng token đã lưu
+  if (customId === 'qshop:cancel_prompt') {
+    return interaction.update({
+      content: '❌ Đã hủy thao tác.',
+      embeds: [],
+      components: [],
+    });
+  }
+
+  // Khách chọn Dùng Token Đã Lưu (Không cần nhập lại)
+  if (customId.startsWith('qshop:use_saved:')) {
+    const packageType = customId.split(':')[2] || 'single';
+    await interaction.deferUpdate();
+
+    const sub = getSubscriber(interaction.user.id);
+    if (!sub || !sub.token || sub.token.length < 20) {
+      return interaction.editReply({
+        content: '⚠️ Không tìm thấy token đã lưu. Vui lòng bấm tạo đơn lại để nhập token mới.',
+        embeds: [],
+        components: [],
+      });
+    }
+
+    let userInfo;
+    try {
+      userInfo = await fetchUserInfo(sub.token);
+    } catch (err) {
+      // Token hết hạn / 401
+      const db = getDb();
+      try {
+        db.prepare('UPDATE quest_subscribers SET enabled = 0 WHERE user_id = ?').run(interaction.user.id);
+      } catch (e) {}
+
+      const expiredEmbed = new EmbedBuilder()
+        .setColor(0xed4245)
+        .setTitle('❌ TOKEN ĐÃ LƯU ĐÃ HẾT HẠN HOẶC KHÔNG HỢP LỆ')
+        .setDescription(
+          `Token đã lưu của tài khoản **@${sub.username || 'User'}** không thể xác thực (lỗi: ${err.message}).\n\n` +
+          `• Có thể bạn vừa đổi mật khẩu Discord, đổi 2FA hoặc đăng xuất khỏi Discord.\n` +
+          `• Hãy bấm **🔄 Nhập Token Mới** bên dưới để cập nhật lại token mới nhé!`
+        );
+
+      const changeRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`qshop:prompt_token:${packageType}`)
+          .setLabel('Nhập Token Mới')
+          .setEmoji('🔄')
+          .setStyle(ButtonStyle.Primary)
+      );
+
+      return interaction.editReply({ embeds: [expiredEmbed], components: [changeRow] });
+    }
+
+    const username = userInfo.global_name || userInfo.username;
+
+    if (packageType === 'single') {
+      let quests = [];
+      try {
+        quests = await fetchQuests(sub.token);
+      } catch (e) {
+        return interaction.editReply({ content: `❌ Không thể tải danh sách Quest: ${e.message}`, embeds: [], components: [] });
+      }
+
+      const pendingQuests = quests.filter((q) => !q.user_status?.completed_at);
+      if (pendingQuests.length === 0) {
+        return interaction.editReply({
+          content: `ℹ️ Tài khoản **@${username}** hiện không có nhiệm vụ Discord nào chưa hoàn thành! Hãy quay lại khi Discord ra mắt Quest mới nhé.`,
+          embeds: [],
+          components: [],
+        });
+      }
+
+      const cfg = getBankConfig();
+      const order = createOrder({
+        userId: interaction.user.id,
+        username,
+        token: sub.token,
+        packageType: 'single',
+        questCount: 1,
+        amount: cfg.singleQuestPrice,
+      });
+
+      const payload = buildQuestSelectionPayload(order.order_id, pendingQuests, username);
+      return interaction.editReply(payload);
+    } else {
+      const cfg = getBankConfig();
+      const order = createOrder({
+        userId: interaction.user.id,
+        username,
+        token: sub.token,
+        packageType: 'monthly',
+        questCount: 999,
+        amount: cfg.monthlyPackagePrice,
+      });
+
+      const payload = buildPaymentPayload(order);
+      return interaction.editReply(payload);
+    }
   }
 
   // 3. Cài Đặt Ngân Hàng (Admin)
@@ -826,7 +1005,7 @@ async function handleShopInteraction(interaction, client) {
     });
   }
 
-  // 5. Modal Submit Token (Single hoặc Monthly)
+  // 5. Modal Submit Token (Single, Monthly, hoặc Update)
   if (interaction.isModalSubmit() && customId.startsWith('qshop:modal_token:')) {
     const packageType = customId.split(':')[2];
     const rawToken = interaction.fields.getTextInputValue('user_token').trim();
@@ -843,6 +1022,17 @@ async function handleShopInteraction(interaction, client) {
     }
 
     const username = userInfo.global_name || userInfo.username;
+
+    // Tự động ghi nhớ / lưu token vào hệ thống để các lần sau không cần nhập lại
+    try {
+      registerSubscriber(interaction.user.id, rawToken, username, 1);
+    } catch (e) {}
+
+    if (packageType === 'update') {
+      return interaction.editReply({
+        content: `✅ **Đã cập nhật Token thành công!**\nTài khoản **@${username}** đã được ghi nhớ và sẵn sàng hoạt động tự động.`,
+      });
+    }
 
     if (packageType === 'single') {
       // Lấy danh sách quests để cho khách chọn
@@ -1012,7 +1202,7 @@ async function handleShopInteraction(interaction, client) {
           `• **Mã đơn:** \`${order.order_id}\`\n` +
           `• **Loại gói:** ${order.package_type === 'monthly' ? '👑 **Gói Tháng (40.000đ)**' : `🎯 **Quest Lẻ (${order.quest_count} nv - ${formatVnd(order.amount)})**`}\n` +
           `• **Số tiền:** **${formatVnd(order.amount)}**\n` +
-          `• **Nội dung CK:** \`${order.order_id}\`\n\n` +
+          `• **Nội dung CK:** \`SEVQR ${order.order_id}\`\n\n` +
           `*Hệ thống đang tự động quét SePay. Nếu bạn đã thấy tiền vào tài khoản ngân hàng, có thể bấm nút xanh bên dưới để duyệt ngay!*`
         )
         .setTimestamp();
@@ -1121,7 +1311,7 @@ async function handleShopInteraction(interaction, client) {
 
   // 15. Cập nhật Token mới
   if (customId === 'qshop:update_token') {
-    return interaction.showModal(buildTokenModal('single'));
+    return interaction.showModal(buildTokenModal('update'));
   }
 }
 
@@ -1228,6 +1418,7 @@ module.exports = {
   buildQuestSelectionPayload,
   buildPaymentPayload,
   buildStatusPayload,
+  buildSavedTokenShopPayload,
   isShopAdmin,
   handleShopInteraction,
   ensureShopPanel,

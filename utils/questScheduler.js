@@ -15,6 +15,7 @@ const {
   sendVideoProgress,
   claimQuestReward,
   completeVideoQuest,
+  completeSingleQuest,
   fetchUserInfo,
 } = require('./questTokenWorker');
 
@@ -147,7 +148,7 @@ async function scanUserQuests(subscriber, client) {
     getDb()
       .prepare('UPDATE quest_subscribers SET last_checked_at = ? WHERE user_id = ?')
       .run(now, userId);
-    return { success: true, pendingCount: 0, actionsTaken: [] };
+    return { success: true, pendingCount: 0, actions: [] };
   }
 
   console.log(`[QUEST SCHEDULER] Phát hiện ${pendingQuests.length} nhiệm vụ mới cho User ${userId}...`);
@@ -162,46 +163,52 @@ async function scanUserQuests(subscriber, client) {
       quest.config?.application?.name ||
       `Nhiệm vụ #${quest.id}`;
 
-    // 1. Tự động nhận nhiệm vụ nếu chưa enroll
-    let enrolled = false;
-    if (!quest.user_status?.enrolled_at) {
-      try {
-        await enrollQuest(token, quest.id);
-        enrolled = true;
-      } catch (e) {}
-    }
-
     const tasks = quest.config?.task_config?.tasks || quest.config?.task_config_v2?.tasks || {};
     const isVideo = !!(tasks.WATCH_VIDEO || tasks.WATCH_VIDEO_ON_MOBILE);
 
-    if (isVideo) {
-      // 2. Video Quest: Tự động hoàn thành theo nhịp an toàn và nhận ORB
-      try {
-        await completeVideoQuest(token, quest);
+    try {
+      const res = await completeSingleQuest(token, quest, {
+        heartbeatDelayMs: 1500,
+      });
+
+      if (res.completed) {
         actions.push({
           questName,
-          type: 'video',
+          type: isVideo ? 'video' : 'game',
           completed: true,
           claimed: true,
           message: 'Hoàn thành 100% & Đã nhận thưởng ORB',
         });
-      } catch (err) {
+      } else if (res.alreadyDone) {
         actions.push({
           questName,
-          type: 'video',
+          type: 'game',
+          completed: true,
+          claimed: true,
+          message: 'Đã hoàn thành trước đó',
+        });
+      } else if (res.requiresDesktop) {
+        actions.push({
+          questName,
+          type: 'game',
+          enrolled: true,
+          requiresDesktop: true,
+          message: res.message || 'Cần mở app trên Desktop hoặc script 1-click',
+        });
+      } else {
+        actions.push({
+          questName,
+          type: isVideo ? 'video' : 'game',
           completed: false,
-          claimed: false,
-          error: err.message,
+          message: res.message || 'Không thể tự hoàn thành qua API',
         });
       }
-    } else {
-      // 3. Game Quest: Đã tự enroll, cần desktop để chạy
+    } catch (err) {
       actions.push({
         questName,
-        type: 'game',
-        enrolled: true,
-        requiresDesktop: true,
-        message: 'Đã tự động nhận (Accept). Mở app trên Desktop để hoàn tất',
+        type: isVideo ? 'video' : 'game',
+        completed: false,
+        error: err.message,
       });
     }
   }
