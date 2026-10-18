@@ -18,6 +18,8 @@ const {
   completeSingleQuest,
   fetchUserInfo,
   isQuestActive,
+  isVideoQuest,
+  extractQuestTasks,
 } = require('./questTokenWorker');
 
 const TOKEN_CACHE_PATH = path.join(__dirname, '..', 'data', 'saved_quest_token.txt');
@@ -238,7 +240,10 @@ async function scanUserQuests(subscriber, client, options = {}) {
   for (const q of pendingQuests) {
     if (!q.user_status?.enrolled_at) {
       try {
-        await enrollQuest(token, q.id);
+        const isVid = isVideoQuest(q);
+        const tasks = extractQuestTasks(q);
+        const platform = isVid ? 0 : (tasks.PLAY_ON_MOBILE ? 2 : 0);
+        await enrollQuest(token, q.id, platform);
       } catch (e) {}
     }
   }
@@ -273,13 +278,14 @@ async function scanUserQuests(subscriber, client, options = {}) {
         quest.config?.application?.name ||
         `Nhiệm vụ #${quest.id}`;
 
+      const isVid = isVideoQuest(quest);
       const resItem = results[i];
       if (resItem.status === 'fulfilled') {
         const res = resItem.value;
         const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
         actions.push({
           questName,
-          type: res.type || 'game',
+          type: res.type || (isVid ? 'video' : 'game'),
           completed: !!res.completed,
           claimed: !!res.claimed,
           progressPercent,
@@ -288,7 +294,7 @@ async function scanUserQuests(subscriber, client, options = {}) {
       } else {
         actions.push({
           questName,
-          type: 'game',
+          type: isVid ? 'video' : 'game',
           completed: false,
           claimed: false,
           error: resItem.reason?.message || 'Lỗi không xác định',
@@ -314,14 +320,15 @@ async function scanUserQuests(subscriber, client, options = {}) {
         .setColor(completedList.length > 0 ? 0x57f287 : 0x5865f2)
         .setTitle('🔔 [LOWKEY QUEST] BÁO CÁO TỰ ĐỘNG HOÀN THÀNH DISCORD QUESTS')
         .setDescription(
-          `Hệ thống vừa tự động cày hoàn thành 100% thời gian cho **${actions.length}** nhiệm vụ:\n\n` +
+          `Hệ thống vừa tự động cày hoàn thành 100% thời gian cho **${actions.length}** nhiệm vụ (Video & Game):\n\n` +
             actions
               .map((a, i) => {
                 const pctText = typeof a.progressPercent === 'number' ? ` (${a.progressPercent}%)` : '';
+                const typeBadge = a.type === 'video' ? '🎬 [Video]' : '🎮 [Game]';
                 if (a.completed) {
-                  return `**${i + 1}. ${a.questName}**${pctText}\n↪ ✅ **${a.message}**!`;
+                  return `**${i + 1}.** ${typeBadge} **${a.questName}**${pctText}\n↪ ✅ **${a.message}**!`;
                 }
-                return `**${i + 1}. ${a.questName}**${pctText}\n↪ ⚠️ ${a.error || a.message}`;
+                return `**${i + 1}.** ${typeBadge} **${a.questName}**${pctText}\n↪ ⚠️ ${a.error || a.message}`;
               })
               .join('\n\n')
         )

@@ -582,6 +582,7 @@ async function handleButtonInteraction(interaction) {
       getQuestProgressSeconds,
       getQuestTargetSeconds,
       isQuestActive,
+      isVideoQuest,
     } = require('./questTokenWorker');
     const sub = getSubscriber(interaction.user.id);
     if (!sub) {
@@ -596,8 +597,8 @@ async function handleButtonInteraction(interaction) {
         .setColor(0x5865f2)
         .setTitle('⏳ ĐANG TIẾN HÀNH CÀY QUEST NGẦM')
         .setDescription(
-          'Bot đang kết nối Gateway và cày tiến độ ngầm 24/7 cho các nhiệm vụ trên tài khoản của bạn (Where Winds Meet, Clean Crew Roblox, VALORANT Aces).\n\n' +
-          '⚡ Tiến trình đang chạy theo nhịp chuẩn an toàn của Discord. Khi hoàn tất 100%, bot sẽ thông báo để bạn vào Cài đặt -> Quests bấm Claim (vì Discord yêu cầu xác thực con người)!'
+          'Bot đang kết nối Gateway và cày tiến độ ngầm 24/7 cho toàn bộ nhiệm vụ Video & Game trên tài khoản của bạn.\n\n' +
+          '⚡ Tiến trình đang chạy tự động 100% theo nhịp chuẩn an toàn của Discord. Khi hoàn tất 100%, bot sẽ thông báo để bạn vào Cài đặt -> Quests bấm Claim (vì Discord yêu cầu xác thực con người)!'
         )
         .setTimestamp();
 
@@ -631,19 +632,22 @@ async function handleButtonInteraction(interaction) {
     // Tự động Enroll tất cả nhiệm vụ chưa nhận
     for (const q of pendingQuests) {
       if (!q.user_status?.enrolled_at) {
-        try { await enrollQuest(sub.token, q.id); } catch (e) {}
+        try {
+          const isVid = isVideoQuest(q);
+          await enrollQuest(sub.token, q.id, isVid ? 0 : 0);
+        } catch (e) {}
       }
     }
 
-    // Khởi chạy tiến trình cày ngầm bằng scanUserQuests trong background
-    scanUserQuests(sub, interaction.client).catch((e) => console.error('[AUTO SCAN BACKGROUND ERROR]', e));
+    // Khởi chạy tiến trình cày ngầm bằng scanUserQuests trong background với nhịp nhanh 1.2s
+    scanUserQuests(sub, interaction.client, { heartbeatDelayMs: 1200 }).catch((e) => console.error('[AUTO SCAN BACKGROUND ERROR]', e));
 
     const scanEmbed = new EmbedBuilder()
       .setColor(0x57f287)
-      .setTitle(`🚀 ĐÃ BẮT ĐẦU TỰ ĐỘNG LÀM ${pendingQuests.length} NHIỆM VỤ NGẦM`)
+      .setTitle(`🚀 ĐÃ BẮT ĐẦU TỰ ĐỘNG LÀM ${pendingQuests.length} NHIỆM VỤ (VIDEO & GAME)`)
       .setTimestamp();
 
-    let desc = `Bot đã nhận diện thành công **${pendingQuests.length} nhiệm vụ** trên tài khoản của bạn:\n\n`;
+    let desc = `Bot đã nhận diện thành công **${pendingQuests.length} nhiệm vụ (Video & Game)** trên tài khoản của bạn:\n\n`;
     pendingQuests.forEach((q, idx) => {
       const qName =
         q.config?.messages?.quest_name ||
@@ -655,13 +659,18 @@ async function handleButtonInteraction(interaction) {
       const currSec = getQuestProgressSeconds(q);
       const targetSec = getQuestTargetSeconds(q);
       const pct = Math.min(100, Math.round((currSec / targetSec) * 100));
+      const isVid = isVideoQuest(q);
+      const typeBadge = isVid ? '🎬 [Video]' : '🎮 [Game]';
+      const actionText = isVid
+        ? 'Bot đang tự động xem video và gửi progress đến 100%...'
+        : 'Bot đang kết nối Gateway và cày tiếp đến 100%...';
 
-      let icon = '🎮';
+      let icon = isVid ? '🎬' : '🎮';
       if (pct > 0) icon = '🔄';
-      desc += `**${idx + 1}. ${qName}** (Tiến độ: **${pct}%**)\n└ ${icon} Bot đang kết nối Gateway và cày tiếp đến 100%...\n\n`;
+      desc += `**${idx + 1}.** ${typeBadge} **${qName}** (Tiến độ: **${pct}%**)\n└ ${icon} ${actionText}\n\n`;
     });
 
-    desc += `⚡ **Hoàn toàn tự động:** Bot đang gửi tín hiệu giả lập an toàn lên Discord trong nền. Bạn không cần mở game hay treo máy!\n` +
+    desc += `⚡ **Hoàn toàn tự động 100%:** Bot đang chạy song song cả nhiệm vụ Video và Game với nhịp an toàn. Bạn không cần mở game hay video!\n` +
       `🎁 **Nhận thưởng (Claim):** Khi hoàn tất 100%, bot sẽ thông báo để bạn vào Cài đặt -> Quests trên Discord tự bấm Claim (vì Discord yêu cầu xác thực con người khi nhận quà).`;
 
     scanEmbed.setDescription(desc.trim());
@@ -716,10 +725,12 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
         if (p.step === 'auth' || p.step === 'fetch') {
           updateProgress(`🔄 ${p.message}`);
         } else if (p.step === 'quest_start') {
-          updateProgress(`🎮 ${p.message}`);
+          const typeBadge = p.type === 'video' ? '🎬 [Video]' : '🎮 [Game]';
+          updateProgress(`${typeBadge} ${p.message}`);
         } else if (p.step === 'progress') {
+          const typeIcon = p.type === 'video' ? '🎬' : '🎮';
           updateProgress(
-            `⏳ [${p.index}/${p.total}] **${p.questName}**: Đang hoàn thành (${p.percent}% - ${p.currentSeconds}/${p.targetSeconds}s)...`
+            `⏳ [${p.index}/${p.total}] ${typeIcon} **${p.questName}**: Đang hoàn thành (${p.percent}% - ${p.currentSeconds}/${p.targetSeconds}s)...`
           );
         }
       },
@@ -734,18 +745,19 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
       `🎁 **Đã nhận thưởng:** **${report.claimedCount}** phần quà / ORB\n\n` +
       (report.message ? `ℹ️ *${report.message}*\n\n` : '') +
       (report.results.length > 0
-        ? '**Chi tiết từng nhiệm vụ:**\n' +
+        ? '**Chi tiết từng nhiệm vụ (Video & Game):**\n' +
           report.results
             .map((r, i) => {
+              const typeBadge = r.type === 'video' ? '🎬 [Video]' : '🎮 [Game]';
               if (r.completed || r.alreadyDone || r.progressPercent >= 100) {
                 const state = r.alreadyDone
                   ? 'Đã làm trước đó'
                   : r.claimed
                   ? 'Hoàn thành 100% & Đã Claim ORB'
                   : 'Hoàn thành 100% (Vào Discord bấm Claim)';
-                return `**${i + 1}. ${r.questName}**: ✅ ${state}`;
+                return `**${i + 1}.** ${typeBadge} **${r.questName}**: ✅ ${state}`;
               }
-              return `**${i + 1}. ${r.questName}**: ⚠️ Chưa xong (${r.error || r.message || 'Thất bại'})`;
+              return `**${i + 1}.** ${typeBadge} **${r.questName}**: ⚠️ Chưa xong (${r.error || r.message || 'Thất bại'})`;
             })
             .join('\n')
         : 'Không có nhiệm vụ nào cần thực hiện.');
@@ -761,8 +773,8 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
       .setColor(isAllCompleted ? 0x57f287 : 0x5865f2)
       .setTitle(
         isAllCompleted
-          ? '🎉 KẾT QUẢ AUTO QUEST DISCORD (100% HOÀN TẤT)'
-          : '⚡ KẾT QUẢ AUTO QUEST DISCORD'
+          ? '🎉 KẾT QUẢ AUTO QUEST DISCORD (VIDEO & GAME 100%)'
+          : '⚡ KẾT QUẢ AUTO QUEST DISCORD (VIDEO & GAME)'
       )
       .setDescription(desc)
       .setFooter({ text: 'Lowkey Auto Quest • Mở Cài đặt -> Quests để bấm Claim nhận quà' })

@@ -375,11 +375,15 @@ setWebSocketImplementation(MockWebSocket);
     assert.equal(report.completedCount, 3); // 2 quests vừa xong + 1 quest alreadyDone
     assert.equal(report.claimedCount, 0); // Không tự động claim
     assert.equal(report.readyToClaimCount, 2); // 2 quests đã hoàn thành 100% sẵn sàng cho người dùng tự claim
+    assert.equal(report.results[0].type, 'video', 'Quest video phải có type là video');
+    assert.equal(report.results[1].type, 'game', 'Quest game phải có type là game');
     assert(enrollCalled, 'Enroll phải được gọi cho quest chưa nhận');
     assert(videoProgressSent, 'Video progress phải được gửi cho video quest');
     assert(heartbeatCount >= 2, 'Heartbeat phải được gửi cho game quest');
     assert.equal(claimCalled, false, 'Claim reward không được gọi tự động (cần xác thực con người)');
     assert(progressLogs.length > 0, 'Phải có callback tiến độ');
+    assert(progressLogs.some((p) => p.type === 'video'), 'Phải có progress log cho video quest');
+    assert(progressLogs.some((p) => p.type === 'game'), 'Phải có progress log cho game quest');
 
     // 8. Kiểm tra Modal interaction xử lý form nhập token
     let modalReply = null;

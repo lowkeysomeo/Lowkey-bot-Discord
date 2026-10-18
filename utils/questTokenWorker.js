@@ -416,11 +416,14 @@ async function completeVideoQuest(token, quest, options = {}) {
   }
 
   const isFastTest = options.heartbeatDelayMs != null && options.heartbeatDelayMs < 500;
+  const isFastMode = typeof options.heartbeatDelayMs === 'number' && options.heartbeatDelayMs <= 2500;
   const elapsedSinceEnroll = (Date.now() - enrolledAt) / 1000;
-  // Nếu đã enroll từ trước (thời gian enroll >= targetSeconds), Discord cho phép báo tiến độ nhanh
-  const canFastPace = isFastTest || (elapsedSinceEnroll >= targetSeconds);
+  // Nếu đã enroll từ trước hoặc đang ở fast mode (từ /quest hoặc auto quest), Discord cho phép báo tiến độ nhanh
+  const canFastPace = isFastTest || isFastMode || (elapsedSinceEnroll >= targetSeconds);
 
-  const loopDelay = isFastTest ? (options.heartbeatDelayMs || 5) : (canFastPace ? 1200 : 7500);
+  const loopDelay = isFastTest
+    ? (options.heartbeatDelayMs || 5)
+    : (isFastMode ? Math.min(options.heartbeatDelayMs, 1200) : (canFastPace ? 1200 : 7500));
   const maxDurationMs = isFastTest ? 5000 : (targetSeconds * 2.5 + 90) * 1000;
   const startTime = Date.now();
   let calls = 0;
@@ -436,6 +439,9 @@ async function completeVideoQuest(token, quest, options = {}) {
     let step = 0;
     if (isFastTest) {
       step = 15;
+    } else if (isFastMode) {
+      // Fast mode từ /quest hoặc bot auto quest: bước nhảy tối ưu để hoàn thành nhanh (~4-6s)
+      step = Math.max(10, Math.ceil(targetSeconds / 5)) + (Math.random() * 1.5);
     } else if (canFastPace) {
       // Đã enroll từ trước: bước nhảy ~9-11s mỗi 1.2s
       step = 9.0 + (Math.random() * 2.0);
@@ -474,6 +480,7 @@ async function completeVideoQuest(token, quest, options = {}) {
       options.onProgress({
         questId,
         questName,
+        type: 'video',
         currentSeconds: Math.min(currentSeconds, targetSeconds),
         targetSeconds,
         percent: Math.min(100, Math.round((currentSeconds / targetSeconds) * 100)),
@@ -496,7 +503,11 @@ async function completeVideoQuest(token, quest, options = {}) {
     } catch (e) {}
   }
 
-  const isFinished = currentSeconds >= targetSeconds || !!lastServerResponse?.completed_at || !!lastServerResponse?.user_status?.completed_at;
+  const isFinished =
+    currentSeconds >= targetSeconds ||
+    (targetSeconds > 0 && Math.round((currentSeconds / targetSeconds) * 100) >= 100) ||
+    !!lastServerResponse?.completed_at ||
+    !!lastServerResponse?.user_status?.completed_at;
 
   if (isFinished) {
     let reward = null;
@@ -528,18 +539,22 @@ async function completeVideoQuest(token, quest, options = {}) {
   }
 
   const currentPercent = Math.min(100, Math.round((currentSeconds / targetSeconds) * 100));
+  const isDone = currentPercent >= 100 || currentSeconds >= targetSeconds;
   return {
     questId,
     questName,
     type: 'video',
     enrolled: true,
-    completed: false,
+    completed: isDone,
     claimed: false,
-    currentSeconds,
+    readyToClaim: isDone,
+    currentSeconds: isDone ? targetSeconds : currentSeconds,
     targetSeconds,
-    progressPercent: currentPercent,
+    progressPercent: isDone ? 100 : currentPercent,
     requiresDesktop: false,
-    message: `Tiến độ video: ${currentPercent}% (${Math.round(currentSeconds)}/${targetSeconds}s). Bot sẽ tiếp tục cày trong lần quét tới.`,
+    message: isDone
+      ? 'Đã hoàn thành 100%! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).'
+      : `Tiến độ video: ${currentPercent}% (${Math.round(currentSeconds)}/${targetSeconds}s). Bot sẽ tiếp tục cày trong lần quét tới.`,
   };
 }
 
@@ -902,7 +917,8 @@ async function completeSingleQuest(token, quest, options = {}) {
   if (isVideoQuest(quest)) {
     const res = await completeVideoQuest(token, quest, options);
     return {
-      progressPercent: 100,
+      type: 'video',
+      requiresDesktop: false,
       ...res,
     };
   }
@@ -915,6 +931,12 @@ async function completeSingleQuest(token, quest, options = {}) {
       body: JSON.stringify({ platform: targetPlatform }),
     });
   } catch {}
+
+  const isActivity = !!(tasks.PLAY_ACTIVITY || tasks.ACHIEVEMENT_IN_ACTIVITY || tasks.ACHIEVEMENT_IN_GAME);
+  const isMobileTask = !!(tasks.PLAY_ON_MOBILE || tasks.WATCH_VIDEO_ON_MOBILE);
+  const taskName = isActivity
+    ? (['PLAY_ACTIVITY', 'ACHIEVEMENT_IN_ACTIVITY', 'ACHIEVEMENT_IN_GAME'].find((k) => tasks[k] != null) || Object.keys(tasks)[0])
+    : (['PLAY_ON_DESKTOP', 'STREAM_ON_DESKTOP', 'PLAY_ON_MOBILE', 'PLAY_ON_PLAYSTATION', 'PLAY_ON_XBOX'].find((k) => tasks[k] != null) || Object.keys(tasks)[0]);
 
   // Nếu nhiệm vụ đã hoàn thành tiến độ (có completed_at) nhưng chưa nhận thưởng:
   if (quest.user_status?.completed_at) {
@@ -929,6 +951,7 @@ async function completeSingleQuest(token, quest, options = {}) {
     return {
       questId,
       questName,
+      type: isActivity ? 'activity' : 'game',
       completed: true,
       claimed,
       readyToClaim: !claimed,
@@ -940,12 +963,6 @@ async function completeSingleQuest(token, quest, options = {}) {
         : 'Đã hoàn thành 100%! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim (xác thực con người).',
     };
   }
-
-  const isActivity = !!(tasks.PLAY_ACTIVITY || tasks.ACHIEVEMENT_IN_ACTIVITY || tasks.ACHIEVEMENT_IN_GAME);
-  const isMobileTask = !!(tasks.PLAY_ON_MOBILE || tasks.WATCH_VIDEO_ON_MOBILE);
-  const taskName = isActivity
-    ? (['PLAY_ACTIVITY', 'ACHIEVEMENT_IN_ACTIVITY', 'ACHIEVEMENT_IN_GAME'].find((k) => tasks[k] != null) || Object.keys(tasks)[0])
-    : (['PLAY_ON_DESKTOP', 'STREAM_ON_DESKTOP', 'PLAY_ON_MOBILE', 'PLAY_ON_PLAYSTATION', 'PLAY_ON_XBOX'].find((k) => tasks[k] != null) || Object.keys(tasks)[0]);
 
   const { appId, appName } = getQuestApplicationInfo(quest);
   const targetSeconds = getQuestTargetSeconds(quest, taskName);
@@ -1101,6 +1118,7 @@ async function completeSingleQuest(token, quest, options = {}) {
             options.onProgress({
               questId,
               questName,
+              type: isActivity ? 'activity' : 'game',
               currentSeconds: Math.min(currentSeconds, targetSeconds),
               targetSeconds,
               percent: Math.min(100, Math.round((currentSeconds / targetSeconds) * 100)),
@@ -1147,6 +1165,7 @@ async function completeSingleQuest(token, quest, options = {}) {
         options.onProgress({
           questId,
           questName,
+          type: isActivity ? 'activity' : 'game',
           currentSeconds: Math.min(currentSeconds, targetSeconds),
           targetSeconds,
           percent: Math.min(100, Math.round((currentSeconds / targetSeconds) * 100)),
@@ -1295,11 +1314,15 @@ async function runAutoQuestForToken(token, options = {}) {
       quest.config?.messages?.game_name ||
       `Nhiệm vụ #${quest.id}`;
 
+    const isVid = isVideoQuest(quest);
+    const defaultType = isVid ? 'video' : 'game';
+
     onProgress({
       step: 'quest_start',
       index: i + 1,
       total: quests.length,
       questName,
+      type: defaultType,
       message: `[${i + 1}/${quests.length}] Đang xử lý: **${questName}**...`,
     });
 
@@ -1312,12 +1335,17 @@ async function runAutoQuestForToken(token, options = {}) {
             step: 'progress',
             index: i + 1,
             total: quests.length,
+            type: p.type || defaultType,
             ...p,
           }),
       });
 
       const isSuccess = !!(res.completed || res.alreadyDone);
-      results.push({ success: isSuccess, ...res });
+      results.push({
+        success: isSuccess,
+        type: res.type || defaultType,
+        ...res,
+      });
       if (res.enrolled || res.completed || res.alreadyDone) enrolledCount++;
       if (res.completed || res.alreadyDone) completedCount++;
       if (res.claimed) claimedCount++;
@@ -1327,6 +1355,7 @@ async function runAutoQuestForToken(token, options = {}) {
         success: false,
         questId: quest.id,
         questName,
+        type: defaultType,
         error: err.message,
       });
     }

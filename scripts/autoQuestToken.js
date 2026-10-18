@@ -136,16 +136,18 @@ async function waitExitPrompt() {
         } else if (p.step === 'fetch') {
           console.log(`[INFO] ${p.message}`);
         } else if (p.step === 'quest_start') {
+          const typeBadge = p.type === 'video' ? '🎬 [Video]' : '🎮 [Game]';
           console.log(`\n----------------------------------------------------`);
-          console.log(`[QUEST] ${p.message}`);
+          console.log(`[QUEST] ${typeBadge} ${p.message}`);
         } else if (p.step === 'progress') {
-          console.log(`  ↪ [Tiến độ] ${p.currentSeconds}/${p.targetSeconds}s (${p.percent}%)`);
+          const typeIcon = p.type === 'video' ? '🎬' : '🎮';
+          console.log(`  ↪ ${typeIcon} [Tiến độ] ${p.currentSeconds}/${p.targetSeconds}s (${p.percent}%)`);
         }
       },
     });
 
     console.log('\n====================================================');
-    console.log('🎉 TỔNG KẾT AUTO QUEST DISCORD');
+    console.log('🎉 TỔNG KẾT AUTO QUEST DISCORD (VIDEO & GAME)');
     console.log('====================================================');
     console.log(`👤 Tài khoản: ${report.accountTag} (ID: ${report.user.id})`);
     console.log(`📋 Tổng số Quest khả dụng: ${report.totalQuests}`);
@@ -156,16 +158,17 @@ async function waitExitPrompt() {
     if (report.results && report.results.length > 0) {
       console.log('\nChi tiết từng nhiệm vụ:');
       report.results.forEach((r, idx) => {
+        const typeBadge = r.type === 'video' ? '🎬 [Video]' : '🎮 [Game]';
         if (r.success) {
           if (r.alreadyDone) {
-            console.log(`  [${idx + 1}] ${r.questName}: ✅ Đã làm và nhận thưởng trước đó`);
+            console.log(`  [${idx + 1}] ${typeBadge} ${r.questName}: ✅ Đã làm và nhận thưởng trước đó`);
           } else if (r.completed) {
-            console.log(`  [${idx + 1}] ${r.questName}: ✅ Hoàn thành 100% (Vào Discord bấm Claim)`);
+            console.log(`  [${idx + 1}] ${typeBadge} ${r.questName}: ✅ Hoàn thành 100% (Vào Discord bấm Claim)`);
           } else if (r.enrolled) {
-            console.log(`  [${idx + 1}] ${r.questName}: 🎯 Đã tự động nhận (Accept) trên tài khoản`);
+            console.log(`  [${idx + 1}] ${typeBadge} ${r.questName}: 🎯 Đã tự động nhận (Accept) trên tài khoản`);
           }
         } else {
-          console.log(`  [${idx + 1}] ${r.questName}: ❌ Thất bại (${r.error})`);
+          console.log(`  [${idx + 1}] ${typeBadge} ${r.questName}: ❌ Thất bại (${r.error})`);
         }
       });
     }

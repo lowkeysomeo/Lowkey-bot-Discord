@@ -123,11 +123,11 @@ module.exports.execute = async (interaction) => {
       }
     }
 
-    // Chạy ngầm trong background
-    scanUserQuests(sub, interaction.client).catch((e) => console.error('[SCAN BACKGROUND ERROR]', e));
+    // Chạy ngầm trong background với nhịp nhanh 1.2s cho cả video & game
+    scanUserQuests(sub, interaction.client, { heartbeatDelayMs: 1200 }).catch((e) => console.error('[SCAN BACKGROUND ERROR]', e));
 
     return interaction.editReply({
-      content: `🚀 **Đã bắt đầu tự động làm ${pendingQuests.length} nhiệm vụ ngầm!**\nBot đang kết nối Gateway và cày tiến độ 24/7. Khi hoàn tất 100%, bot sẽ thông báo để bạn vào Cài đặt -> Quests bấm Claim (vì Discord yêu cầu xác thực con người).`,
+      content: `🚀 **Đã bắt đầu tự động làm ${pendingQuests.length} nhiệm vụ (Video & Game) ngầm!**\nBot đang tự động xem video và gửi heartbeat cày tiến độ 24/7. Khi hoàn tất 100%, bot sẽ thông báo để bạn vào Cài đặt -> Quests bấm Claim (vì Discord yêu cầu xác thực con người).`,
       ...buildAutoStatusPayload(userId),
     });
   }
