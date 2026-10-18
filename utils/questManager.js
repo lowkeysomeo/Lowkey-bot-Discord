@@ -141,20 +141,18 @@ function buildTokenGuidePayload() {
       'Để hệ thống chạy **tự động 100%** không cần bạn thao tác tay hay mở game, bot cần dùng **User Token** của bạn để gửi yêu cầu hoàn thành tiến độ nhiệm vụ trực tiếp lên Discord:\n\n' +
         '📱 **CÁCH 1: LẤY TOKEN TRÊN ĐIỆN THOẠI (iOS / ANDROID) — 15 GIÂY:**\n' +
         '1. Mở trình duyệt trên điện thoại (Safari, Chrome, Kiwi Browser, Brave).\n' +
-        '2. Truy cập vào **`https://discord.com/login`** và đăng nhập vào tài khoản Discord của bạn.\n' +
-        '3. Sau khi vào được trang chat Discord trên web, copy đoạn mã sau và dán vào thanh địa chỉ URL trình duyệt:\n' +
-        '```javascript\njavascript:(function(){let t=window.localStorage.token||(webpackChunkdiscord_app.push([[\'\'],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken();prompt("User Token của bạn (Sao chép chuỗi này):",t.replace(/"/g,\'\'))})();\n```\n' +
-        '*(Lưu ý: Nếu trình duyệt tự xóa chữ `javascript:`, bạn chỉ cần gõ lại chữ `javascript:` ở đầu thanh địa chỉ rồi bấm Go/Enter)*.\n' +
-        '4. Hộp thoại hiện ra mã Token ➔ Bấm **Sao chép (Copy)** ➔ Quay lại bot và bấm nút **Nhập Token**!\n\n' +
+        '2. Vào cài đặt trình duyệt (nút 3 chấm hoặc chữ aA) ➔ Bật **"Trang web cho máy tính" (Desktop Site)**.\n' +
+        '3. Truy cập vào **`https://discord.com/login`** và đăng nhập vào tài khoản của bạn (đến khi thấy giao diện danh sách server/kênh chat).\n' +
+        '4. Tạo một Bookmark (Dấu trang) mới với URL là mã bên dưới (hoặc dán vào thanh URL rồi gõ lại chữ `javascript:` ở đầu):\n' +
+        '```javascript\njavascript:(function(){try{let req;(window.webpackChunkdiscord_app||[]).push([[Symbol()],{},(r)=>{if(Object.keys(r?.c||{}).length>Object.keys(req?.c||{}).length)req=r;}]);window.webpackChunkdiscord_app?.pop();let token="";if(req?.c){for(const m of Object.values(req.c)){try{const exp=m?.exports;if(!exp)continue;if(typeof exp?.default?.getToken==="function"){token=exp.default.getToken();break;}if(typeof exp?.getToken==="function"){token=exp.getToken();break;}if(typeof exp?.Z?.getToken==="function"){token=exp.Z.getToken();break;}if(typeof exp?.ZP?.getToken==="function"){token=exp.ZP.getToken();break;}for(const k of Object.keys(exp)){if(exp[k]&&typeof exp[k].getToken==="function"){token=exp[k].getToken();break;}}if(token)break;}catch(e){}}}if(!token){prompt("❌ Không tìm thấy Token! Vui lòng đảm bảo đã bật Trang web cho máy tính và đang ở màn hình chat:","");}else{prompt("✅ User Token của bạn (Sao chép chuỗi này):",token);}}catch(err){alert("❌ Lỗi: "+err.message);}})();\n```\n' +
+        '5. Hộp thoại hiện ra mã Token ➔ Bấm **Sao chép (Copy)** ➔ Quay lại Discord và bấm nút **Nhập Token**!\n\n' +
         '💻 **CÁCH 2: LẤY TOKEN TRÊN MÁY TÍNH (PC / LAPTOP):**\n' +
         '1. Mở Discord trên trình duyệt (hoặc Discord Desktop có bật DevTools).\n' +
         '2. Bấm phím `F12` hoặc tổ hợp phím `Ctrl + Shift + I` (trên Mac: `Cmd + Option + I`).\n' +
         '3. Chuyển sang tab **Console** ➔ Dán lệnh sau và Enter:\n' +
-        '```javascript\n(webpackChunkdiscord_app.push([[\'\'],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken()\n```\n' +
+        '```javascript\n(function(){let req;(window.webpackChunkdiscord_app||[]).push([[Symbol()],{},(r)=>{if(Object.keys(r?.c||{}).length>Object.keys(req?.c||{}).length)req=r;}]);window.webpackChunkdiscord_app?.pop();for(const m of Object.values(req.c)){try{const exp=m?.exports;if(typeof exp?.default?.getToken==="function")return exp.default.getToken();if(typeof exp?.getToken==="function")return exp.getToken();}catch(e){}}})();\n```\n' +
         '4. Sao chép chuỗi Token nằm trong dấu ngoặc kép và dán vào bot.\n\n' +
-        '🔒 **Cam kết bảo mật:**\n' +
-        '• Khi bạn nhập qua Modal, nội dung chỉ được gửi trực tiếp và xử lý tức thì, không bị hiển thị ra kênh chat.\n' +
-        '• Bot chỉ dùng token để truy vấn danh mục Quest (`/quests/@me`), gửi heartbeat tiến độ và gửi thông báo khi hoàn thành 100%.'
+        '💡 **Mẹo:** Nếu không muốn lấy Token, bạn có thể vào phòng Voice trên điện thoại và gõ `/quest action:stream` để bot vào làm Viewer treo 15 phút cùng bạn hoàn toàn tự động!'
     )
     .setFooter({ text: 'Lowkey Auto Quest • Hỗ trợ hoàn hảo cả Điện thoại & Máy tính' })
     .setTimestamp();
