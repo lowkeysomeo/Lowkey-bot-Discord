@@ -364,37 +364,131 @@ async function processPaidOrder(orderId, client) {
     let allQuests = [];
     try {
       allQuests = await fetchQuests(order.token);
-    } catch (e) {}
+    } catch (e) {
+      console.error(`[QUEST SHOP] Lỗi fetch quests cho đơn #${order.order_id}:`, e.message);
+    }
 
-    const selectedIds = new Set(order.quest_ids);
-    const targetQuests = allQuests.filter((q) => selectedIds.has(q.id));
+    let targetQuests = [];
+    if (Array.isArray(order.quest_ids) && order.quest_ids.length > 0) {
+      const selectedIds = new Set(order.quest_ids);
+      targetQuests = allQuests.filter((q) => selectedIds.has(q.id));
+    }
+    // Nếu khách hàng không chọn cụ thể từ dropdown hoặc quest đã thay đổi, tự động chọn các quest chưa nhận thưởng theo số lượng quest_count
+    if (targetQuests.length === 0) {
+      const pending = allQuests.filter((q) => !q.user_status?.claimed_at);
+      targetQuests = pending.slice(0, Math.max(1, order.quest_count || 1));
+    }
 
     const results = [];
+    let completedCount = 0;
+    let desktopCount = 0;
+
     for (const q of targetQuests) {
       try {
         const res = await completeSingleQuest(order.token, q);
-        results.push({ questId: q.id, name: res.questName, success: true, message: 'Hoàn thành 100% & Đã nhận thưởng' });
+        if (res.completed || res.alreadyDone) {
+          completedCount++;
+          results.push({
+            questId: q.id,
+            name: res.questName || q.id,
+            success: true,
+            completed: true,
+            message: res.alreadyDone ? 'Đã nhận thưởng trước đó' : 'Hoàn thành 100% & Đã nhận thưởng ORB',
+          });
+        } else if (res.requiresDesktop) {
+          desktopCount++;
+          results.push({
+            questId: q.id,
+            name: res.questName || q.id,
+            success: false,
+            completed: false,
+            requiresDesktop: true,
+            message: 'Đã tự động nhận (Accept). Cần mở Discord Desktop hoặc chạy Script F12 để hoàn tất',
+          });
+        } else {
+          results.push({
+            questId: q.id,
+            name: res.questName || q.id,
+            success: false,
+            completed: false,
+            error: res.message || 'Không thể hoàn thành qua API',
+          });
+        }
       } catch (err) {
-        results.push({ questId: q.id, name: q.id, success: false, error: err.message });
+        results.push({
+          questId: q.id,
+          name: q.id,
+          success: false,
+          completed: false,
+          error: err.message,
+        });
       }
     }
 
-    updateOrderStatus(orderId, 'completed', { completedAt: Date.now() });
+    let finalStatus = 'completed';
+    if (results.length === 0) {
+      finalStatus = 'cancelled';
+    } else if (completedCount === results.length) {
+      finalStatus = 'completed';
+    } else if (desktopCount > 0) {
+      finalStatus = 'pending_desktop';
+    } else if (completedCount > 0) {
+      finalStatus = 'partially_completed';
+    } else {
+      finalStatus = 'failed';
+    }
+
+    updateOrderStatus(orderId, finalStatus, {
+      completedAt: finalStatus === 'completed' ? Date.now() : null,
+      error: finalStatus !== 'completed' ? `${completedCount}/${results.length} hoàn tất, ${desktopCount} cần Desktop/F12` : null,
+    });
 
     // Gửi thông báo DM cho khách hàng
     if (client) {
       const user = await client.users.fetch(order.user_id).catch(() => null);
       if (user) {
+        const isAllDone = finalStatus === 'completed';
+        const embedColor = isAllDone ? 0x57f287 : desktopCount > 0 ? 0xfee75c : 0xed4245;
+        const embedTitle = isAllDone
+          ? '🎉 [LOWKEY SHOP] HOÀN TẤT ĐƠN HÀNG QUEST LẺ!'
+          : desktopCount > 0
+          ? '🎯 [LOWKEY SHOP] ĐÃ NHẬN NHIỆM VỤ THÀNH CÔNG!'
+          : '⚠️ [LOWKEY SHOP] KẾT QUẢ XỬ LÝ ĐƠN HÀNG';
+
+        let desc =
+          `Đơn hàng **\`${order.order_id}\`** của bạn đã được bot xử lý:\n\n` +
+          results
+            .map((r, i) => {
+              if (r.completed) {
+                return `**${i + 1}. ${r.name}**\n↪ ✅ ${r.message}`;
+              } else if (r.requiresDesktop) {
+                return `**${i + 1}. ${r.name}**\n↪ 🎯 ${r.message}`;
+              } else {
+                return `**${i + 1}. ${r.name}**\n↪ ⚠️ ${r.error || r.message || 'Thất bại'}`;
+              }
+            })
+            .join('\n\n');
+
+        if (isAllDone) {
+          desc += `\n\n🎁 **Phần thưởng & Điểm ORB** đã được chuyển trực tiếp vào tài khoản Discord của bạn. Mở **Cài đặt -> Quests** để kiểm tra nhé!`;
+        } else if (desktopCount > 0) {
+          desc +=
+            `\n\n💡 **HƯỚNG DẪN HOÀN TẤT TRONG 10 GIÂY KHÔNG CẦN TẢI GAME:**\n` +
+            `Bot đã tự động **Accept (Nhận)** các nhiệm vụ game trên tài khoản của bạn. Để hoàn tất mà không cần cài game nặng:\n` +
+            `1. Mở Discord trên máy tính (Web hoặc Discord Desktop app).\n` +
+            `2. Bấm phím **\`Ctrl + Shift + I\`** (hoặc \`F12\`) ➔ Chọn tab **Console**.\n` +
+            `3. Dán dòng lệnh sau và bấm Enter:\n` +
+            `\`\`\`javascript\nfetch("https://raw.githubusercontent.com/power0matin/discord-quest-auto-completer/main/quest_completer.js").then(r=>r.text()).then(eval);\n\`\`\`\n` +
+            `Script sẽ tự động chạy ngầm và claim toàn bộ ORB về tài khoản!`;
+        }
+
         const embed = new EmbedBuilder()
-          .setColor(0x57f287)
-          .setTitle('🎉 [LOWKEY SHOP] HOÀN TẤT ĐƠN HÀNG QUEST LẺ!')
-          .setDescription(
-            `Đơn hàng **\`${order.order_id}\`** của bạn đã được bot thực hiện xong:\n\n` +
-            results.map((r, i) => `**${i + 1}. ${r.name}**\n↪ ${r.success ? '✅ ' + r.message : '⚠️ ' + r.error}`).join('\n\n') +
-            `\n\n🎁 **Phần thưởng & Điểm ORB** đã được chuyển trực tiếp vào tài khoản Discord của bạn. Mở **Cài đặt -> Quests** để kiểm tra nhé!`
-          )
-          .setFooter({ text: 'Lowkey Quest Shop • Cảm ơn bạn đã tin dùng dịch vụ!' })
+          .setColor(embedColor)
+          .setTitle(embedTitle)
+          .setDescription(desc)
+          .setFooter({ text: 'Lowkey Quest Shop • Dịch vụ tự động 24/7' })
           .setTimestamp();
+
         const dmSent = await user.send({ embeds: [embed] }).then(() => true).catch(() => false);
         if (!dmSent) {
           const { channelId } = getBankConfig();
@@ -402,14 +496,16 @@ async function processPaidOrder(orderId, client) {
           const ch = await client.channels.fetch(targetId).catch(() => null);
           if (ch && ch.isTextBased()) {
             ch.send({
-              content: `🎉 Chúc mừng <@${order.user_id}>! Đơn hàng **#${order.order_id}** (${order.quest_count} nhiệm vụ) đã được hoàn tất 100% và cộng điểm ORBs!`,
+              content: isAllDone
+                ? `🎉 Chúc mừng <@${order.user_id}>! Đơn hàng **#${order.order_id}** (${order.quest_count} nhiệm vụ) đã được hoàn tất 100% và nhận thưởng ORB!`
+                : `🎯 Thông báo <@${order.user_id}>: Đơn hàng **#${order.order_id}** đã được bot nhận (Accept) thành công! Vui lòng mở tin nhắn riêng (DM) để nhận hướng dẫn hoàn tất 1-click.`,
             }).catch(() => {});
           }
         }
       }
     }
 
-    return { success: true, type: 'single', results };
+    return { success: true, type: 'single', finalStatus, results };
   }
 }
 

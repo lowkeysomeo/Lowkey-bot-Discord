@@ -869,6 +869,9 @@ function questShopPage() {
     pending: '<span class="badge amber">Chờ thanh toán</span>',
     running: '<span class="badge purple">Đang chạy</span>',
     completed: '<span class="badge">Hoàn thành</span>',
+    pending_desktop: '<span class="badge amber">Cần mở Desktop</span>',
+    partially_completed: '<span class="badge purple">Xong một phần</span>',
+    cancelled: '<span class="badge red">Đã hủy</span>',
     rejected: '<span class="badge red">Đã hủy</span>',
     failed: '<span class="badge red">Thất bại</span>',
   };
@@ -1000,7 +1003,7 @@ function questShopPage() {
                 ${o.status === 'pending' ? `
                   <button type="button" class="primary" style="min-height:30px; padding:3px 10px; font-size:12px; background:#10b981;" data-qorder-action="approve" data-qorder-id="${h(o.order_id)}">✓ Duyệt Tiền</button>
                   <button type="button" class="text-button danger" style="min-height:30px; padding:3px 8px; font-size:12px;" data-qorder-action="reject" data-qorder-id="${h(o.order_id)}">✕ Hủy</button>
-                ` : o.status === 'completed' ? '<span style="color:var(--green); font-size:12px;">Đã xong</span>' : '<span class="subtle">—</span>'}
+                ` : o.status === 'completed' ? '<span style="color:var(--green); font-size:12px;">Đã xong</span>' : o.status === 'pending_desktop' ? '<span style="color:var(--amber); font-size:12px;" title="' + h(o.error_message || '') + '">Cần Desktop</span>' : o.status === 'partially_completed' ? '<span style="color:var(--accent); font-size:12px;" title="' + h(o.error_message || '') + '">Một phần</span>' : '<span class="subtle">—</span>'}
               </td>
             </tr>
             `).join('')}

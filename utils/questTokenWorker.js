@@ -398,6 +398,7 @@ async function completeSingleQuest(token, quest, options = {}) {
         reward,
       };
     } catch (err) {
+      console.warn(`[QUEST WORKER] Activity heartbeat failed for ${questName} (${questId}): ${err.message}`);
       return {
         questId,
         questName,
@@ -483,6 +484,7 @@ async function completeSingleQuest(token, quest, options = {}) {
       reward,
     };
   } catch (err) {
+    console.warn(`[QUEST WORKER] Game heartbeat failed for ${questName} (${questId}): ${err.message}`);
     return {
       questId,
       questName,
@@ -565,7 +567,8 @@ async function runAutoQuestForToken(token, options = {}) {
           }),
       });
 
-      results.push({ success: true, ...res });
+      const isSuccess = !!(res.completed || res.alreadyDone);
+      results.push({ success: isSuccess, ...res });
       if (res.enrolled || res.completed || res.alreadyDone) enrolledCount++;
       if (res.completed || res.alreadyDone) completedCount++;
       if (res.claimed) claimedCount++;

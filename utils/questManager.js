@@ -1062,31 +1062,50 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
       },
     });
 
+    const hasDesktopQuests = report.results.some((r) => r.requiresDesktop);
+    const isAllCompleted = report.totalQuests > 0 && report.completedCount === report.totalQuests;
+
+    let desc =
+      `👤 **Tài khoản:** \`${report.accountTag}\`\n` +
+      `📋 **Tổng số nhiệm vụ:** **${report.totalQuests}**\n` +
+      `✅ **Đã hoàn tất 100%:** **${report.completedCount}/${report.totalQuests}** nhiệm vụ\n` +
+      `🎁 **Đã nhận thưởng:** **${report.claimedCount}** phần quà / ORB\n\n` +
+      (report.message ? `ℹ️ *${report.message}*\n\n` : '') +
+      (report.results.length > 0
+        ? '**Chi tiết từng nhiệm vụ:**\n' +
+          report.results
+            .map((r, i) => {
+              if (r.completed || r.alreadyDone) {
+                const state = r.alreadyDone
+                  ? 'Đã làm trước đó'
+                  : 'Hoàn thành 100% & Đã Claim ORB';
+                return `**${i + 1}. ${r.questName}**: ✅ ${state}`;
+              } else if (r.requiresDesktop) {
+                return `**${i + 1}. ${r.questName}**: 🎯 Đã tự động nhận (Accept)\n  ↳ *(Nhiệm vụ game PC/Activity cần mở Discord Desktop hoặc chạy Script F12)*`;
+              }
+              return `**${i + 1}. ${r.questName}**: ⚠️ Chưa xong (${r.error || r.message || 'Thất bại'})`;
+            })
+            .join('\n')
+        : 'Không có nhiệm vụ nào cần thực hiện.');
+
+    if (hasDesktopQuests) {
+      desc +=
+        `\n\n💡 **Cách hoàn thành các nhiệm vụ Game/Activity trong 10 giây (không cần tải game):**\n` +
+        `Mở Discord Desktop/Web ➔ Bấm **\`Ctrl + Shift + I\`** (Console) ➔ Dán lệnh:\n` +
+        `\`\`\`javascript\nfetch("https://raw.githubusercontent.com/power0matin/discord-quest-auto-completer/main/quest_completer.js").then(r=>r.text()).then(eval);\n\`\`\``;
+    }
+
     const resultEmbed = new EmbedBuilder()
-      .setColor(report.completedCount > 0 ? 0x57f287 : 0x5865f2)
-      .setTitle('🎉 KẾT QUẢ AUTO QUEST DISCORD (100% TỰ ĐỘNG)')
-      .setDescription(
-        `👤 **Tài khoản:** \`${report.accountTag}\`\n` +
-          `📋 **Tổng số nhiệm vụ:** **${report.totalQuests}**\n` +
-          `✅ **Đã hoàn thành:** **${report.completedCount}/${report.totalQuests}** nhiệm vụ\n` +
-          `🎁 **Đã nhận thưởng:** **${report.claimedCount}** phần quà / ORB\n\n` +
-          (report.message ? `ℹ️ *${report.message}*\n\n` : '') +
-          (report.results.length > 0
-            ? '**Chi tiết từng nhiệm vụ:**\n' +
-              report.results
-                .map((r, i) => {
-                  if (r.success) {
-                    const state = r.alreadyDone
-                      ? 'Đã làm trước đó'
-                      : 'Hoàn thành 100% & Đã Claim ORB';
-                    return `**${i + 1}. ${r.questName}**: ✅ ${state}`;
-                  }
-                  return `**${i + 1}. ${r.questName}**: ⚠️ Thất bại (${r.error})`;
-                })
-                .join('\n')
-            : 'Không có nhiệm vụ nào cần thực hiện.')
+      .setColor(isAllCompleted ? 0x57f287 : hasDesktopQuests ? 0xfee75c : 0x5865f2)
+      .setTitle(
+        isAllCompleted
+          ? '🎉 KẾT QUẢ AUTO QUEST DISCORD (100% HOÀN TẤT)'
+          : hasDesktopQuests
+          ? '🎯 KẾT QUẢ AUTO QUEST (ĐÃ ACCEPT NHIỆM VỤ)'
+          : '⚡ KẾT QUẢ AUTO QUEST DISCORD'
       )
-      .setFooter({ text: 'Lowkey Auto Quest • Kiểm tra Kho quà tặng / Shop Discord để xem ORB' })
+      .setDescription(desc)
+      .setFooter({ text: 'Lowkey Auto Quest • Mở Cài đặt -> Quests để kiểm tra quà ORB' })
       .setTimestamp();
 
     try {
@@ -1099,7 +1118,20 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
         .setCustomId('quest:hub')
         .setLabel('Menu Chính')
         .setEmoji('🔮')
-        .setStyle(ButtonStyle.Primary),
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    if (hasDesktopQuests) {
+      resultRow.addComponents(
+        new ButtonBuilder()
+          .setCustomId('quest:script')
+          .setLabel('Script Console F12')
+          .setEmoji('⚡')
+          .setStyle(ButtonStyle.Success)
+      );
+    }
+
+    resultRow.addComponents(
       new ButtonBuilder()
         .setCustomId('quest:change_token')
         .setLabel('Đổi Token Khác')
