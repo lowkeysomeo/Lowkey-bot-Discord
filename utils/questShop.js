@@ -43,6 +43,24 @@ const BANK_NAMES = {
   LPB: 'LPBank',
 };
 
+const DEFAULT_PANEL_TITLE = '🏪 DỊCH VỤ AUTO QUEST & SĂN ORBS DISCORD TỰ ĐỘNG 24/7';
+const DEFAULT_PANEL_FOOTER = 'Lowkey Auto Quest Shop • Uy tín - Tiện lợi - Tự động 100%';
+const DEFAULT_PANEL_COLOR = '#5865f2';
+const DEFAULT_PANEL_DESCRIPTION =
+  `Chào mừng bạn đến với hệ thống tự động hoàn thành **Discord Quests** và săn điểm **ORB / Phần quà Discord** của Lowkey Bot!\n\n` +
+  `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+  `### 📦 CÁC GÓI DỊCH VỤ ĐANG CUNG CẤP\n\n` +
+  `**1️⃣ Gói Tùy Chọn Quest Lẻ — \`{single_price} / quest\`**\n` +
+  `• Tự do tích chọn các nhiệm vụ bạn muốn làm trên tài khoản.\n` +
+  `• Tiền thanh toán = \`Số lượng quest × {single_price}\`.\n` +
+  `• Sau khi quét mã QR thanh toán, bot sẽ lập tức cày và nhận thưởng ORBs ngay.\n\n` +
+  `**2️⃣ Gói Tự Động Theo Tháng — \`{monthly_price} / tháng\` (30 ngày)**\n` +
+  `• **KHÔNG GIỚI HẠN** số lượng nhiệm vụ trong suốt 1 tháng!\n` +
+  `• Bot chạy nền 24/7 trên máy chủ: cứ có Quest mới là tự nhận, tự xem video / chơi game, tự nhận quà và gửi thông báo DM chúc mừng.\n` +
+  `• Bạn hoàn toàn không cần bật máy tính, mở game hay treo máy.\n` +
+  `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+  `🛡️ *Hệ thống chia nhịp tua an toàn, chống 400 Bad Request & bảo vệ tài khoản tối đa.*`;
+
 function formatVnd(amount) {
   return `${Number(amount || 0).toLocaleString('vi-VN')} đ`;
 }
@@ -63,6 +81,10 @@ function getBankConfig() {
     panelMessageId: config.panel_message_id || null,
     singleQuestPrice: parseInt(config.single_quest_price, 10) || SINGLE_QUEST_PRICE,
     monthlyPackagePrice: parseInt(config.monthly_package_price, 10) || MONTHLY_PACKAGE_PRICE,
+    panelTitle: config.panel_title || DEFAULT_PANEL_TITLE,
+    panelDescription: config.panel_description !== undefined && config.panel_description !== '' ? config.panel_description : DEFAULT_PANEL_DESCRIPTION,
+    panelFooter: config.panel_footer || DEFAULT_PANEL_FOOTER,
+    panelColor: config.panel_color || DEFAULT_PANEL_COLOR,
   };
 }
 
@@ -517,24 +539,22 @@ function buildShopPanelPayload() {
   const singlePriceStr = formatVnd(cfg.singleQuestPrice);
   const monthlyPriceStr = formatVnd(cfg.monthlyPackagePrice);
 
+  let desc = cfg.panelDescription || DEFAULT_PANEL_DESCRIPTION;
+  desc = desc
+    .replaceAll('{single_price}', singlePriceStr)
+    .replaceAll('{monthly_price}', monthlyPriceStr);
+
+  let embedColor = 0x5865f2;
+  if (cfg.panelColor) {
+    const hex = cfg.panelColor.replace('#', '').trim();
+    const parsed = parseInt(hex, 16);
+    if (!isNaN(parsed)) embedColor = parsed;
+  }
+
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle('🏪 DỊCH VỤ AUTO QUEST & SĂN ORBS DISCORD TỰ ĐỘNG 24/7')
-    .setDescription(
-      `Chào mừng bạn đến với hệ thống tự động hoàn thành **Discord Quests** và săn điểm **ORB / Phần quà Discord** của Lowkey Bot!\n\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `### 📦 CÁC GÓI DỊCH VỤ ĐANG CUNG CẤP\n\n` +
-      `**1️⃣ Gói Tùy Chọn Quest Lẻ — \`${singlePriceStr} / quest\`**\n` +
-      `• Tự do tích chọn các nhiệm vụ bạn muốn làm trên tài khoản.\n` +
-      `• Tiền thanh toán = \`Số lượng quest × ${singlePriceStr}\`.\n` +
-      `• Sau khi quét mã QR thanh toán, bot sẽ lập tức cày và nhận thưởng ORBs ngay.\n\n` +
-      `**2️⃣ Gói Tự Động Theo Tháng — \`${monthlyPriceStr} / tháng\` (30 ngày)**\n` +
-      `• **KHÔNG GIỚI HẠN** số lượng nhiệm vụ trong suốt 1 tháng!\n` +
-      `• Bot chạy nền 24/7 trên máy chủ: cứ có Quest mới là tự nhận, tự xem video / chơi game, tự nhận quà và gửi thông báo DM chúc mừng.\n` +
-      `• Bạn hoàn toàn không cần bật máy tính, mở game hay treo máy.\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🛡️ *Hệ thống chia nhịp tua an toàn, chống 400 Bad Request & bảo vệ tài khoản tối đa.*`
-    )
+    .setColor(embedColor)
+    .setTitle(cfg.panelTitle || DEFAULT_PANEL_TITLE)
+    .setDescription(desc)
     .addFields(
       {
         name: '🎯 Mua Quest Lẻ',
@@ -552,7 +572,7 @@ function buildShopPanelPayload() {
         inline: true,
       }
     )
-    .setFooter({ text: 'Lowkey Auto Quest Shop • Uy tín - Tiện lợi - Tự động 100%' })
+    .setFooter({ text: cfg.panelFooter || DEFAULT_PANEL_FOOTER })
     .setTimestamp();
 
   const row1 = new ActionRowBuilder().addComponents(
@@ -1269,7 +1289,10 @@ async function handleShopInteraction(interaction, client) {
 
     if (order.status === 'completed') {
       const payload = buildPaymentPayload(order);
-      return interaction.update(payload);
+      if (typeof interaction.update === 'function') {
+        return interaction.update(payload);
+      }
+      return interaction.reply({ content: 'Đơn hàng này đã hoàn thành!', flags: 64 });
     }
 
     const tenMinutesMs = 10 * 60 * 1000;
@@ -1278,11 +1301,25 @@ async function handleShopInteraction(interaction, client) {
         updateOrderStatus(order.order_id, 'cancelled', { error: 'Hết hạn thanh toán (quá 10 phút)' });
       }
       const expiredPayload = buildPaymentPayload({ ...order, status: 'cancelled' });
-      return interaction.update(expiredPayload);
+      if (typeof interaction.update === 'function') {
+        return interaction.update(expiredPayload);
+      }
+      return interaction.reply({ content: 'Đơn hàng này đã hết hạn (quá 10 phút) và đã được hủy tự động.', flags: 64 });
+    }
+
+    if (order.check_count > 0 && !isOwner(interaction.user.id)) {
+      return interaction.reply({
+        content: `⏳ **Bạn đã gửi yêu cầu xác nhận đơn hàng #${order.order_id} rồi!**\n\n• Hệ thống và SePay đang tự động quét kiểm tra mỗi 15 giây.\n• Vui lòng **không bấm liên tục** để tránh quá tải.\n• Khi nhận được tiền, bot sẽ tự động thực hiện nhiệm vụ và gửi thông báo DM cho bạn ngay lập tức!`,
+        flags: 64,
+      });
     }
 
     // Cập nhật ngay trên bảng mã QR hiện tại (đóng bảng in-place)
-    await interaction.deferUpdate();
+    if (typeof interaction.deferUpdate === 'function') {
+      await interaction.deferUpdate();
+    } else if (typeof interaction.deferReply === 'function') {
+      await interaction.deferReply({ flags: 64 });
+    }
 
     // Bước 1: Kiểm tra thanh toán SePay (thử 2 lần cách nhau 2.5s phòng khi ngân hàng trễ vài giây)
     let autoPaid = await checkSePayPayment(order);
@@ -1397,7 +1434,7 @@ async function handleShopInteraction(interaction, client) {
 
     const payload = buildPaymentPayload(order);
     payload.content =
-      `⏳ **Chưa thấy giao dịch chuyển khoản cho đơn #${order.order_id}!**\n` +
+      `⏳ **ĐÃ GHI NHẬN YÊU CẦU: Chưa thấy giao dịch chuyển khoản cho đơn #${order.order_id}!**\n` +
       `• Nếu bạn vừa chuyển tiền, vui lòng đợi 10-20 giây để ngân hàng chuyển tiếp qua SePay rồi bấm lại nút **Đã Chuyển Tiền / Kiểm Tra** nhé.\n` +
       `• Vui lòng đảm bảo nội dung chuyển khoản chính xác là: \`SEVQR ${order.order_id}\`.\n` +
       `• Hạn thanh toán: còn <t:${Math.floor((order.created_at + tenMinutesMs) / 1000)}:R>.`;
@@ -1610,4 +1647,8 @@ module.exports = {
   fetchSePayTransactions,
   matchTransactionWithOrder,
   checkSePayPayment,
+  DEFAULT_PANEL_TITLE,
+  DEFAULT_PANEL_DESCRIPTION,
+  DEFAULT_PANEL_FOOTER,
+  DEFAULT_PANEL_COLOR,
 };

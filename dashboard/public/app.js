@@ -957,6 +957,46 @@ function questShopPage() {
             <small>Kênh Discord nơi bot gửi bảng dịch vụ mua quest kèm các nút bấm (Hiện tại: #${h(currentChannelName?.name || cfg.channelId)}).</small>
           </div>
         </div>
+
+        <div style="margin: 24px 0 12px; padding-top: 16px; border-top: 1px solid var(--border-subtle);">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <h3 style="font-size:15px; margin:0 0 4px; display:flex; align-items:center; gap:8px;">
+                <span>🎨</span> Tùy Chỉnh Nội Dung Bảng Cửa Hàng (Discord Embed)
+              </h3>
+              <p class="subtle" style="font-size:12px; margin:0;">
+                Tùy chỉnh tiêu đề, màu sắc, nội dung mô tả và chữ chân trang của tin nhắn Bảng Shop gửi trên Discord.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-grid">
+          <div class="field" style="grid-column: 1 / -2;">
+            <label for="qshop-panel-title">Tiêu đề Bảng Cửa Hàng (Embed Title)</label>
+            <input id="qshop-panel-title" name="panelTitle" type="text" value="${h(cfg.panelTitle || '🏪 DỊCH VỤ AUTO QUEST & SĂN ORBS DISCORD TỰ ĐỘNG 24/7')}" placeholder="Tiêu đề hiển thị đầu bảng..." required>
+          </div>
+          <div class="field">
+            <label for="qshop-panel-color">Màu viền Embed</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input id="qshop-panel-color-picker" type="color" value="${h(cfg.panelColor || '#5865f2')}" style="width:40px; height:38px; padding:2px; border-radius:4px; border:1px solid var(--border-subtle); background:transparent; cursor:pointer;">
+              <input id="qshop-panel-color" name="panelColor" type="text" value="${h(cfg.panelColor || '#5865f2')}" placeholder="#5865f2" style="flex:1;">
+            </div>
+          </div>
+          <div class="field" style="grid-column: 1 / -1;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <label for="qshop-panel-description" style="margin:0;">Nội dung mô tả & Bảng giá (Embed Description)</label>
+              <button type="button" id="qshop-reset-desc-btn" class="text-button" style="font-size:12px; padding:0; color:var(--accent); cursor:pointer;">↺ Khôi phục nội dung mẫu</button>
+            </div>
+            <textarea id="qshop-panel-description" name="panelDescription" rows="12" style="font-family:monospace; font-size:13px; line-height:1.5; resize:vertical;" placeholder="Nội dung mô tả chi tiết bảng dịch vụ...">${h(cfg.panelDescription || '')}</textarea>
+            <small>Hỗ trợ đầy đủ định dạng Markdown Discord (**in đậm**, *in nghiêng*, \`code\`, v.v.). Dùng <code>{single_price}</code> để tự chèn giá quest lẻ và <code>{monthly_price}</code> để tự chèn giá gói tháng.</small>
+          </div>
+          <div class="field" style="grid-column: 1 / -1;">
+            <label for="qshop-panel-footer">Chữ chân trang (Embed Footer)</label>
+            <input id="qshop-panel-footer" name="panelFooter" type="text" value="${h(cfg.panelFooter || 'Lowkey Auto Quest Shop • Uy tín - Tiện lợi - Tự động 100%')}" placeholder="Chữ chân trang dưới cùng...">
+          </div>
+        </div>
+
         <div id="qshop-sepay-test-result" style="margin-top:12px;display:none;"></div>
         <div class="savebar">
           <span id="qshop-config-status">Thay đổi thông tin sẽ áp dụng ngay vào mã QR và giá cước.</span>
@@ -1141,11 +1181,15 @@ function attachQuestShopEvents() {
           singleQuestPrice: Number(formData.get('singleQuestPrice')),
           monthlyPackagePrice: Number(formData.get('monthlyPackagePrice')),
           channelId: formData.get('channelId'),
+          panelTitle: formData.get('panelTitle'),
+          panelColor: formData.get('panelColor'),
+          panelDescription: formData.get('panelDescription'),
+          panelFooter: formData.get('panelFooter'),
         };
         const res = await api('/api/quest-shop/config', payload);
         if (state.questShopData) state.questShopData.config = res.config;
-        if (statusSpan) statusSpan.textContent = '✅ Đã lưu cài đặt thành công!';
-        notify('Đã lưu cấu hình Quest Shop thành công!');
+        if (statusSpan) statusSpan.textContent = '✅ Đã lưu cài đặt & đồng bộ lên Discord thành công!';
+        notify('Đã lưu cấu hình Quest Shop & đồng bộ bảng Discord thành công!');
       } catch (err) {
         if (statusSpan) statusSpan.textContent = '❌ Lỗi: ' + err.message;
         notify(err.message);
@@ -1154,6 +1198,40 @@ function attachQuestShopEvents() {
         if (submitBtn) submitBtn.disabled = false;
       }
     };
+
+    const colorPicker = configForm.querySelector('#qshop-panel-color-picker');
+    const colorInput = configForm.querySelector('#qshop-panel-color');
+    if (colorPicker && colorInput) {
+      colorPicker.oninput = () => { colorInput.value = colorPicker.value; };
+      colorInput.oninput = () => {
+        if (/^#[0-9a-fA-F]{6}$/.test(colorInput.value)) {
+          colorPicker.value = colorInput.value;
+        }
+      };
+    }
+
+    const resetDescBtn = configForm.querySelector('#qshop-reset-desc-btn');
+    const descTextarea = configForm.querySelector('#qshop-panel-description');
+    if (resetDescBtn && descTextarea) {
+      resetDescBtn.onclick = () => {
+        const defaultDesc =
+          `Chào mừng bạn đến với hệ thống tự động hoàn thành **Discord Quests** và săn điểm **ORB / Phần quà Discord** của Lowkey Bot!\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `### 📦 CÁC GÓI DỊCH VỤ ĐANG CUNG CẤP\n\n` +
+          `**1️⃣ Gói Tùy Chọn Quest Lẻ — \`{single_price} / quest\`**\n` +
+          `• Tự do tích chọn các nhiệm vụ bạn muốn làm trên tài khoản.\n` +
+          `• Tiền thanh toán = \`Số lượng quest × {single_price}\`.\n` +
+          `• Sau khi quét mã QR thanh toán, bot sẽ lập tức cày và nhận thưởng ORBs ngay.\n\n` +
+          `**2️⃣ Gói Tự Động Theo Tháng — \`{monthly_price} / tháng\` (30 ngày)**\n` +
+          `• **KHÔNG GIỚI HẠN** số lượng nhiệm vụ trong suốt 1 tháng!\n` +
+          `• Bot chạy nền 24/7 trên máy chủ: cứ có Quest mới là tự nhận, tự xem video / chơi game, tự nhận quà và gửi thông báo DM chúc mừng.\n` +
+          `• Bạn hoàn toàn không cần bật máy tính, mở game hay treo máy.\n` +
+          `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+          `🛡️ *Hệ thống chia nhịp tua an toàn, chống 400 Bad Request & bảo vệ tài khoản tối đa.*`;
+        descTextarea.value = defaultDesc;
+        notify('Đã khôi phục nội dung mẫu!');
+      };
+    }
   }
 
   const testSepayBtn = document.querySelector('#qshop-test-sepay-btn');

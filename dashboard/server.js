@@ -296,6 +296,13 @@ function createDashboard(client, options = {}) {
               const p = Math.max(0, parseInt(input.monthlyPackagePrice, 10) || 0);
               questShop.setBankConfig('monthly_package_price', p);
             }
+            if (input.panelTitle !== undefined) questShop.setBankConfig('panel_title', String(input.panelTitle).trim());
+            if (input.panelColor !== undefined) questShop.setBankConfig('panel_color', String(input.panelColor).trim());
+            if (input.panelDescription !== undefined) questShop.setBankConfig('panel_description', String(input.panelDescription).trim());
+            if (input.panelFooter !== undefined) questShop.setBankConfig('panel_footer', String(input.panelFooter).trim());
+
+            // Tự động đồng bộ cập nhật bảng trên Discord nếu đã ghim
+            questShop.ensureShopPanel(client).catch(() => {});
 
             return json(res, 200, { ok: true, config: questShop.getBankConfig() });
           }
