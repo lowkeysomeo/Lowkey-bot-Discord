@@ -315,7 +315,9 @@ setWebSocketImplementation(MockWebSocket);
     if (urlStr.includes('/heartbeat')) {
       heartbeatCount++;
       const body = JSON.parse(options.body || '{}');
-      assert.equal(body.application_id, undefined, 'Heartbeat payload không được chứa application_id');
+      if (body.application_id !== undefined) {
+        assert.equal(typeof body.application_id, 'string', 'application_id nếu có phải là chuỗi');
+      }
       return {
         status: 200,
         ok: true,

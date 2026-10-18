@@ -173,12 +173,13 @@ async function enrollQuest(token, questId) {
 /**
  * Gửi heartbeat giả lập tiến trình chơi game hoặc stream
  */
-async function sendHeartbeat(token, questId, { streamKey = null, terminal = false } = {}) {
+async function sendHeartbeat(token, questId, { streamKey = null, applicationId = null, terminal = false } = {}) {
   const body = { terminal: Boolean(terminal) };
   if (streamKey) {
     body.stream_key = streamKey;
-  } else {
-    body.stream_key = null;
+  }
+  if (applicationId) {
+    body.application_id = String(applicationId);
   }
 
   let res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
@@ -187,8 +188,19 @@ async function sendHeartbeat(token, questId, { streamKey = null, terminal = fals
     body: JSON.stringify(body),
   });
 
-  // Fallback 1: Nếu Discord API từ chối stream_key = null (400 Bad Request), gửi body không có stream_key
-  if (res.status === 400 && body.stream_key === null) {
+  // Fallback 1: Nếu Discord API từ chối với 400 Bad Request và có application_id, thử không có application_id
+  if (res.status === 400 && body.application_id) {
+    const altBody = { terminal: Boolean(terminal) };
+    if (body.stream_key) altBody.stream_key = body.stream_key;
+    res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
+      method: 'POST',
+      headers: getHeaders(token),
+      body: JSON.stringify(altBody),
+    });
+  }
+
+  // Fallback 2: Nếu vẫn lỗi 400 và có stream_key, thử chỉ gửi terminal
+  if (res.status === 400 && body.stream_key) {
     res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
       method: 'POST',
       headers: getHeaders(token),
@@ -196,7 +208,7 @@ async function sendHeartbeat(token, questId, { streamKey = null, terminal = fals
     });
   }
 
-  // Fallback 2: Nếu vẫn lỗi 400 và chưa có stream_key, thử mô phỏng stream_key
+  // Fallback 3: Nếu vẫn lỗi 400 và không có stream_key, thử mô phỏng stream_key
   if (res.status === 400 && !streamKey) {
     res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
       method: 'POST',
@@ -703,31 +715,29 @@ async function completeSingleQuest(token, quest, options = {}) {
     };
   }
 
-  // Tạo stream_key chuẩn xác dạng call:channelId:userId nếu cần cho Activity hoặc Stream
+  // Tạo stream_key chuẩn xác dạng call:channelId:userId từ danh sách private channels
   let streamKey = null;
-  if (isActivity || tasks.STREAM_ON_DESKTOP) {
-    let channelId = null;
-    let userId = null;
-    try {
-      userId = getUserIdFromToken(token);
-      if (!userId) {
-        const u = await fetchUserInfo(token).catch(() => null);
-        if (u?.id) userId = u.id;
-      }
-    } catch {}
+  let channelId = null;
+  let userId = null;
+  try {
+    userId = getUserIdFromToken(token);
+    if (!userId) {
+      const u = await fetchUserInfo(token).catch(() => null);
+      if (u?.id) userId = u.id;
+    }
+  } catch {}
 
-    try {
-      const dmRes = await requestDiscord('https://discord.com/api/v9/users/@me/channels', {
-        method: 'GET',
-        headers: getHeaders(token),
-      });
-      if (dmRes.ok) {
-        const dms = await dmRes.json();
-        if (Array.isArray(dms) && dms.length > 0) channelId = dms[0].id;
-      }
-    } catch {}
-    if (!channelId) channelId = '1000000000000000000';
-    if (!userId) userId = '1000000000000000000';
+  try {
+    const dmRes = await requestDiscord('https://discord.com/api/v9/users/@me/channels', {
+      method: 'GET',
+      headers: getHeaders(token),
+    });
+    if (dmRes.ok) {
+      const dms = await dmRes.json();
+      if (Array.isArray(dms) && dms.length > 0) channelId = dms[0].id;
+    }
+  } catch {}
+  if (channelId && userId) {
     streamKey = `call:${channelId}:${userId}`;
   }
 
@@ -763,7 +773,7 @@ async function completeSingleQuest(token, quest, options = {}) {
   try {
     while (currentSeconds < targetSeconds && loops < maxLoops) {
       loops++;
-      const hb = await sendHeartbeat(token, questId, { streamKey, terminal: false });
+      const hb = await sendHeartbeat(token, questId, { streamKey, applicationId: appId, terminal: false });
 
       if (hb?.user_status?.completed_at || hb?.completed_at) {
         currentSeconds = targetSeconds;
@@ -774,7 +784,9 @@ async function completeSingleQuest(token, quest, options = {}) {
         hb?.user_status?.progress?.[taskName]?.value ??
         hb?.progress?.[taskName]?.value ??
         hb?.user_status?.stream_progress_seconds ??
-        hb?.stream_progress_seconds;
+        hb?.stream_progress_seconds ??
+        (typeof hb?.progress === 'object' && hb.progress?.[Object.keys(hb.progress)[0]]?.value != null ? hb.progress[Object.keys(hb.progress)[0]].value : null) ??
+        (typeof hb?.user_status?.progress === 'object' && hb.user_status.progress?.[Object.keys(hb.user_status.progress)[0]]?.value != null ? hb.user_status.progress[Object.keys(hb.user_status.progress)[0]].value : null);
 
       if (typeof serverProgress === 'number' && serverProgress > currentSeconds) {
         currentSeconds = serverProgress;
@@ -783,8 +795,8 @@ async function completeSingleQuest(token, quest, options = {}) {
         currentSeconds = Math.min(targetSeconds, currentSeconds + 30);
       } else {
         stalledCount++;
-        if (stalledCount >= 3) {
-          // Discord yêu cầu máy khách desktop thật sự chạy game
+        if (stalledCount >= 5) {
+          // Discord không tăng tiến độ sau 5 lần gửi heartbeat liên tiếp
           break;
         }
       }
