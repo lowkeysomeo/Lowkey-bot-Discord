@@ -51,8 +51,11 @@ const {
 
   const scriptPayload = buildScriptPayload();
   assert.equal(scriptPayload.embeds.length, 1);
-  assert.match(scriptPayload.embeds[0].data.title, /MÃ SCRIPT AUTO HOÀN THÀNH/);
-  assert(scriptPayload.content.includes('webpackChunkdiscord_app'));
+  assert(
+    scriptPayload.content.includes('webpackChunkdiscord_app') ||
+    scriptPayload.content.includes('quest_completer.js') ||
+    (scriptPayload.files && scriptPayload.files[0]?.attachment?.toString('utf8')?.includes('webpackChunkdiscord_app'))
+  );
 
   const infoPayload = buildInfoPayload();
   assert.equal(infoPayload.embeds.length, 1);

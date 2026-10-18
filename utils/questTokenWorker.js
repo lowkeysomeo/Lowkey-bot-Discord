@@ -98,13 +98,27 @@ async function fetchQuests(token) {
   }
 
   const data = await res.json();
-  const allQuests = Array.isArray(data?.quests) ? data.quests : [];
-  const now = Date.now();
-  const activeQuests = allQuests.filter((q) => {
-    if (!q.config?.expires_at) return true;
-    return new Date(q.config.expires_at).getTime() > now;
+  let allQuests = [];
+  if (Array.isArray(data?.quests)) allQuests = allQuests.concat(data.quests);
+  if (Array.isArray(data?.open_quests)) allQuests = allQuests.concat(data.open_quests);
+  if (Array.isArray(data)) allQuests = allQuests.concat(data);
+
+  const seen = new Set();
+  const dedupedQuests = allQuests.filter((q) => {
+    if (!q?.id || seen.has(q.id)) return false;
+    seen.add(q.id);
+    return true;
   });
-  return activeQuests.length > 0 ? activeQuests : allQuests;
+
+  const now = Date.now();
+  const activeQuests = dedupedQuests.filter((q) => {
+    const exp = q.config?.expires_at || q.config?.expiresAt;
+    if (!exp) return true;
+    const expMs = new Date(exp).getTime();
+    if (Number.isNaN(expMs)) return true;
+    return expMs > now;
+  });
+  return activeQuests.length > 0 ? activeQuests : dedupedQuests;
 }
 
 /**
@@ -293,6 +307,9 @@ async function completeSingleQuest(token, quest, options = {}) {
       questId,
       questName,
       alreadyDone: true,
+      completed: true,
+      claimed: false,
+      progressPercent: 100,
       message: 'Nhiệm vụ này đã nhận thưởng trước đó.',
     };
   }
@@ -315,12 +332,32 @@ async function completeSingleQuest(token, quest, options = {}) {
     });
   } catch {}
 
+  // Nếu nhiệm vụ đã hoàn thành tiến độ (có completed_at) nhưng chưa nhận thưởng:
+  if (quest.user_status?.completed_at) {
+    try {
+      const reward = await claimQuestReward(token, questId);
+      return {
+        questId,
+        questName,
+        completed: true,
+        claimed: true,
+        progressPercent: 100,
+        reward,
+        message: 'Nhiệm vụ đã hoàn thành tiến độ! Đã tự động nhận thưởng (Claim ORB) thành công.',
+      };
+    } catch (e) {}
+  }
+
   const tasks = quest.config?.task_config?.tasks || quest.config?.task_config_v2?.tasks || {};
   const isVideo = !!(tasks.WATCH_VIDEO || tasks.WATCH_VIDEO_ON_MOBILE);
 
   // Xử lý nhiệm vụ xem video
   if (isVideo) {
-    return await completeVideoQuest(token, quest, options);
+    const res = await completeVideoQuest(token, quest, options);
+    return {
+      progressPercent: 100,
+      ...res,
+    };
   }
 
   // Xử lý nhiệm vụ Discord Activity hoặc Mini-game (Valorant Aces, v.v.)
@@ -331,6 +368,23 @@ async function completeSingleQuest(token, quest, options = {}) {
     const actAppId = actTaskData.applications?.[0]?.id || quest.config?.application?.id || quest.config?.application_id;
     const targetSeconds = actTaskData.target || 900;
     let currentSeconds = quest.user_status?.progress?.[actTaskName]?.value ?? quest.user_status?.stream_progress_seconds ?? 0;
+    const currentPercent = Math.min(100, Math.round((currentSeconds / targetSeconds) * 100));
+
+    if (currentSeconds >= targetSeconds) {
+      try {
+        const reward = await claimQuestReward(token, questId);
+        return {
+          questId,
+          questName,
+          type: 'activity',
+          completed: true,
+          claimed: true,
+          progressPercent: 100,
+          reward,
+          message: 'Đã hoàn thành 100% Hoạt động & Nhận thưởng thành công!',
+        };
+      } catch (e) {}
+    }
 
     // Tìm DM channel của user để mô phỏng stream_key
     let channelId = null;
@@ -393,20 +447,27 @@ async function completeSingleQuest(token, quest, options = {}) {
       return {
         questId,
         questName,
+        type: 'activity',
         completed: true,
         claimed: true,
+        progressPercent: 100,
         reward,
+        message: 'Hoàn thành 100% Hoạt động & Đã nhận thưởng ORB thành công!',
       };
     } catch (err) {
       console.warn(`[QUEST WORKER] Activity heartbeat failed for ${questName} (${questId}): ${err.message}`);
       return {
         questId,
         questName,
+        type: 'activity',
         enrolled: true,
         completed: false,
         claimed: false,
+        currentSeconds,
+        targetSeconds,
+        progressPercent: currentPercent,
         requiresDesktop: true,
-        message: 'Đã tự động nhận (Accept). Nhiệm vụ Hoạt động yêu cầu mở Discord Desktop hoặc chạy Script F12.',
+        message: `Đã tự động nhận (Accept). Tiến độ: ${currentPercent}%. Hoạt động yêu cầu mở Discord Desktop hoặc chạy Script F12.`,
       };
     }
   }
@@ -430,6 +491,25 @@ async function completeSingleQuest(token, quest, options = {}) {
     quest.user_status?.progress?.[taskName]?.value ??
     quest.user_status?.stream_progress_seconds ??
     0;
+  const currentPercent = Math.min(100, Math.round((currentSeconds / targetSeconds) * 100));
+
+  if (currentSeconds >= targetSeconds) {
+    try {
+      const reward = await claimQuestReward(token, questId);
+      return {
+        questId,
+        questName,
+        type: 'game',
+        completed: true,
+        claimed: true,
+        currentSeconds: targetSeconds,
+        targetSeconds,
+        progressPercent: 100,
+        reward,
+        message: 'Đã hoàn thành 100% thời gian chơi & Nhận thưởng thành công!',
+      };
+    } catch (e) {}
+  }
 
   const heartbeatDelay = options.heartbeatDelayMs ?? 20000;
   const maxLoops = Math.ceil(targetSeconds / 20) + 10;
@@ -479,20 +559,29 @@ async function completeSingleQuest(token, quest, options = {}) {
     return {
       questId,
       questName,
+      type: 'game',
       completed: true,
       claimed: true,
+      currentSeconds: targetSeconds,
+      targetSeconds,
+      progressPercent: 100,
       reward,
+      message: 'Hoàn thành 100% & Đã nhận thưởng ORB thành công!',
     };
   } catch (err) {
     console.warn(`[QUEST WORKER] Game heartbeat failed for ${questName} (${questId}): ${err.message}`);
     return {
       questId,
       questName,
+      type: 'game',
       enrolled: true,
       completed: false,
       claimed: false,
+      currentSeconds,
+      targetSeconds,
+      progressPercent: currentPercent,
       requiresDesktop: true,
-      message: 'Đã tự động nhận (Accept). Nhiệm vụ game PC bảo mật cao yêu cầu mở Discord Desktop hoặc chạy Script F12.',
+      message: `Đã tự động nhận (Accept). Tiến độ hiện tại: ${currentPercent}%. Cần mở Discord Desktop (hoặc chạy script F12) để hoàn tất 15 phút chơi game.`,
     };
   }
 }

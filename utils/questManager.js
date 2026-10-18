@@ -115,10 +115,20 @@ const QUEST_SCRIPT = `(async () => {
 
   console.log("%c[Lowkey Quest]%c Đang tải danh sách nhiệm vụ...", "color: #5865F2; font-weight: bold", "color: #00ffff");
 
-  let allQuests = [...QuestsStore.quests.values()].filter(x => new Date(x.config.expiresAt).getTime() > Date.now() && !x.userStatus?.completedAt);
+  let allQuests = [...QuestsStore.quests.values()].filter(x => new Date(x.config.expiresAt).getTime() > Date.now() && !x.userStatus?.claimedAt);
 
-  // 1. TỰ ĐỘNG NHẬN (AUTO ENROLL) TẤT CẢ QUESTS CHƯA NHẬN
+  // 1. TỰ ĐỘNG NHẬN (AUTO ENROLL) VÀ TỰ ĐỘNG CLAIM CÁC QUESTS ĐÃ XONG TIẾN ĐỘ
   for (let q of allQuests) {
+    if (q.userStatus?.completedAt && !q.userStatus?.claimedAt) {
+      if (api) {
+        try {
+          await api.post({ url: \`/quests/\${q.id}/claim-reward\`, body: { platform: 0 } });
+          console.log(\`%c[NHẬN THƯỞNG THÀNH CÔNG]%c \${q.config.messages.questName || q.config.messages.gameTitle}\`, "color: #57F287; font-weight: bold", "color: #FFFFFF");
+        } catch (e) {}
+      }
+      continue;
+    }
+
     if (!q.userStatus?.enrolledAt) {
       console.log(\`%c[TỰ NHẬN]%c Đang nhận nhiệm vụ: \${q.config.messages.questName || q.config.messages.gameTitle}...\`, "color: #FAA61A; font-weight: bold", "color: #FFFFFF");
       if (api) {
@@ -135,7 +145,7 @@ const QUEST_SCRIPT = `(async () => {
     }
   }
 
-  allQuests = [...QuestsStore.quests.values()].filter(x => new Date(x.config.expiresAt).getTime() > Date.now() && !x.userStatus?.completedAt);
+  allQuests = [...QuestsStore.quests.values()].filter(x => new Date(x.config.expiresAt).getTime() > Date.now() && !x.userStatus?.claimedAt && !x.userStatus?.completedAt);
 
   let videoQuests = [];
   let gameQuests = [];
@@ -1016,14 +1026,61 @@ async function handleButtonInteraction(interaction) {
       });
     }
     const res = await scanUserQuests(sub, interaction.client);
-    if (res.actions?.length > 0) {
+    const actions = res.actions || [];
+
+    if (actions.length > 0) {
+      const completedList = actions.filter((a) => a.completed);
+      const gameList = actions.filter((a) => a.requiresDesktop && !a.completed);
+
+      const scanEmbed = new EmbedBuilder()
+        .setColor(completedList.length > 0 ? 0x57f287 : 0x5865f2)
+        .setTitle(`🔎 KẾT QUẢ QUÉT TỰ ĐỘNG (${actions.length} NHIỆM VỤ ĐƯỢC PHÁT HIỆN)`)
+        .setTimestamp();
+
+      let desc = '';
+      actions.forEach((a, idx) => {
+        let icon = '🎮';
+        if (a.completed) icon = '✅';
+        else if (a.requiresDesktop) icon = '🕹️';
+
+        const pctText = typeof a.progressPercent === 'number' ? ` (Tiến độ: **${a.progressPercent}%**)` : '';
+        desc += `**${idx + 1}. ${a.questName}**${pctText}\n└ ${icon} ${a.message}\n\n`;
+      });
+
+      if (gameList.length > 0) {
+        desc += `💡 **Hướng dẫn làm nhanh Game PC:**\n` +
+          `Do Discord bắt buộc mở ứng dụng Desktop để nhận diện game, bot đã tự động nhận (Accept) nhiệm vụ cho bạn. ` +
+          `Bạn hãy bấm nút **📜 Lấy Script F12 1-Click** bên dưới để hoàn tất 15 phút ngay trên máy tính mà không cần tải game!`;
+      }
+
+      scanEmbed.setDescription(desc.trim());
+
+      const scanRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId('quest:script')
+          .setLabel('Lấy Script F12 1-Click')
+          .setEmoji('📜')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId('quest:auto_scan_now')
+          .setLabel('Quét Lại Ngay')
+          .setEmoji('🔄')
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId('quest:auto')
+          .setLabel('Cài Đặt Tự Động')
+          .setEmoji('⚙️')
+          .setStyle(ButtonStyle.Secondary)
+      );
+
       await interaction.followUp({
-        content: `🎉 Đã quét xong: Tự động xử lý thành công **${res.actions.length}** nhiệm vụ! Hãy kiểm tra tin nhắn riêng (DM).`,
+        embeds: [scanEmbed],
+        components: [scanRow],
         flags: 64,
       });
     } else {
       await interaction.followUp({
-        content: '✅ Đã quét xong: Hiện tại không có nhiệm vụ mới nào trên tài khoản của bạn.',
+        content: '✅ **Đã quét xong:** Hiện tại bạn không có nhiệm vụ Discord nào chưa hoàn thành!',
         flags: 64,
       });
     }

@@ -170,17 +170,30 @@ async function scanUserQuests(subscriber, client) {
 
   const now = Date.now();
   const activeQuests = allQuests.filter((q) => {
-    if (!q.config?.expires_at) return true;
-    return new Date(q.config.expires_at).getTime() > now;
+    const exp = q.config?.expires_at || q.config?.expiresAt;
+    if (!exp) return true;
+    const expMs = new Date(exp).getTime();
+    if (Number.isNaN(expMs)) return true;
+    return expMs > now;
   });
 
-  const pendingQuests = activeQuests.filter((q) => !q.user_status?.completed_at);
+  // Một nhiệm vụ chỉ coi là đã kết thúc hoàn toàn khi đã claim phần thưởng (claimed_at).
+  // Nếu chưa claim (kể cả có completed_at hoặc đang dở 26%), đều phải đưa vào pendingQuests để bot xử lý hoặc claim!
+  const pendingQuests = activeQuests.filter((q) => !q.user_status?.claimed_at);
 
   if (pendingQuests.length === 0) {
     getDb()
       .prepare('UPDATE quest_subscribers SET last_checked_at = ? WHERE user_id = ?')
       .run(now, userId);
-    return { success: true, pendingCount: 0, actions: [] };
+    return {
+      success: true,
+      totalQuests: allQuests.length,
+      pendingCount: 0,
+      completedCount: 0,
+      claimedCount: 0,
+      gamePendingCount: 0,
+      actions: [],
+    };
   }
 
   console.log(`[QUEST SCHEDULER] Phát hiện ${pendingQuests.length} nhiệm vụ mới cho User ${userId}...`);
@@ -200,36 +213,44 @@ async function scanUserQuests(subscriber, client) {
 
     try {
       const res = await completeSingleQuest(token, quest);
+      const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
 
       if (res.completed) {
         actions.push({
           questName,
-          type: isVideo ? 'video' : 'game',
+          type: isVideo ? 'video' : (res.type || 'game'),
           completed: true,
           claimed: true,
-          message: 'Hoàn thành 100% & Đã nhận thưởng ORB',
+          progressPercent: 100,
+          message: res.message || 'Hoàn thành 100% & Đã nhận thưởng ORB',
         });
       } else if (res.alreadyDone) {
         actions.push({
           questName,
-          type: 'game',
+          type: res.type || 'game',
           completed: true,
           claimed: true,
-          message: 'Đã hoàn thành trước đó',
+          progressPercent: 100,
+          message: res.message || 'Đã hoàn thành trước đó',
         });
       } else if (res.requiresDesktop) {
         actions.push({
           questName,
-          type: 'game',
+          type: res.type || 'game',
           enrolled: true,
+          completed: false,
+          claimed: false,
           requiresDesktop: true,
-          message: res.message || 'Cần mở app trên Desktop hoặc script 1-click',
+          progressPercent,
+          message: res.message || `Đã tự động nhận (Tiến độ: ${progressPercent}%). Cần mở Discord Desktop hoặc chạy Script F12.`,
         });
       } else {
         actions.push({
           questName,
-          type: isVideo ? 'video' : 'game',
+          type: isVideo ? 'video' : (res.type || 'game'),
           completed: false,
+          claimed: false,
+          progressPercent,
           message: res.message || 'Không thể tự hoàn thành qua API',
         });
       }
@@ -238,6 +259,7 @@ async function scanUserQuests(subscriber, client) {
         questName,
         type: isVideo ? 'video' : 'game',
         completed: false,
+        claimed: false,
         error: err.message,
       });
     }
@@ -251,35 +273,60 @@ async function scanUserQuests(subscriber, client) {
   if (subscriber.notify_dm && actions.length > 0 && client) {
     const user = await client.users.fetch(userId).catch(() => null);
     if (user) {
+      const completedList = actions.filter((a) => a.completed);
+      const gameList = actions.filter((a) => a.requiresDesktop && !a.completed);
+
       const embed = new EmbedBuilder()
-        .setColor(0x57f287)
-        .setTitle('🔔 [LOWKEY QUEST] PHÁT HIỆN & TỰ ĐỘNG XỬ LÝ NHIỆM VỤ MỚI')
+        .setColor(completedList.length > 0 ? 0x57f287 : 0x5865f2)
+        .setTitle('🔔 [LOWKEY QUEST] BÁO CÁO QUÉT TỰ ĐỘNG DISCORD QUESTS')
         .setDescription(
-          `Hệ thống vừa quét định kỳ tài khoản Discord của bạn và tự động xử lý **${actions.length}** nhiệm vụ:\n\n` +
+          `Hệ thống vừa quét định kỳ tài khoản Discord của bạn và ghi nhận **${actions.length}** nhiệm vụ:\n\n` +
             actions
               .map((a, i) => {
+                const pctText = typeof a.progressPercent === 'number' ? ` (${a.progressPercent}%)` : '';
                 if (a.completed) {
-                  return `**${i + 1}. ${a.questName}** (Video)\n↪ ✅ **${a.message}**!`;
+                  return `**${i + 1}. ${a.questName}**${pctText}\n↪ ✅ **${a.message}**!`;
                 }
                 if (a.requiresDesktop) {
-                  return `**${i + 1}. ${a.questName}** (Game)\n↪ 🎯 **${a.message}** (bấm 1-click ngoài Desktop).`;
+                  return `**${i + 1}. ${a.questName}**${pctText}\n↪ 🕹️ **${a.message}**`;
                 }
                 return `**${i + 1}. ${a.questName}**\n↪ ⚠️ ${a.error || a.message}`;
               })
               .join('\n\n')
         )
-        .addFields({
-          name: '🎁 Phần thưởng',
-          value: 'Điểm ORB và phần quà đã được cộng vào tài khoản. Bạn có thể kiểm tra tại **Cài đặt -> Quests** trên Discord!',
-        })
         .setFooter({ text: 'Lowkey Auto Quest Scheduler • Tự động quét 24/7' })
         .setTimestamp();
+
+      if (completedList.length > 0) {
+        embed.addFields({
+          name: '🎁 Phần thưởng',
+          value: 'Điểm ORB và phần quà của các nhiệm vụ hoàn thành đã được cộng vào tài khoản của bạn!',
+        });
+      }
+      if (gameList.length > 0) {
+        embed.addFields({
+          name: '💡 Hướng dẫn làm nhanh Game PC',
+          value: 'Do Discord bắt buộc mở client Desktop để nhận diện game, bạn có thể gõ `/quest action:script` trong server để lấy mã script F12 1-click hoàn tất 15 phút ngay trên máy tính mà không cần tải game.',
+        });
+      }
 
       user.send({ embeds: [embed] }).catch(() => {});
     }
   }
 
-  return { success: true, pendingCount: pendingQuests.length, actions };
+  const completedCount = actions.filter((a) => a.completed).length;
+  const claimedCount = actions.filter((a) => a.claimed).length;
+  const gamePendingCount = actions.filter((a) => a.requiresDesktop && !a.completed).length;
+
+  return {
+    success: true,
+    totalQuests: allQuests.length,
+    pendingCount: pendingQuests.length,
+    completedCount,
+    claimedCount,
+    gamePendingCount,
+    actions,
+  };
 }
 
 async function scanAll(client = discordClient) {

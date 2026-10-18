@@ -933,8 +933,8 @@ async function buildStatusPayload(userId) {
     }
   }
 
-  const completedQuests = allQuests.filter((q) => q.user_status?.completed_at);
-  const pendingQuests = allQuests.filter((q) => !q.user_status?.completed_at);
+  const completedQuests = allQuests.filter((q) => q.user_status?.claimed_at);
+  const pendingQuests = allQuests.filter((q) => !q.user_status?.claimed_at);
 
   const embed = new EmbedBuilder()
     .setColor(tokenValid ? 0x57f287 : 0xed4245)
@@ -1077,7 +1077,7 @@ async function handleShopInteraction(interaction, client) {
         return interaction.editReply({ content: `❌ Không thể tải danh sách Quest: ${e.message}`, embeds: [], components: [] });
       }
 
-      const pendingQuests = quests.filter((q) => !q.user_status?.completed_at);
+      const pendingQuests = quests.filter((q) => !q.user_status?.claimed_at);
       if (pendingQuests.length === 0) {
         return interaction.editReply({
           content: `ℹ️ Tài khoản **@${username}** hiện không có nhiệm vụ Discord nào chưa hoàn thành! Hãy quay lại khi Discord ra mắt Quest mới nhé.`,
@@ -1198,7 +1198,7 @@ async function handleShopInteraction(interaction, client) {
         return interaction.editReply({ content: `❌ Không thể tải danh sách Quest: ${e.message}` });
       }
 
-      const pendingQuests = quests.filter((q) => !q.user_status?.completed_at);
+      const pendingQuests = quests.filter((q) => !q.user_status?.claimed_at);
       if (pendingQuests.length === 0) {
         return interaction.editReply({
           content: `ℹ️ Tài khoản **@${username}** hiện không có nhiệm vụ Discord nào chưa hoàn thành! Hãy quay lại khi Discord ra mắt Quest mới nhé.`,
