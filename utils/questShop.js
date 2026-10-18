@@ -567,21 +567,14 @@ function buildShopPanelPayload() {
     new ButtonBuilder()
       .setCustomId('qshop:check_status')
       .setLabel('🔍 Kiểm Tra Gói & Tài Khoản')
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  const row2 = new ActionRowBuilder().addComponents(
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId('qshop:token_guide')
       .setLabel('🔑 Hướng Dẫn Lấy Token')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId('qshop:admin_config')
-      .setLabel('⚙️ Cài Đặt Ngân Hàng (Admin)')
       .setStyle(ButtonStyle.Secondary)
   );
 
-  return { embeds: [embed], components: [row1, row2] };
+  return { embeds: [embed], components: [row1] };
 }
 
 /**
