@@ -44,7 +44,15 @@ function fixture() {
   const channel = { id: 'voice' };
   function interaction(guildId = 'one', userId = 'user') {
     return { guildId, user: { id: userId }, guild: { members: { fetch: async () => ({ voice: { channelId: 'voice' } }) } },
-      channel: { send: async payload => events.push(payload.content) } };
+      channel: { send: async payload => {
+        const m = {
+          content: payload.content,
+          deleted: false,
+          delete: async () => { m.deleted = true; events.push(`deleted:${payload.content}`); }
+        };
+        events.push(payload.content);
+        return m;
+      } } };
   }
   return { music, media, events, interaction, channel, block(promise) { blockReady = promise; } };
 }
@@ -75,6 +83,8 @@ async function main() {
   await tick();
   const session = f.music.session('one');
   assert.equal(session.current.title, 'first');
+  assert.ok(session.nowPlayingMsg);
+  assert.equal(session.nowPlayingMsg.deleted, false);
   assert.equal((await f.music.add(f.interaction(), f.channel, 'second')).position, 1);
   await assert.rejects(f.music.add(f.interaction(), { id: 'other' }, 'wrong channel'), /kênh voice khác/);
   await f.music.add(f.interaction('two'), f.channel, 'server two');
@@ -82,6 +92,7 @@ async function main() {
   await tick();
   assert.equal(session.current.title, 'second');
   assert(f.events.includes('closed:first'));
+  assert(f.events.includes('deleted:🎶 Đang phát: **first**'));
   assert.equal(f.music.session('two').current.title, 'server two');
   // Lỗi trả về muộn từ bài đã hủy không được làm bỏ qua bài mới.
   f.music.fail(session, { title: 'first' });
@@ -93,6 +104,7 @@ async function main() {
   assert.equal(f.music.session('one'), undefined);
   f.music.destroy(f.music.session('two'));
   assert(f.events.includes('closed:server two'));
+  assert(f.events.includes('deleted:🎶 Đang phát: **server two**'));
 
   // Đã dừng thì kết quả tìm bài hoặc kết nối đến muộn cũng không được phát lại.
   const g = fixture();

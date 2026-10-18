@@ -89,6 +89,7 @@ class MusicSystem {
       textChannel: interaction.channel,
       timer: null,
       recovering: false,
+      nowPlayingMsg: null,
     };
     this.sessions.set(guildId, session);
     connection.subscribe(player);
@@ -146,9 +147,13 @@ class MusicSystem {
 
   active(session) { return this.sessions.get(session.guildId) === session; }
 
-  async tell(session, content) {
-    if (!this.active(session)) return;
-    await session.textChannel?.send({ content, allowedMentions: { parse: [] } }).catch(() => {});
+  async tell(session, content, autoDeleteMs = 0) {
+    if (!this.active(session)) return null;
+    const msg = await session.textChannel?.send({ content, allowedMentions: { parse: [] } }).catch(() => null);
+    if (msg && autoDeleteMs > 0 && typeof msg.delete === 'function') {
+      setTimeout(() => msg.delete().catch(() => {}), autoDeleteMs);
+    }
+    return msg;
   }
 
   async checkSpotifyPlaylistUpdates(session) {
@@ -170,7 +175,7 @@ class MusicSystem {
           addedCount++;
         }
         if (addedCount > 0) {
-          await this.tell(session, `🔔 Đã tự động cập nhật thêm **${addedCount} bài hát mới** từ playlist Spotify **${session.spotifyPlaylist.name}** vào hàng chờ!`);
+          await this.tell(session, `🔔 Đã tự động cập nhật thêm **${addedCount} bài hát mới** từ playlist Spotify **${session.spotifyPlaylist.name}** vào hàng chờ!`, 8000);
         }
       }
     } catch (err) {
@@ -220,11 +225,18 @@ class MusicSystem {
       session.player.play(resource);
       await this.audio.entersState(session.player, this.audio.AudioPlayerStatus.Playing, 25_000);
       console.log(`[VOICE PLAYING] Started playing: "${label(track)}" (guild: ${session.guildId})`);
-      if (this.active(session) && session.current === track) await this.tell(session, `🎶 Đang phát: **${label(track)}**`);
+      if (this.active(session) && session.current === track) {
+        if (session.nowPlayingMsg && typeof session.nowPlayingMsg.delete === 'function') {
+          session.nowPlayingMsg.delete().catch(() => {});
+          session.nowPlayingMsg = null;
+        }
+        const msg = await this.tell(session, `🎶 Đang phát: **${label(track)}**`, 6000);
+        session.nowPlayingMsg = msg;
+      }
     } catch (error) {
       console.error('[VOICE NEXT ERROR]', error);
       if (session.connection.state.status !== this.audio.VoiceConnectionStatus.Ready && this.active(session)) {
-        await this.tell(session, '❌ Không kết nối được voice. Kiểm tra quyền Kết nối/Nói của bot và thử lại.');
+        await this.tell(session, '❌ Không kết nối được voice. Kiểm tra quyền Kết nối/Nói của bot và thử lại.', 8000);
         this.destroy(session);
       } else this.fail(session, track, error);
     }
@@ -233,11 +245,15 @@ class MusicSystem {
   fail(session, track, error) {
     if (!track || !this.active(session) || session.current !== track) return;
     if (error) console.error(`[TRACK FAILED] ${track.title}:`, error?.message || error);
-    void this.tell(session, `❌ Không phát được **${label(track)}**. ${source.sourceErrorMessage(error)}`);
+    void this.tell(session, `❌ Không phát được **${label(track)}**. ${source.sourceErrorMessage(error)}`, 8000);
     this.skip(session);
   }
 
   skip(session) {
+    if (session.nowPlayingMsg && typeof session.nowPlayingMsg.delete === 'function') {
+      session.nowPlayingMsg.delete().catch(() => {});
+      session.nowPlayingMsg = null;
+    }
     const track = session.current;
     session.current = null;
     track?.audio?.close();
@@ -250,6 +266,10 @@ class MusicSystem {
     this.sessions.delete(session.guildId);
     this.revisions.set(session.guildId, (this.revisions.get(session.guildId) || 0) + 1);
     clearTimeout(session.timer);
+    if (session.nowPlayingMsg && typeof session.nowPlayingMsg.delete === 'function') {
+      session.nowPlayingMsg.delete().catch(() => {});
+      session.nowPlayingMsg = null;
+    }
     session.queue = [];
     session.current?.audio?.close();
     session.current = null;

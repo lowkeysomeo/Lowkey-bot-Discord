@@ -62,6 +62,27 @@ function buildPanelPayload(tracks, guild) {
   return { embeds: [embed], components: [rowMenu, rowButtons] };
 }
 
+async function cleanChannelStatusMessages(channel) {
+  if (!channel || typeof channel.messages?.fetch !== 'function') return;
+  try {
+    const fetched = await channel.messages.fetch({ limit: 20 }).catch(() => null);
+    if (!fetched) return;
+    const botId = channel.client?.user?.id;
+    for (const msg of fetched.values()) {
+      if (msg.author?.id === botId && msg.content) {
+        if (
+          msg.content.includes('Đang chuẩn bị phát') ||
+          msg.content.includes('Đang phát:') ||
+          msg.content.includes('vào hàng chờ phát') ||
+          msg.content.includes('vào hàng chờ (#')
+        ) {
+          msg.delete().catch(() => {});
+        }
+      }
+    }
+  } catch {}
+}
+
 async function checkVoiceConditions(interaction) {
   const member = await interaction.guild.members.fetch(interaction.user.id);
   const channel = member.voice.channel;
@@ -170,7 +191,7 @@ module.exports = {
     // 2. XEM DANH SÁCH BÀI HÁT (LIST)
     // ─────────────────────────────────────────────────────────────
     if (sub === 'list') {
-      await interaction.deferReply();
+      await interaction.deferReply({ flags: 64 });
       const tracks = localMusic.listTracks();
       if (!tracks.length) {
         return interaction.editReply({
@@ -230,6 +251,7 @@ module.exports = {
           });
         }
 
+        void cleanChannelStatusMessages(interaction.channel);
         const payload = buildPanelPayload(tracks, interaction.guild);
         return interaction.reply(payload);
       }
@@ -240,9 +262,11 @@ module.exports = {
         const channel = await checkVoiceConditions(interaction);
         const trackItem = localMusic.findTrack(selectedQuery);
         if (!trackItem) {
-          return interaction.editReply({
+          await interaction.editReply({
             content: `❌ Không tìm thấy bài hát \`${selectedQuery}\` trong kho nhạc. Dùng \`/musiclocal list\` để xem danh sách.`,
           });
+          setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+          return;
         }
 
         const musicTrack = localMusic.toMusicTrack(trackItem);
@@ -251,9 +275,14 @@ module.exports = {
           ? `🎵 Đã thêm **${label(result.track)}** vào hàng chờ (#${result.position}).`
           : `🎵 Đang chuẩn bị phát **${label(result.track)}**…`;
 
-        return interaction.editReply({ content });
+        void cleanChannelStatusMessages(interaction.channel);
+        await interaction.editReply({ content });
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        return;
       } catch (err) {
-        return interaction.editReply({ content: `❌ ${err.message}` });
+        await interaction.editReply({ content: `❌ ${err.message}` });
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        return;
       }
     }
   },
@@ -269,7 +298,9 @@ module.exports = {
         const filename = interaction.values[0];
         const trackItem = localMusic.findTrack(filename);
         if (!trackItem) {
-          return interaction.editReply({ content: '❌ Không tìm thấy bài hát đã chọn.' });
+          await interaction.editReply({ content: '❌ Không tìm thấy bài hát đã chọn.' });
+          setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+          return;
         }
 
         const musicTrack = localMusic.toMusicTrack(trackItem);
@@ -278,9 +309,14 @@ module.exports = {
           ? `🎵 Đã thêm **${label(result.track)}** vào hàng chờ (#${result.position}).`
           : `🎵 Đang chuẩn bị phát **${label(result.track)}**…`;
 
-        return interaction.editReply({ content });
+        void cleanChannelStatusMessages(interaction.channel);
+        await interaction.editReply({ content });
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        return;
       } catch (err) {
-        return interaction.editReply({ content: `❌ ${err.message}` });
+        await interaction.editReply({ content: `❌ ${err.message}` });
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        return;
       }
     }
 
@@ -290,16 +326,23 @@ module.exports = {
         const channel = await checkVoiceConditions(interaction);
         const tracks = localMusic.listTracks();
         if (!tracks.length) {
-          return interaction.editReply({ content: '📂 Kho nhạc hiện tại chưa có bài nào.' });
+          await interaction.editReply({ content: '📂 Kho nhạc hiện tại chưa có bài nào.' });
+          setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+          return;
         }
 
         const musicTracks = tracks.map(t => localMusic.toMusicTrack(t));
         const res = await music.addMultiple(interaction, channel, musicTracks);
-        return interaction.editReply({
+        void cleanChannelStatusMessages(interaction.channel);
+        await interaction.editReply({
           content: `🎶 Đã thêm **${res.addedCount} bài hát** trong kho vào hàng chờ phát! (Tổng trong hàng: ${res.totalInQueue} bài)`,
         });
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        return;
       } catch (err) {
-        return interaction.editReply({ content: `❌ ${err.message}` });
+        await interaction.editReply({ content: `❌ ${err.message}` });
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        return;
       }
     }
 
@@ -309,7 +352,9 @@ module.exports = {
         const channel = await checkVoiceConditions(interaction);
         const tracks = localMusic.listTracks();
         if (!tracks.length) {
-          return interaction.editReply({ content: '📂 Kho nhạc hiện tại chưa có bài nào.' });
+          await interaction.editReply({ content: '📂 Kho nhạc hiện tại chưa có bài nào.' });
+          setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+          return;
         }
 
         // Xáo trộn ngẫu nhiên Fisher-Yates
@@ -321,11 +366,16 @@ module.exports = {
 
         const musicTracks = shuffled.map(t => localMusic.toMusicTrack(t));
         const res = await music.addMultiple(interaction, channel, musicTracks);
-        return interaction.editReply({
+        void cleanChannelStatusMessages(interaction.channel);
+        await interaction.editReply({
           content: `🔀 Đã xáo trộn và thêm **${res.addedCount} bài hát** vào hàng chờ phát!`,
         });
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        return;
       } catch (err) {
-        return interaction.editReply({ content: `❌ ${err.message}` });
+        await interaction.editReply({ content: `❌ ${err.message}` });
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
+        return;
       }
     }
   },

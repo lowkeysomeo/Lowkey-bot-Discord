@@ -44,11 +44,17 @@ function musicCommand(name, description) {
         }
       }
       await interaction.editReply({ content, allowedMentions: { parse: [] } });
+      if (name === 'play') {
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 6000);
+      }
     } catch (error) {
       const known = /^(Nhập|Link|Chỉ hỗ trợ|Không tìm|Bạn |Bot |Hãy |Kênh |Hàng |Chưa |Không có|Bài hát)/.test(error.message);
       if (!known) console.error('[MUSIC] Không tải được nguồn nhạc:', error.code || error.name);
       await interaction.editReply({ content: `❌ ${known ? error.message : sourceErrorMessage(error)}`,
         allowedMentions: { parse: [] } });
+      if (name === 'play') {
+        setTimeout(() => interaction.deleteReply().catch(() => {}), 6000);
+      }
     }
   } };
 }
