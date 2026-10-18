@@ -497,14 +497,56 @@ function buildSavedTokenPayload(userId) {
   if (!sub || !sub.token || sub.token.length < 20) return null;
 
   const maskedToken = sub.token.length > 8 ? `••••••••${sub.token.slice(-4)}` : '••••••••';
+
+  // Trường hợp Token đã hết hạn / không sài được nữa:
+  if (sub.enabled === 0) {
+    const expiredEmbed = new EmbedBuilder()
+      .setColor(0xed4245)
+      .setTitle('⚠️ TOKEN ĐÃ LƯU KHÔNG CÒN SỬ DỤNG ĐƯỢC')
+      .setDescription(
+        `Token đã lưu của bạn (**\`${maskedToken}\`** — \`${sub.username || 'User'}\`) hiện **không thể xác thực** với Discord (lỗi 401 hoặc đã đổi mật khẩu).\n\n` +
+        `👉 **Khi nào cần thêm token:** Bạn chỉ cần thêm token mới khi muốn đổi hoặc khi token cũ không còn dùng được nữa.\n\n` +
+        `Vui lòng bấm **🔄 Đổi Token Mới** bên dưới để cập nhật lại token mới và tiếp tục sử dụng!`
+      )
+      .setFooter({ text: 'Lowkey Auto Quest • Token cũ đã ngắt kết nối' })
+      .setTimestamp();
+
+    const expiredRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('quest:change_token')
+        .setLabel('Đổi Token Mới')
+        .setEmoji('🔄')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('quest:token_guide')
+        .setLabel('Cách Lấy Token')
+        .setEmoji('🔑')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('quest:delete_token')
+        .setLabel('Xóa Token Cũ')
+        .setEmoji('🗑️')
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId('quest:hub')
+        .setLabel('Về Menu Chính')
+        .setEmoji('↩️')
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    return { embeds: [expiredEmbed], components: [expiredRow] };
+  }
+
+  // Trường hợp Token đang hoạt động tốt (được ghi nhớ):
   const embed = new EmbedBuilder()
     .setColor(0x57f287)
-    .setTitle('⚡ TÀI KHOẢN AUTO QUEST ĐÃ LƯU')
+    .setTitle('⚡ TÀI KHOẢN AUTO QUEST ĐÃ GHI NHỚ')
     .setDescription(
-      `Hệ thống đã ghi nhớ Discord User Token của bạn (**\`${maskedToken}\`** — \`${sub.username || 'User'}\`).\n\n` +
-      `• Bấm **▶️ Chạy Ngay (Token Đã Lưu)** để bot cày 100% tự động ngay lập tức mà không cần nhập lại token.\n` +
-      `• Bấm **🔄 Đổi Token Mới** nếu bạn vừa đổi mật khẩu Discord hoặc muốn chuyển tài khoản.\n` +
-      `• Bấm **🗑️ Xóa Token** nếu bạn muốn gỡ tài khoản khỏi hệ thống bot.`
+      `Bot đã ghi nhớ Discord User Token của bạn (**\`${maskedToken}\`** — \`${sub.username || 'User'}\`).\n\n` +
+      `✅ **Bạn không cần nhập lại token mỗi lần làm quest!** Bot sẽ tự động sử dụng token này.\n\n` +
+      `• Bấm **▶️ Chạy Ngay (Token Đã Lưu)** để bot hoàn thành 100% tất cả nhiệm vụ và nhận điểm ORB ngay lập tức.\n` +
+      `• Bấm **🔄 Đổi Token Mới** khi bạn muốn đổi sang tài khoản hoặc token khác.\n` +
+      `• Bấm **🗑️ Xóa Token** nếu bạn muốn gỡ tài khoản khỏi bot.`
     )
     .setFooter({ text: 'Lowkey Auto Quest • Token được bảo mật và mã hóa trên máy chủ' })
     .setTimestamp();
@@ -776,13 +818,22 @@ async function handleButtonInteraction(interaction) {
     try {
       const { getDb } = require('./database');
       getDb().prepare('DELETE FROM quest_subscribers WHERE user_id = ?').run(userId);
+      const { isOwner } = require('./questAuth');
+      if (isOwner(userId)) {
+        const fs = require('node:fs');
+        const path = require('node:path');
+        const tokenPath = path.join(__dirname, '..', 'data', 'saved_quest_token.txt');
+        if (fs.existsSync(tokenPath)) {
+          try { fs.unlinkSync(tokenPath); } catch {}
+        }
+      }
     } catch (e) {}
     const deletedRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('quest:change_token').setLabel('Nhập Token Mới').setEmoji('🔑').setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId('quest:hub').setLabel('Về Menu Chính').setEmoji('↩️').setStyle(ButtonStyle.Secondary)
     );
     return interaction.update({
-      content: '✅ **Đã xóa Token đã lưu của bạn khỏi hệ thống!**\nKhi cần cày quest, bạn có thể bấm nút bên dưới để nhập token mới bất cứ lúc nào.',
+      content: '✅ **Đã xóa Token đã lưu của bạn khỏi hệ thống!**\nKhi cần cày quest hoặc thêm token mới, bạn có thể bấm nút bên dưới bất cứ lúc nào.',
       embeds: [],
       components: [deletedRow],
     });
@@ -794,7 +845,18 @@ async function handleButtonInteraction(interaction) {
     if (!sub || !sub.token || sub.token.length < 20) {
       return interaction.showModal(buildTokenModal());
     }
-    await interaction.deferReply({ flags: 64 });
+    if (sub.enabled === 0) {
+      const saved = buildSavedTokenPayload(userId);
+      if (interaction.message?.flags?.has?.(64)) return interaction.update(saved);
+      return interaction.reply({ flags: 64, ...saved });
+    }
+    if (!interaction.deferred && !interaction.replied) {
+      if (typeof interaction.deferUpdate === 'function') {
+        await interaction.deferUpdate();
+      } else {
+        await interaction.deferReply({ flags: 64 });
+      }
+    }
     const username = interaction.user?.tag || interaction.member?.user?.tag || sub.username || 'User';
     return executeAutoQuestFlow(interaction, sub.token, userId, username);
   }
@@ -1027,7 +1089,25 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
       .setFooter({ text: 'Lowkey Auto Quest • Kiểm tra Kho quà tặng / Shop Discord để xem ORB' })
       .setTimestamp();
 
-    return interaction.editReply({ content: null, embeds: [resultEmbed] });
+    try {
+      const { registerSubscriber } = require('./questScheduler');
+      registerSubscriber(userId, token, report.accountTag || username, 1);
+    } catch (e) {}
+
+    const resultRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('quest:hub')
+        .setLabel('Menu Chính')
+        .setEmoji('🔮')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('quest:change_token')
+        .setLabel('Đổi Token Khác')
+        .setEmoji('🔄')
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    return interaction.editReply({ content: null, embeds: [resultEmbed], components: [resultRow] });
   } catch (err) {
     const isTokenExpired =
       err.message &&
@@ -1047,17 +1127,22 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
         .setDescription(
           `Token Discord của bạn không thể xác thực (lỗi 401 Unauthorized).\n\n` +
           `• **Nguyên nhân:** Có thể bạn vừa đổi mật khẩu Discord, đổi mã bảo mật 2FA hoặc đăng xuất khỏi Discord Web/Desktop.\n` +
-          `• Vui lòng bấm **🔄 Đổi Token Mới** bên dưới để cập nhật lại token mới nhé!`
+          `• **Ghi nhớ Token:** Token cũ đã bị vô hiệu hóa vì không còn dùng được. Vui lòng bấm **🔄 Đổi Token Mới** bên dưới để cập nhật lại token mới nhé!`
         )
-        .setFooter({ text: 'Lowkey Auto Quest • Tự động phát hiện token lỗi' })
+        .setFooter({ text: 'Lowkey Auto Quest • Token cũ đã ngắt kết nối' })
         .setTimestamp();
 
       const changeRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('quest:change_token')
           .setLabel('Đổi Token Mới')
+          .setEmoji('🔄')
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId('quest:token_guide')
+          .setLabel('Cách Lấy Token')
           .setEmoji('🔑')
-          .setStyle(ButtonStyle.Primary),
+          .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId('quest:hub')
           .setLabel('Về Menu Chính')

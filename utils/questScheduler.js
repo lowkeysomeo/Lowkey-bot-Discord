@@ -44,7 +44,20 @@ function getUserIdFromToken(token) {
 
 function getSubscriber(userId) {
   const db = getDb();
-  return db.prepare('SELECT * FROM quest_subscribers WHERE user_id = ?').get(userId);
+  let sub = db.prepare('SELECT * FROM quest_subscribers WHERE user_id = ?').get(userId);
+  if (!sub) {
+    const { isOwner } = require('./questAuth');
+    if (isOwner(userId) && fs.existsSync(TOKEN_CACHE_PATH)) {
+      try {
+        const token = fs.readFileSync(TOKEN_CACHE_PATH, 'utf8').trim();
+        if (token && token.length > 20) {
+          registerSubscriber(userId, token, 'Bot Owner', 1);
+          sub = db.prepare('SELECT * FROM quest_subscribers WHERE user_id = ?').get(userId);
+        }
+      } catch (e) {}
+    }
+  }
+  return sub;
 }
 
 function listSubscribers(onlyEnabled = true) {
@@ -77,6 +90,18 @@ function registerSubscriber(userId, token, username = null, notifyDm = 1, packag
       expires_at = case when excluded.expires_at > 0 then excluded.expires_at else quest_subscribers.expires_at end,
       enabled = 1
   `).run(userId, token.trim(), username, notifyDm ? 1 : 0, packageType, expiresAt, now);
+
+  // Đồng bộ file cache nếu là bot Owner
+  try {
+    const { isOwner } = require('./questAuth');
+    if (isOwner(userId)) {
+      const dir = path.dirname(TOKEN_CACHE_PATH);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(TOKEN_CACHE_PATH, token.trim(), 'utf8');
+    }
+  } catch (e) {
+    console.warn('[QUEST SCHEDULER] Không thể đồng bộ TOKEN_CACHE_PATH:', e.message);
+  }
 }
 
 function toggleSubscriber(userId, enabled = null) {
@@ -102,11 +127,15 @@ function autoEnrollLocalToken() {
     if (fs.existsSync(TOKEN_CACHE_PATH)) {
       const token = fs.readFileSync(TOKEN_CACHE_PATH, 'utf8').trim();
       if (token && token.length > 20) {
-        const userId = getUserIdFromToken(token);
-        if (userId) {
-          registerSubscriber(userId, token, 'Host User', 1);
-          console.log(`[QUEST SCHEDULER] Đã đồng bộ tài khoản máy chủ (ID: ${userId}) vào hệ thống tự động.`);
+        const { OWNER_ID } = require('./questAuth');
+        const tokenUserId = getUserIdFromToken(token);
+        if (tokenUserId) {
+          registerSubscriber(tokenUserId, token, 'Host User', 1);
         }
+        if (OWNER_ID) {
+          registerSubscriber(OWNER_ID, token, 'Bot Owner', 1);
+        }
+        console.log(`[QUEST SCHEDULER] Đã đồng bộ tài khoản máy chủ vào hệ thống tự động.`);
       }
     }
   } catch (err) {
@@ -124,11 +153,14 @@ async function scanUserQuests(subscriber, client) {
   } catch (err) {
     if (err.message && err.message.includes('401')) {
       console.warn(`[QUEST SCHEDULER] Token của User ${userId} đã hết hạn.`);
+      try {
+        getDb().prepare('UPDATE quest_subscribers SET enabled = 0 WHERE user_id = ?').run(userId);
+      } catch (e) {}
       if (subscriber.notify_dm && client) {
         const u = await client.users.fetch(userId).catch(() => null);
         if (u) {
           u.send(
-            '⚠️ **[Lowkey Quest]** Discord User Token của bạn đã hết hạn hoặc mật khẩu đã đổi. Vui lòng vào server gõ `/quest action:token` để cập nhật lại token mới nhé!'
+            '⚠️ **[Lowkey Quest]** Discord User Token của bạn đã hết hạn hoặc bạn vừa đổi mật khẩu Discord. Bot đã tạm ngưng tự động làm quest. Vui lòng vào server gõ `/quest action:token` và bấm **Đổi Token Mới** để cập nhật lại nhé!'
           ).catch(() => {});
         }
       }
@@ -340,8 +372,20 @@ function buildAutoStatusPayload(userId) {
 
   if (!sub) {
     embed.addFields({
-      name: '⚠️ Lưu ý',
-      value: 'Tài khoản của bạn chưa nạp Token vào hệ thống bot. Hãy bấm nút **Nhập Token** bên dưới để kích hoạt tự động!',
+      name: '⚠️ Lưu ý Token',
+      value: 'Tài khoản của bạn chưa nạp Token vào hệ thống bot. Hãy bấm nút **Nhập Token** bên dưới để bot ghi nhớ và tự động làm quest!',
+    });
+  } else if (sub.enabled === 0) {
+    const masked = sub.token?.length > 8 ? `••••••••${sub.token.slice(-4)}` : '••••••••';
+    embed.addFields({
+      name: '⚠️ Token Không Thể Sử Dụng',
+      value: `Token đã lưu (\`${masked}\` — \`${sub.username || 'User'}\`) **đã hết hạn hoặc đổi mật khẩu (401)**.\n👉 Bấm nút **Đổi Token Mới** bên dưới để cập nhật lại!`,
+    });
+  } else {
+    const masked = sub.token?.length > 8 ? `••••••••${sub.token.slice(-4)}` : '••••••••';
+    embed.addFields({
+      name: '🔑 Token Đã Ghi Nhớ',
+      value: `\`${masked}\` (${sub.username || 'User'}) — ✅ **Đang hoạt động tốt**. Bot sẽ tự động dùng token này khi có quest mới mà không cần bạn nhập lại!`,
     });
   }
 
@@ -362,8 +406,8 @@ function buildAutoStatusPayload(userId) {
       .setEmoji('🔔')
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId('quest:modal')
-      .setLabel('Đổi Token')
+      .setCustomId(sub ? 'quest:change_token' : 'quest:modal')
+      .setLabel(sub ? 'Đổi Token Mới' : 'Nhập Token')
       .setEmoji('🔑')
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()

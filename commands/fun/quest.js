@@ -25,7 +25,7 @@ module.exports.data = {
         { name: '🏪 Cửa hàng Mua Bán Auto Quest & Gói Tháng', value: 'shop' },
         { name: '⏰ Đặt lịch Tự động quét & làm Quest mới', value: 'auto' },
         { name: '🔄 Quét tìm nhiệm vụ mới ngay lập tức', value: 'scan' },
-        { name: '🤖 Auto 100% bằng User Token (Mở Modal)', value: 'token' },
+        { name: '🤖 Auto 100% bằng User Token (Đã lưu / Nhập mới)', value: 'token' },
         { name: '🛡️ Quản lý phê duyệt (Dành cho Admin)', value: 'admin' },
         { name: '🔑 Hướng dẫn lấy Discord User Token', value: 'token_guide' },
         { name: '⚡ Lấy Script Auto Hoàn Thành Quest (Console)', value: 'script' },
@@ -77,9 +77,14 @@ module.exports.execute = async (interaction) => {
     }
     const { getSubscriber, scanUserQuests, buildAutoStatusPayload } = require('../../utils/questScheduler');
     const sub = getSubscriber(userId);
-    if (!sub) {
+    if (!sub || !sub.token) {
       return interaction.editReply({
         content: '⚠️ Bạn chưa nạp Token vào hệ thống bot. Hãy dùng lệnh `/quest action:token` để nạp token và kích hoạt nhé!',
+      });
+    }
+    if (sub.enabled === 0) {
+      return interaction.editReply({
+        content: '⚠️ Token đã lưu của bạn đã hết hạn hoặc không dùng được nữa. Hãy dùng lệnh `/quest action:token` và bấm **Đổi Token Mới** để cập nhật lại nhé!',
       });
     }
     const res = await scanUserQuests(sub, interaction.client);
