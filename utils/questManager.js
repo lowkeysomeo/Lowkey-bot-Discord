@@ -264,15 +264,17 @@ function buildScriptPayload() {
     .setColor(0x9b59b6)
     .setTitle('⚡ MÃ SCRIPT AUTO HOÀN THÀNH 100% DISCORD QUESTS')
     .setDescription(
-      'Hỗ trợ **100% tất cả các loại Quest** (Video, Game PC như Roblox Clean Crew, Where Winds Meet, và Hoạt động Discord như Valorant Aces):\n\n' +
-      '📌 **Cách 1: Chạy 1 Dòng Lệnh Nhanh (Khuyên dùng)**\n' +
-      '1. Mở Discord trên máy tính (hoặc Discord Web).\n' +
-      '2. Bấm phím **`Ctrl + Shift + I`** (hoặc `F12`) ➔ Chọn tab **Console**.\n' +
-      '*(Nếu Console báo cấm dán, hãy gõ `allow pasting` rồi bấm Enter)*.\n' +
-      '3. Dán dòng lệnh sau và bấm **Enter**:\n' +
-      '```javascript\nfetch("https://raw.githubusercontent.com/power0matin/discord-quest-auto-completer/main/quest_completer.js").then(r=>r.text()).then(eval);\n```\n' +
-      '📌 **Cách 2: Dùng File Script Đính Kèm Offline**\n' +
-      'Tải file **`auto_quest.js`** đính kèm bên dưới, mở bằng Notepad, copy toàn bộ nội dung dán vào Console rồi Enter.'
+      'Hỗ trợ **100% tất cả các loại Quest** (Video, Game PC như Where Winds Meet, Roblox Clean Crew, và Hoạt động Discord như VALORANT Aces):\n\n' +
+      '📂 **Cách 1: Dán trực tiếp từ file (Khuyên dùng - 100% không bị CSP chặn)**\n' +
+      '1. Tải hoặc mở file **`auto_quest.js`** đính kèm bên dưới tin nhắn này.\n' +
+      '2. Mở file bằng Notepad (hoặc xem trực tiếp), bấm **`Ctrl + A`** rồi **`Ctrl + C`** để sao chép toàn bộ mã.\n' +
+      '3. Mở Discord trên máy tính ➔ Bấm **`Ctrl + Shift + I`** (hoặc `F12`) ➔ Chọn tab **Console**.\n' +
+      '*(Nếu Console có thông báo cấm dán, hãy gõ `allow pasting` rồi bấm Enter)*.\n' +
+      '4. Bấm **`Ctrl + V`** dán toàn bộ mã vào rồi bấm **Enter**.\n\n' +
+      '⚡ **Cách 2: Chạy 1 Dòng Lệnh Nhanh (Localhost)**\n' +
+      'Nếu bạn đang mở Discord trên máy chủ chạy bot:\n' +
+      '```javascript\nfetch("http://127.0.0.1:3000/auto_quest.js").then(r=>r.text()).then(eval);\n```\n' +
+      '⚠️ *Lưu ý: Không dùng lệnh `fetch` từ link github vì Discord Desktop sẽ chặn theo chính sách bảo mật CSP.*'
     )
     .setFooter({ text: 'Lowkey Quest Helper • Hoàn thành 100% tự động & nhận điểm ORB' })
     .setTimestamp();
@@ -298,7 +300,9 @@ function buildScriptPayload() {
   const file = new AttachmentBuilder(Buffer.from(QUEST_SCRIPT, 'utf-8'), { name: 'auto_quest.js' });
 
   return {
-    content: '⚡ **LỆNH CHẠY AUTO QUEST 1 DÒNG (DÁN VÀO CONSOLE F12):**\n```javascript\nfetch("https://raw.githubusercontent.com/power0matin/discord-quest-auto-completer/main/quest_completer.js").then(r=>r.text()).then(eval);\n```',
+    content: '⚡ **HƯỚNG DẪN AUTO QUEST (F12 CONSOLE):**\n' +
+      '👉 Tải/mở file **`auto_quest.js`** đính kèm bên dưới, bấm `Ctrl + A` ➔ `Ctrl + C` để copy mã, sau đó dán trực tiếp vào Console Discord (F12) rồi bấm Enter!\n' +
+      '*(Nếu mở Discord ngay trên máy chủ bot, bạn có thể dán lệnh: `fetch("http://127.0.0.1:3000/auto_quest.js").then(r=>r.text()).then(eval);`)*',
     embeds: [embed],
     components: [row],
     files: [file],
@@ -749,8 +753,8 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
     if (hasDesktopQuests) {
       desc +=
         `\n\n💡 **Cách hoàn thành các nhiệm vụ Game/Activity trong 10 giây (không cần tải game):**\n` +
-        `Mở Discord Desktop/Web ➔ Bấm **\`Ctrl + Shift + I\`** (Console) ➔ Dán lệnh:\n` +
-        `\`\`\`javascript\nfetch("https://raw.githubusercontent.com/power0matin/discord-quest-auto-completer/main/quest_completer.js").then(r=>r.text()).then(eval);\n\`\`\``;
+        `Dùng lệnh \`/quest\` ➔ Bấm **📜 Mã Script Auto F12** để tải file **\`auto_quest.js\`**, copy toàn bộ mã và dán trực tiếp vào Console (\`Ctrl + Shift + I\`) rồi Enter!\n` +
+        `*(Tránh dùng lệnh fetch(...) từ github vì Discord sẽ chặn theo CSP)*.`;
     }
 
     const resultEmbed = new EmbedBuilder()

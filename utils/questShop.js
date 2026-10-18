@@ -497,11 +497,10 @@ async function processPaidOrder(orderId, client) {
           desc +=
             `\n\n💡 **HƯỚNG DẪN HOÀN TẤT TRONG 10 GIÂY KHÔNG CẦN TẢI GAME:**\n` +
             `Bot đã tự động **Accept (Nhận)** các nhiệm vụ game trên tài khoản của bạn. Để hoàn tất mà không cần cài game nặng:\n` +
-            `1. Mở Discord trên máy tính (Web hoặc Discord Desktop app).\n` +
-            `2. Bấm phím **\`Ctrl + Shift + I\`** (hoặc \`F12\`) ➔ Chọn tab **Console**.\n` +
-            `3. Dán dòng lệnh sau và bấm Enter:\n` +
-            `\`\`\`javascript\nfetch("https://raw.githubusercontent.com/power0matin/discord-quest-auto-completer/main/quest_completer.js").then(r=>r.text()).then(eval);\n\`\`\`\n` +
-            `Script sẽ tự động chạy ngầm và claim toàn bộ ORB về tài khoản!`;
+            `1. Dùng lệnh \`/quest\` ➔ Bấm nút **📜 Mã Script Auto F12** để tải file **\`auto_quest.js\`**.\n` +
+            `2. Mở file, copy toàn bộ mã (\`Ctrl + A\`, \`Ctrl + C\`).\n` +
+            `3. Mở Discord Desktop ➔ Bấm **\`Ctrl + Shift + I\`** ➔ Chọn tab **Console** ➔ Dán mã (\`Ctrl + V\`) và bấm Enter!\n` +
+            `Script sẽ tự động cày ngầm và nhận toàn bộ quà ORB về tài khoản!`;
         }
 
         const embed = new EmbedBuilder()

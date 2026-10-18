@@ -115,6 +115,14 @@ function createDashboard(client, options = {}) {
       const url = new URL(req.url, 'http://internal');
       const route = url.pathname;
       if (req.method === 'GET' && route === '/health') return json(res, 200, { ok: true });
+      if (req.method === 'GET' && (route === '/auto_quest.js' || route === '/quest.js')) {
+        const { QUEST_SCRIPT } = require('../utils/questManager');
+        res.writeHead(200, {
+          'Content-Type': 'application/javascript; charset=utf-8',
+          'Access-Control-Allow-Origin': '*',
+        });
+        return res.end(QUEST_SCRIPT);
+      }
       if (req.method === 'GET' && route === '/auth/discord') {
         if (!configured) fail(503, 'Đăng nhập Discord chưa được cấu hình.');
         rateLimit(`login:${req.socket.remoteAddress}`, 30);
