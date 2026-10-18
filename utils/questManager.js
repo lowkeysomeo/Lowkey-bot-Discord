@@ -136,22 +136,27 @@ function buildSavedTokenPayload(userId) {
 function buildTokenGuidePayload() {
   const embed = new EmbedBuilder()
     .setColor(0x00b0f4)
-    .setTitle('🔑 HƯỚNG DẪN LẤY DISCORD USER TOKEN')
+    .setTitle('🔑 HƯỚNG DẪN LẤY DISCORD USER TOKEN (ĐIỆN THOẠI & MÁY TÍNH)')
     .setDescription(
-      'Để hệ thống chạy **tự động 100%** không cần bạn thao tác tay hay mở game, bot cần dùng **User Token** của bạn để gửi yêu cầu hoàn thành nhiệm vụ và nhận thưởng trực tiếp từ Discord:\n\n' +
-        '📌 **Cách lấy User Token trong 10 giây (trên Discord Web hoặc Desktop):**\n' +
+      'Để hệ thống chạy **tự động 100%** không cần bạn thao tác tay hay mở game, bot cần dùng **User Token** của bạn để gửi yêu cầu hoàn thành tiến độ nhiệm vụ trực tiếp lên Discord:\n\n' +
+        '📱 **CÁCH 1: LẤY TOKEN TRÊN ĐIỆN THOẠI (iOS / ANDROID) — 15 GIÂY:**\n' +
+        '1. Mở trình duyệt trên điện thoại (Safari, Chrome, Kiwi Browser, Brave).\n' +
+        '2. Truy cập vào **`https://discord.com/login`** và đăng nhập vào tài khoản Discord của bạn.\n' +
+        '3. Sau khi vào được trang chat Discord trên web, copy đoạn mã sau và dán vào thanh địa chỉ URL trình duyệt:\n' +
+        '```javascript\njavascript:(function(){let t=window.localStorage.token||(webpackChunkdiscord_app.push([[\'\'],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken();prompt("User Token của bạn (Sao chép chuỗi này):",t.replace(/"/g,\'\'))})();\n```\n' +
+        '*(Lưu ý: Nếu trình duyệt tự xóa chữ `javascript:`, bạn chỉ cần gõ lại chữ `javascript:` ở đầu thanh địa chỉ rồi bấm Go/Enter)*.\n' +
+        '4. Hộp thoại hiện ra mã Token ➔ Bấm **Sao chép (Copy)** ➔ Quay lại bot và bấm nút **Nhập Token**!\n\n' +
+        '💻 **CÁCH 2: LẤY TOKEN TRÊN MÁY TÍNH (PC / LAPTOP):**\n' +
         '1. Mở Discord trên trình duyệt (hoặc Discord Desktop có bật DevTools).\n' +
         '2. Bấm phím `F12` hoặc tổ hợp phím `Ctrl + Shift + I` (trên Mac: `Cmd + Option + I`).\n' +
-        '3. Chuyển sang tab **Network** (Mạng).\n' +
-        '4. Gõ chữ `api` hoặc `science` vào ô tìm kiếm (Filter).\n' +
-        '5. Bấm vào bất kỳ một dòng yêu cầu nào trong danh sách ➔ Chọn tab **Headers**.\n' +
-        '6. Kéo xuống mục **Request Headers**, tìm dòng **`Authorization`**.\n' +
-        '7. Sao chép toàn bộ chuỗi ký tự sau chữ `Authorization` (đó chính là User Token của bạn).\n\n' +
+        '3. Chuyển sang tab **Console** ➔ Dán lệnh sau và Enter:\n' +
+        '```javascript\n(webpackChunkdiscord_app.push([[\'\'],{},e=>{m=[];for(let c in e.c)m.push(e.c[c])}]),m).find(m=>m?.exports?.default?.getToken!==void 0).exports.default.getToken()\n```\n' +
+        '4. Sao chép chuỗi Token nằm trong dấu ngoặc kép và dán vào bot.\n\n' +
         '🔒 **Cam kết bảo mật:**\n' +
         '• Khi bạn nhập qua Modal, nội dung chỉ được gửi trực tiếp và xử lý tức thì, không bị hiển thị ra kênh chat.\n' +
-        '• Bot chỉ dùng token để truy vấn danh mục Quest (`/quests/@me`), gửi heartbeat và bấm nhận thưởng (`claim-reward`).'
+        '• Bot chỉ dùng token để truy vấn danh mục Quest (`/quests/@me`), gửi heartbeat tiến độ và gửi thông báo khi hoàn thành 100%.'
     )
-    .setFooter({ text: 'Lowkey Auto Quest • Không bao giờ chia sẻ token cho người lạ' })
+    .setFooter({ text: 'Lowkey Auto Quest • Hỗ trợ hoàn hảo cả Điện thoại & Máy tính' })
     .setTimestamp();
 
   return { embeds: [embed], components: [] };
@@ -169,21 +174,21 @@ function buildMainHubPayload(guildId, userId = null) {
     )
     .addFields(
       {
-        name: '🤖 1. Auto 100% Bằng User Token (Không Cần Nhúng Tay)',
+        name: '🤖 1. Auto 100% Bằng User Token (Hỗ trợ cả Điện thoại & Máy tính)',
         value:
-          'Nhập User Token để bot tự động nhận nhiệm vụ, gửi heartbeat hoàn thành 100% tiến độ và claim toàn bộ phần quà/điểm ORB vào tài khoản của bạn ngay lập tức.',
+          'Nhập User Token để bot tự động chạy ngầm 24/7 trên Cloud. Tự nhận nhiệm vụ, kết nối Gateway giả lập (cả Desktop & Mobile) cày đủ 100% thời gian chơi mà bạn không cần mở máy tính hay treo app.',
         inline: false,
       },
       {
-        name: '⚡ 2. Script Auto Hoàn Thành Quest (Console F12)',
+        name: '⚡ 2. Script Auto Hoàn Thành Quest (Console F12 Máy Tính)',
         value:
           'Lấy đoạn mã JavaScript hook Webpack tự động giả lập chơi game và stream. Hoàn thành 100% nhiệm vụ chỉ sau vài giây ngay trên máy tính mà không cần cài game.',
         inline: false,
       },
       {
-        name: '🎙️ 3. Trợ Lý Treo Voice Stream (15 Phút)',
+        name: '🎙️ 3. Trợ Lý Treo Voice Stream 15 Phút (Hoàn Hảo Cho Điện Thoại)',
         value:
-          'Nếu làm nhiệm vụ stream cho bạn bè: Bot sẽ vào phòng Voice làm **Viewer (Người xem)** cho bạn stream màn hình. Đủ 15 phút bot sẽ nhắc bạn nhận thưởng và tự rời phòng.',
+          'Người dùng điện thoại chỉ cần vào phòng Voice bất kỳ, bấm nút Treo Voice để bot vào làm **Viewer (Người xem)**. Đủ 15 phút bot sẽ nhắc bạn nhận thưởng và tự rời phòng.',
         inline: false,
       },
       {
@@ -742,7 +747,7 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
                   : 'Hoàn thành 100% (Vào Discord bấm Claim)';
                 return `**${i + 1}. ${r.questName}**: ✅ ${state}`;
               } else if (r.requiresDesktop) {
-                return `**${i + 1}. ${r.questName}**: 🎯 Đã tự động nhận (Accept)\n  ↳ *(Nhiệm vụ game PC/Activity cần mở Discord Desktop hoặc chạy Script F12)*`;
+                return `**${i + 1}. ${r.questName}**: 🎯 Đã tự động nhận (Accept)\n  ↳ *(Điện thoại: Dùng \`/quest action:stream\` treo voice 15p | Máy tính: Dán script F12)*`;
               }
               return `**${i + 1}. ${r.questName}**: ⚠️ Chưa xong (${r.error || r.message || 'Thất bại'})`;
             })
@@ -751,9 +756,9 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
 
     if (hasDesktopQuests) {
       desc +=
-        `\n\n💡 **Cách hoàn thành các nhiệm vụ Game/Activity trong 10 giây (không cần tải game):**\n` +
-        `Dùng lệnh \`/quest\` ➔ Bấm **📜 Mã Script Auto F12** để tải file **\`auto_quest.js\`**, copy toàn bộ mã và dán trực tiếp vào Console (\`Ctrl + Shift + I\`) rồi Enter!\n` +
-        `*(Tránh dùng lệnh fetch(...) từ github vì Discord sẽ chặn theo CSP)*.`;
+        `\n\n💡 **Cách hoàn thành các nhiệm vụ Game/Activity (không cần tải game):**\n` +
+        `• **Trên Điện thoại:** Tham gia phòng Voice bất kỳ, gõ lệnh \`/quest action:stream\` để bot vào làm Viewer treo cùng bạn 15 phút.\n` +
+        `• **Trên Máy tính:** Bấm **📜 Mã Script Auto F12** lấy file **\`auto_quest.js\`**, dán vào Console (\`Ctrl + Shift + I\`) rồi Enter!\n`;
     }
 
     const resultEmbed = new EmbedBuilder()

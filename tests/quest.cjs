@@ -486,6 +486,46 @@ setWebSocketImplementation(MockWebSocket);
     const optInRes = await completeSingleQuest('valid_token_xyz', valorantQuest, { autoClaim: true, heartbeatDelayMs: 10 });
     assert.equal(optInRes.completed, true);
     assert.equal(optInRes.claimed, true);
+
+    // 9.4 Kiểm tra nhiệm vụ Mobile (PLAY_ON_MOBILE / WATCH_VIDEO_ON_MOBILE)
+    const mobileGameQuest = {
+      id: 'quest-mobile-game',
+      config: {
+        messages: { quest_name: 'Mobile Legends Quest' },
+        task_config: {
+          tasks: {
+            PLAY_ON_MOBILE: {
+              target: 900,
+              applications: [{ id: '55667788', name: 'Mobile Legends' }],
+            },
+          },
+        },
+      },
+      user_status: { enrolled_at: null, completed_at: null, claimed_at: null },
+    };
+
+    const mobileRes = await completeSingleQuest('valid_token_xyz', mobileGameQuest, { heartbeatDelayMs: 10 });
+    assert.equal(mobileRes.completed, true);
+    assert.equal(mobileRes.type, 'game');
+
+    const mobileVideoQuest = {
+      id: 'quest-mobile-video',
+      config: {
+        messages: { quest_name: 'Watch Mobile Video' },
+        task_config: {
+          tasks: {
+            WATCH_VIDEO_ON_MOBILE: {
+              target: 30,
+            },
+          },
+        },
+      },
+      user_status: { enrolled_at: null, completed_at: null, claimed_at: null },
+    };
+
+    const mobileVidRes = await completeSingleQuest('valid_token_xyz', mobileVideoQuest, { heartbeatDelayMs: 10 });
+    assert.equal(mobileVidRes.completed, true);
+    assert.equal(mobileVidRes.type, 'video');
   } finally {
     setFetchImplementation(null);
   }

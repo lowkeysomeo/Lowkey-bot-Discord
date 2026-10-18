@@ -292,9 +292,12 @@ async function completeVideoQuest(token, quest, options = {}) {
   const maxLoops = Math.ceil(targetSeconds / 5) + 20;
   let loops = 0;
 
+  const isFastTest = options.heartbeatDelayMs != null && options.heartbeatDelayMs < 500;
+  const loopDelay = isFastTest ? options.heartbeatDelayMs : 1000;
+
   while (currentSeconds < targetSeconds && loops < maxLoops) {
     loops++;
-    const maxAllowed = Math.floor((Date.now() - enrolledAt) / 1000) + 10;
+    const maxAllowed = isFastTest ? 999999 : Math.floor((Date.now() - enrolledAt) / 1000) + 10;
     const speed = 7;
     const nextTimestamp = Math.min(targetSeconds, currentSeconds + speed);
 
@@ -315,14 +318,14 @@ async function completeVideoQuest(token, quest, options = {}) {
     }
 
     if (currentSeconds >= targetSeconds) break;
-    await new Promise((r) => setTimeout(r, 1000));
+    await new Promise((r) => setTimeout(r, loopDelay));
   }
 
   let reward = null;
   let claimed = false;
   if (options.autoClaim === true) {
     try {
-      await new Promise((r) => setTimeout(r, 1200));
+      if (!isFastTest) await new Promise((r) => setTimeout(r, 1200));
       reward = await claimQuestReward(token, questId);
       claimed = true;
     } catch (e) {}
@@ -331,6 +334,7 @@ async function completeVideoQuest(token, quest, options = {}) {
   return {
     questId,
     questName,
+    type: 'video',
     completed: true,
     claimed,
     readyToClaim: !claimed,
@@ -342,8 +346,9 @@ async function completeVideoQuest(token, quest, options = {}) {
 }
 
 class DiscordUserGateway {
-  constructor(token) {
+  constructor(token, options = {}) {
     this.token = (token || '').trim().replace(/^['"]|['"]$/g, '');
+    this.device = options.device || 'desktop';
     this.ws = null;
     this.heartbeatTimer = null;
     this.sequence = null;
@@ -395,12 +400,19 @@ class DiscordUserGateway {
             const interval = d?.heartbeat_interval || 41250;
             this.startHeartbeat(interval);
 
-            const identifyPayload = {
-              op: 2,
-              d: {
-                token: this.token,
-                capabilities: 16381,
-                properties: {
+            const isMobileDevice = this.device === 'mobile';
+            const properties = isMobileDevice
+              ? {
+                  os: 'Android',
+                  browser: 'Discord Android',
+                  device: 'Discord Mobile',
+                  release_channel: 'googleRelease',
+                  client_version: '215.15 - stable',
+                  os_version: '33',
+                  os_arch: 'arm64',
+                  system_locale: 'vi-VN',
+                }
+              : {
                   os: 'Windows',
                   browser: 'Discord Client',
                   release_channel: 'stable',
@@ -408,7 +420,14 @@ class DiscordUserGateway {
                   os_version: '10.0.19045',
                   os_arch: 'x64',
                   system_locale: 'en-US',
-                },
+                };
+
+            const identifyPayload = {
+              op: 2,
+              d: {
+                token: this.token,
+                capabilities: 16381,
+                properties,
                 presence: {
                   status: 'online',
                   since: 0,
@@ -649,9 +668,10 @@ async function completeSingleQuest(token, quest, options = {}) {
   }
 
   const isActivity = !!(tasks.PLAY_ACTIVITY || tasks.ACHIEVEMENT_IN_ACTIVITY || tasks.ACHIEVEMENT_IN_GAME);
+  const isMobileTask = !!(tasks.PLAY_ON_MOBILE || tasks.WATCH_VIDEO_ON_MOBILE);
   const taskName = isActivity
     ? (['PLAY_ACTIVITY', 'ACHIEVEMENT_IN_ACTIVITY', 'ACHIEVEMENT_IN_GAME'].find((k) => tasks[k] != null) || Object.keys(tasks)[0])
-    : (['PLAY_ON_DESKTOP', 'STREAM_ON_DESKTOP', 'PLAY_ON_PLAYSTATION', 'PLAY_ON_XBOX'].find((k) => tasks[k] != null) || Object.keys(tasks)[0]);
+    : (['PLAY_ON_DESKTOP', 'STREAM_ON_DESKTOP', 'PLAY_ON_MOBILE', 'PLAY_ON_PLAYSTATION', 'PLAY_ON_XBOX'].find((k) => tasks[k] != null) || Object.keys(tasks)[0]);
 
   const { appId, appName } = getQuestApplicationInfo(quest);
   const targetSeconds = getQuestTargetSeconds(quest, taskName);
@@ -716,7 +736,8 @@ async function completeSingleQuest(token, quest, options = {}) {
   const isFastTestMode = typeof options.heartbeatDelayMs === 'number' && options.heartbeatDelayMs < 500;
   if (!isFastTestMode && (appId || !isActivity)) {
     try {
-      gateway = new DiscordUserGateway(token);
+      const device = isMobileTask ? 'mobile' : (options.device || 'desktop');
+      gateway = new DiscordUserGateway(token, { device });
       await gateway.connect({
         name: appName,
         type: 0,
@@ -829,7 +850,7 @@ async function completeSingleQuest(token, quest, options = {}) {
       targetSeconds,
       progressPercent: currentPercent,
       requiresDesktop: true,
-      message: `Tiến độ: ${currentPercent}%. Cần mở Discord Desktop (hoặc chạy Script F12 1-click) để hoàn tất.`,
+      message: `Tiến độ: ${currentPercent}%. Hoàn tất: Gõ /quest action:stream (treo voice 15p trên Điện thoại) hoặc dán Script F12 (trên Máy tính).`,
     };
   } catch (err) {
     console.warn(`[QUEST WORKER] Heartbeat error for ${questName} (${questId}): ${err.message}`);

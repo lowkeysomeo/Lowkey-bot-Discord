@@ -497,12 +497,10 @@ async function processPaidOrder(orderId, client) {
           desc += `\n\n🎁 **Nhiệm vụ đã hoàn thành 100%!** Vui lòng mở **Cài đặt -> Quests** trên Discord để tự bấm **Claim** nhận thưởng (Discord yêu cầu xác thực con người khi nhận quà).`;
         } else if (desktopCount > 0) {
           desc +=
-            `\n\n💡 **HƯỚNG DẪN HOÀN TẤT TRONG 10 GIÂY KHÔNG CẦN TẢI GAME:**\n` +
-            `Bot đã tự động **Accept (Nhận)** các nhiệm vụ game trên tài khoản của bạn. Để hoàn tất mà không cần cài game nặng:\n` +
-            `1. Dùng lệnh \`/quest\` ➔ Bấm nút **📜 Mã Script Auto F12** để tải file **\`auto_quest.js\`**.\n` +
-            `2. Mở file, copy toàn bộ mã (\`Ctrl + A\`, \`Ctrl + C\`).\n` +
-            `3. Mở Discord Desktop ➔ Bấm **\`Ctrl + Shift + I\`** ➔ Chọn tab **Console** ➔ Dán mã (\`Ctrl + V\`) và bấm Enter!\n` +
-            `Script sẽ tự động cày ngầm và nhận toàn bộ quà ORB về tài khoản!`;
+            `\n\n💡 **HƯỚNG DẪN HOÀN TẤT (KHÔNG CẦN TẢI GAME):**\n` +
+            `Bot đã tự động **Accept (Nhận)** các nhiệm vụ game trên tài khoản của bạn:\n` +
+            `• **Trên Điện thoại:** Tham gia phòng Voice bất kỳ, gõ lệnh \`/quest action:stream\` để bot vào làm Viewer treo cùng bạn 15 phút.\n` +
+            `• **Trên Máy tính:** Bấm nút **📜 Mã Script Auto F12** lấy file **\`auto_quest.js\`**, dán vào Console (\`Ctrl + Shift + I\`) rồi Enter!\n`;
         }
 
         const embed = new EmbedBuilder()
