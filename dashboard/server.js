@@ -542,6 +542,7 @@ function createDashboard(client, options = {}) {
           if(!input||typeof input!=='object'||Array.isArray(input))fail(400,'Dữ liệu không hợp lệ.');
           if(input.action==='create')return json(res,200,await rr.create(guild,input));
           if(input.action==='disable'&&typeof input.id==='string')return json(res,200,await rr.disable(guild,input.id));
+          if(input.action==='cleanup')return json(res,200,await rr.cleanupDuplicates(guild,input.id||null));
           fail(400,'Thao tác không hợp lệ.');
         }
         if (match[2] === 'confession-panel') {

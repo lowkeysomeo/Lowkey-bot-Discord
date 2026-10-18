@@ -86,11 +86,122 @@ async function refreshTimedPanels(client,now=Date.now()){
   });
  }
 }
+async function cleanupDuplicates(guild, panelId = null) {
+ return serial(`cleanup:${guild.id}`, async () => {
+  let rows;
+  if (panelId) {
+   rows = db().prepare('SELECT * FROM reaction_role_panels WHERE id=? AND guild_id=?').all(panelId, guild.id);
+   if (!rows.length) fail('Không tìm thấy bảng trong server này.');
+  } else {
+   rows = db().prepare('SELECT * FROM reaction_role_panels WHERE guild_id=? AND active=1 AND single_choice!=0').all(guild.id);
+  }
+  if (!rows.length) return { success: true, panelsCount: 0, cleanedCount: 0, dmsSent: 0, cleanedUsers: [] };
+
+  let members;
+  try {
+   const fetched = await guild.members.fetch();
+   if (fetched instanceof Map || (fetched && typeof fetched.values === 'function')) {
+    members = fetched;
+   } else if (fetched) {
+    members = new Map([[fetched.id || 'user', fetched]]);
+   } else {
+    members = guild.members.cache;
+   }
+  } catch {
+   members = guild.members.cache;
+  }
+
+  let totalCleaned = 0;
+  let dmsSent = 0;
+  const cleanedUsers = [];
+
+  for (const row of rows) {
+   const choices = typeof row.choices === 'string' ? JSON.parse(row.choices) : row.choices;
+   if (!Array.isArray(choices) || choices.length < 2) continue;
+
+   const memberList = (members && typeof members.values === 'function')
+    ? [...members.values()]
+    : (Array.isArray(members) ? members : []);
+
+   for (const member of memberList) {
+    if (!member || member.user?.bot) continue;
+
+    const owned = choices.filter(c => member.roles?.cache?.has(c.roleId));
+    if (owned.length >= 2) {
+     for (const c of owned) {
+      try {
+       await member.roles.remove(c.roleId, `Gỡ do pick trùng nhiều hơn 1 role (${row.title})`);
+      } catch (err) {
+       console.warn(`[REACTION ROLE CLEANUP] Không thể gỡ role ${c.roleId} của member ${member.id}: ${err.message}`);
+      }
+     }
+
+     const labels = owned.map(c => `**${c.label}**`).join(', ');
+     const messageUrl = row.message_id ? `https://discord.com/channels/${guild.id}/${row.channel_id}/${row.message_id}` : null;
+     const linkNotice = messageUrl ? `\n👉 Bấm vào đây để chọn lại miền của bạn: ${messageUrl}` : '';
+     const dmText = `Xin chào **${member.user?.displayName || member.user?.username || 'bạn'}**,\n\nHệ thống nhận thấy bạn đang chọn **${owned.length} role** trong bảng **${row.title}** (${labels}).\nTheo quy định của server, mỗi thành viên **chỉ được chọn 1 role** (ví dụ: chỉ chọn 1 trong 3 miền Bắc, Trung hoặc Nam).\n\nBot đã tự động gỡ các role này. Bạn vui lòng vào lại kênh để chọn đúng 1 role duy nhất nhé!${linkNotice}\n\n*VietNam Legacy trân trọng.*`;
+
+     let sent = false;
+     if (typeof member.send === 'function') {
+      try {
+       await member.send({ content: dmText, allowedMentions: { parse: [] } });
+       sent = true;
+       dmsSent++;
+      } catch {}
+     }
+
+     totalCleaned++;
+     cleanedUsers.push({
+      userId: member.id,
+      tag: member.user?.tag || member.user?.username || member.id,
+      panelTitle: row.title,
+      roles: owned.map(c => c.label),
+      dmSent: sent,
+     });
+
+     if (process.env.DB_PATH !== ':memory:') {
+      await new Promise(r => setTimeout(r, 200));
+     }
+    }
+   }
+  }
+
+  return {
+   success: true,
+   panelsCount: rows.length,
+   cleanedCount: totalCleaned,
+   dmsSent,
+   cleanedUsers,
+  };
+ });
+}
+
 function start(client){
  if(refreshTimers.has(client))return;
  // Đồng bộ ngay khi khởi động để xử lý cả trường hợp bot tắt qua giao thừa.
  const refresh=()=>refreshTimedPanels(client).catch(error=>console.error('[REACTION ROLE]',error.message));
  void refresh();
  const timer=setInterval(refresh,60_000);timer.unref?.();refreshTimers.set(client,timer);
+
+ const autoCleanup = async () => {
+  for (const guild of client.guilds.cache.values()) {
+   try {
+    const res = await cleanupDuplicates(guild);
+    if (res.cleanedCount > 0) {
+     console.log(`[REACTION ROLE] Tự động lọc thành công: Đã gỡ role của ${res.cleanedCount} thành viên pick trùng trong guild "${guild.name}" (${guild.id}).`);
+    }
+   } catch (err) {
+    console.warn(`[REACTION ROLE] Lỗi auto-cleanup cho guild ${guild.id}: ${err.message}`);
+   }
+  }
+ };
+
+ if (process.env.DB_PATH !== ':memory:') {
+  setTimeout(() => {
+   void autoCleanup();
+   const cleanupTimer = setInterval(autoCleanup, 30 * 60_000);
+   cleanupTimer.unref?.();
+  }, 10_000);
+ }
 }
-module.exports={create,list,disable,handleButton,payload,checkedRole,start,refreshTimedPanels};
+module.exports={create,list,disable,handleButton,payload,checkedRole,start,refreshTimedPanels,cleanupDuplicates};

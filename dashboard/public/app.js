@@ -99,6 +99,7 @@ function render() {
   if(rrAdd)rrAdd.onclick=()=>{const list=document.querySelector('#rr-choices');if(list.children.length>=10)return notify('Tối đa 10 role mỗi bảng.');list.insertAdjacentHTML('beforeend',rrChoice());state.dirty=true;};
   if(rrForm)rrForm.addEventListener('click',event=>{const remove=event.target.closest('[data-rr-remove]');if(remove){remove.closest('[data-rr-choice]').remove();state.dirty=true;}});
   document.querySelectorAll('[data-rr-disable]').forEach(b=>{b.onclick=()=>rrDisable(b.dataset.rrDisable);});
+  document.querySelectorAll('[data-rr-cleanup]').forEach(b=>{b.onclick=()=>rrCleanup(b.dataset.rrCleanup);});
   const giveawayForm = document.querySelector('#giveaway-form');
   if (giveawayForm) {
     giveawayForm.onsubmit = event => { event.preventDefault(); giveawaySubmit('create'); };
@@ -578,7 +579,7 @@ function rrPage(){
  '<div class="field full"><label for="rr-description">Lời giới thiệu</label><textarea id="rr-description" name="description" maxlength="2000" required>Chọn những điều bạn quan tâm để kết nối cùng mọi người. Bấm nút bên dưới để nhận role, bấm lại nếu muốn bỏ nhé!</textarea></div><div class="field full"><label><input type="checkbox" id="rr-single-choice" checked> <strong>Chỉ cho phép chọn 1 role trong bảng</strong> (nếu chọn role khác, member phải bỏ role cũ trước)</label></div></div>'+
  '<div id="rr-choices">'+rrChoice()+'</div><button type="button" class="secondary" id="rr-add">+ Thêm role</button>')+
  '<div class="note">Bot cần Manage Roles và role của bot phải nằm trên các role tự nhận. Role này được member tự do nhận/bỏ, nên dùng role riêng với role thưởng level và top tháng.</div><div class="savebar"><span>Tối đa 10 role/bảng · 20 bảng đang hoạt động.</span><button class="primary" type="submit">Đăng bảng nhận role</button></div><div id="rr-result"></div></form>'+
- panel('Các bảng đã đăng','Đóng bảng sẽ ngừng nhận/bỏ role qua bảng đó; giữ nguyên role đã cấp.',rows===undefined?'<p>Đang tải danh sách…</p>':!rows.length?'<p>Chưa có bảng nhận role.</p>':rows.map(r=>'<article class="giveaway-item"><div><h3>'+h(r.title)+'</h3><p>'+h(r.active?'Đang hoạt động':'Đã đóng')+' · '+r.choices.length+' role</p><small>ID: '+h(r.id)+'</small></div><div class="giveaway-actions">'+(r.messageUrl?'<a class="secondary" target="_blank" rel="noopener noreferrer" href="'+h(r.messageUrl)+'">Xem bảng ↗</a>':'')+(r.active?'<button class="secondary" data-rr-disable="'+h(r.id)+'">Đóng bảng</button>':'')+'</div></article>').join(''));
+  panel('Các bảng đã đăng','Đóng bảng sẽ ngừng nhận/bỏ role qua bảng đó; giữ nguyên role đã cấp.',rows===undefined?'<p>Đang tải danh sách…</p>':!rows.length?'<p>Chưa có bảng nhận role.</p>':rows.map(r=>'<article class="giveaway-item"><div><h3>'+h(r.title)+'</h3><p>'+h(r.active?'Đang hoạt động':'Đã đóng')+' · '+r.choices.length+' role'+(r.single_choice?' · <em>Chỉ 1 role</em>':'')+'</p><small>ID: '+h(r.id)+'</small></div><div class="giveaway-actions">'+(r.messageUrl?'<a class="secondary" target="_blank" rel="noopener noreferrer" href="'+h(r.messageUrl)+'">Xem bảng ↗</a>':'')+(r.active&&r.single_choice?'<button class="secondary" data-rr-cleanup="'+h(r.id)+'" title="Lọc và xóa role của người pick từ 2 role trở lên, gửi DM">🧹 Quét trùng</button>':'')+(r.active?'<button class="secondary" data-rr-disable="'+h(r.id)+'">Đóng bảng</button>':'')+'</div></article>').join(''));
 }
 async function rrSubmit(event){
  event.preventDefault();if(state.saving)return;
@@ -596,6 +597,14 @@ async function rrDisable(id){
  state.saving=true;const guildId=state.guild.id,requestId=state.requestId;
  try{const result=await api(`/api/guilds/${guildId}/reaction-roles`,{action:'disable',id});notify(result.warning||'Đã đóng bảng.');const rows=await api(`/api/guilds/${guildId}/reaction-roles`);if(state.requestId===requestId){state.data.reactionroles=rows;render();}}
  catch(e){notify(e.message);}finally{state.saving=false;}
+}
+async function rrCleanup(id){
+ if(state.saving||!canLeave()||!confirm('Quét và xóa role của những thành viên đã nhận từ 2 role trở lên trong bảng này? Bot sẽ gửi tin nhắn DM cho họ để pick lại.'))return;
+ state.saving=true;const guildId=state.guild.id;
+ try{
+  const result=await api(`/api/guilds/${guildId}/reaction-roles`,{action:'cleanup',id});
+  notify(`Đã quét xong: Đã gỡ role của ${result.cleanedCount||0} thành viên và gửi ${result.dmsSent||0} tin nhắn DM.`);
+ }catch(e){notify(e.message);}finally{state.saving=false;}
 }
 const DEFAULT_TICKET_OPTIONS = [
   {
