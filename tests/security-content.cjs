@@ -107,5 +107,52 @@ const after25h = make(u3, '<@555555555555555555> <@555555555555555555> <@5555555
 assert.equal(await security.message(after25h), true);
 assert.equal(lastTimeoutMs, 600000, 'Sau 24 giờ vi phạm mới được tính lại mức ban đầu 10 phút');
 
-console.log('PASS security-content: invite, ad web, ngoại lệ, chỉnh sửa, đếm spam, lặp nhiều kênh, tag 3 lần/1 tin, tag liên tục 2m và tái phạm 24h.');
+// Kiểm tra bỏ qua lượt tag phát sinh từ Reply tin nhắn
+saveOptions(gid, {
+  securityEnabled: true,
+  securitySpam: true,
+  securityMentionEnabled: true,
+  securityMentionLimit: 5,
+  securityChatChannels: 'none',
+  securityTimeoutMinutes: 10
+});
+
+// Tin nhắn Reply chứa 1 người được reply + 4 bạn bè (tổng 5 người trong mentions.users) -> KHÔNG bị phạt vì người được reply bị trừ ra (còn 4 < 5)
+const replyUsersMap = new Map([
+  ['replied-user-id', { id: 'replied-user-id' }],
+  ['friend-1', { id: 'friend-1' }],
+  ['friend-2', { id: 'friend-2' }],
+  ['friend-3', { id: 'friend-3' }],
+  ['friend-4', { id: 'friend-4' }]
+]);
+const replyMsg = {
+  ...make('reply-author', 'Ê rủ thêm mấy bạn vào chơi', '111111111111111111', baseTime + 30 * 3600 * 1000),
+  mentions: {
+    users: replyUsersMap,
+    roles: new Map(),
+    repliedUser: { id: 'replied-user-id' }
+  },
+  reference: { messageId: 'orig-msg-123' }
+};
+assert.equal(await security.message(replyMsg), false, 'Tin nhắn reply không được tính lượt tag của người được reply');
+
+// Tin nhắn KHÔNG PHẢI reply có 5 người trong mentions.users -> BỊ PHẠT vì đủ 5 người (mass mention)
+const direct5UsersMap = new Map([
+  ['user-a', { id: 'user-a' }],
+  ['user-b', { id: 'user-b' }],
+  ['user-c', { id: 'user-c' }],
+  ['user-d', { id: 'user-d' }],
+  ['user-e', { id: 'user-e' }]
+]);
+const direct5Msg = {
+  ...make('direct-author', 'Tag 5 bạn trực tiếp', '111111111111111111', baseTime + 31 * 3600 * 1000),
+  mentions: {
+    users: direct5UsersMap,
+    roles: new Map(),
+    repliedUser: null
+  }
+};
+assert.equal(await security.message(direct5Msg), true, 'Tag 5 người trực tiếp không phải reply phải bị phạt');
+
+console.log('PASS security-content: invite, ad web, ngoại lệ, chỉnh sửa, đếm spam, lặp nhiều kênh, tag 3 lần/1 tin, tag liên tục 2m, tái phạm 24h và bỏ qua reply mention.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

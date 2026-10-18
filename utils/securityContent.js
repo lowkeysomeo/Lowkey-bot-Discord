@@ -152,7 +152,17 @@ async function inspect(msg, tools) {
   }
 
   if (!violation && !exempt(msg, o.securityChatChannels, o.securityChatRoles)) {
-    const userMentions = extractUserMentions(msg.content);
+    // Xác định ID người được reply nếu tin nhắn là một reply
+    const repliedUserId = msg.mentions?.repliedUser?.id
+      || (msg.reference?.messageId && msg.channel?.messages?.cache?.get(msg.reference.messageId)?.author?.id)
+      || null;
+
+    let userMentions = extractUserMentions(msg.content);
+    // Bỏ qua lượt tag phát sinh từ Reply tin nhắn
+    if (repliedUserId) {
+      userMentions = userMentions.filter(id => id !== repliedUserId);
+    }
+
     const maxSingle = getMaxSingleUserMentions(userMentions);
     const continuousLimit = Number(o.securityContinuousMentionLimit) || 10;
     const isContinuous = (o.securitySpam && o.securityMentionEnabled && userMentions.length > 0)
@@ -168,7 +178,22 @@ async function inspect(msg, tools) {
       }
     }
 
-    const mentions = (msg.mentions?.users?.size || 0) + (msg.mentions?.roles?.size || 0);
+    // Đếm số lượng mention trực tiếp (loại trừ lượt tag tự động do Reply)
+    let directUsersCount = 0;
+    if (msg.mentions?.users) {
+      const userEntries = msg.mentions.users instanceof Map
+        ? [...msg.mentions.users.keys()]
+        : (Array.isArray(msg.mentions.users)
+          ? msg.mentions.users.map(u => (typeof u === 'string' ? u : u.id))
+          : (typeof msg.mentions.users.keys === 'function' ? [...msg.mentions.users.keys()] : []));
+
+      for (const uid of userEntries) {
+        if (repliedUserId && uid === repliedUserId) continue;
+        directUsersCount++;
+      }
+    }
+
+    const mentions = directUsersCount + (msg.mentions?.roles?.size || 0);
     const mass = o.securitySpam && o.securityMentionEnabled && (mentions >= o.securityMentionLimit || msg.mentions?.everyone);
     const burst = !tools.edited && o.securitySpam && tools.hit('spam:' + msg.guild.id + ':' + msg.author.id, o.securitySpamWindow, o.securitySpamLimit, now);
     const normalized = normalize(msg.content).toLowerCase().replace(/\s+/g, ' ').trim();
