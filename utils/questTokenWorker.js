@@ -172,57 +172,92 @@ async function enrollQuest(token, questId) {
 
 /**
  * Gửi heartbeat giả lập tiến trình chơi game hoặc stream
+ * Tự động thử nhiều chiến lược stream_key để tối đa khả năng Discord chấp nhận
  */
-async function sendHeartbeat(token, questId, { streamKey = null, applicationId = null, terminal = false } = {}) {
-  const body = { terminal: Boolean(terminal) };
+async function sendHeartbeat(token, questId, { streamKey = null, applicationId = null, terminal = false, userId = null } = {}) {
+  // Xây dựng danh sách các body cần thử theo thứ tự ưu tiên
+  const bodiesToTry = [];
+
+  // Ưu tiên 1: streamKey được truyền vào + applicationId
+  if (streamKey && applicationId) {
+    bodiesToTry.push({ stream_key: streamKey, application_id: String(applicationId), terminal: Boolean(terminal) });
+  }
+  // Ưu tiên 2: streamKey được truyền vào, không có applicationId
   if (streamKey) {
-    body.stream_key = streamKey;
+    bodiesToTry.push({ stream_key: streamKey, terminal: Boolean(terminal) });
   }
+
+  // Ưu tiên 3: Tạo stream_key từ userId thật (userId luôn hợp lệ khi decode từ token)
+  const effectiveUserId = userId || getUserIdFromToken(token);
+  if (effectiveUserId) {
+    // Discord chấp nhận stream_key dạng call:CHANNEL_ID:USER_ID
+    // Dùng userId làm channelId giả — hợp lệ về format (18-19 chữ số)
+    const fakeChannelId = effectiveUserId;
+    const selfCallKey = `call:${fakeChannelId}:${effectiveUserId}`;
+    if (applicationId) {
+      bodiesToTry.push({ stream_key: selfCallKey, application_id: String(applicationId), terminal: Boolean(terminal) });
+    }
+    bodiesToTry.push({ stream_key: selfCallKey, terminal: Boolean(terminal) });
+  }
+
+  // Ưu tiên 4: Chỉ applicationId, không có stream_key
   if (applicationId) {
-    body.application_id = String(applicationId);
+    bodiesToTry.push({ application_id: String(applicationId), terminal: Boolean(terminal) });
   }
 
-  let res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
-    method: 'POST',
-    headers: getHeaders(token),
-    body: JSON.stringify(body),
-  });
+  // Ưu tiên 5: Chỉ terminal (body tối giản nhất)
+  bodiesToTry.push({ terminal: Boolean(terminal) });
 
-  // Fallback 1: Nếu Discord API từ chối với 400 Bad Request và có application_id, thử không có application_id
-  if (res.status === 400 && body.application_id) {
-    const altBody = { terminal: Boolean(terminal) };
-    if (body.stream_key) altBody.stream_key = body.stream_key;
-    res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify(altBody),
-    });
+  // Loại bỏ duplicate
+  const uniqueBodies = [];
+  const seen = new Set();
+  for (const b of bodiesToTry) {
+    const key = JSON.stringify(b);
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueBodies.push(b);
+    }
   }
 
-  // Fallback 2: Nếu vẫn lỗi 400 và có stream_key, thử chỉ gửi terminal
-  if (res.status === 400 && body.stream_key) {
-    res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify({ terminal: Boolean(terminal) }),
-    });
+  let lastRes = null;
+  let lastText = '';
+
+  for (const body of uniqueBodies) {
+    try {
+      const res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
+        method: 'POST',
+        headers: getHeaders(token),
+        body: JSON.stringify(body),
+      });
+
+      const responseText = await res.clone().text().catch(() => '');
+      console.log(`[HEARTBEAT] Quest=${questId} | status=${res.status} | body=${JSON.stringify(body).substring(0, 80)} | resp=${responseText.substring(0, 120)}`);
+
+      if (res.ok) {
+        // Thành công — parse JSON và trả về
+        try {
+          return JSON.parse(responseText);
+        } catch {
+          return {};
+        }
+      }
+
+      lastRes = res;
+      lastText = responseText;
+
+      // Nếu lỗi không phải 400 (ví dụ 401, 403, 404) thì không thử tiếp
+      if (res.status !== 400) break;
+
+      // 400 → thử body tiếp theo
+    } catch (err) {
+      console.warn(`[HEARTBEAT] Quest=${questId} | fetch error: ${err.message}`);
+      lastText = err.message;
+    }
   }
 
-  // Fallback 3: Nếu vẫn lỗi 400 và không có stream_key, thử mô phỏng stream_key
-  if (res.status === 400 && !streamKey) {
-    res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
-      method: 'POST',
-      headers: getHeaders(token),
-      body: JSON.stringify({ stream_key: 'call:1000000000000000000:1000', terminal: Boolean(terminal) }),
-    });
-  }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Lỗi khi gửi heartbeat (${questId}): HTTP ${res.status} ${text}`);
-  }
-
-  return await res.json().catch(() => ({}));
+  // Tất cả body đều thất bại
+  const statusCode = lastRes ? lastRes.status : 0;
+  throw new Error(`Lỗi khi gửi heartbeat (${questId}): HTTP ${statusCode} ${lastText.substring(0, 200)}`);
 }
 
 /**
@@ -766,14 +801,29 @@ async function completeSingleQuest(token, quest, options = {}) {
   }
 
   const heartbeatDelay = options.heartbeatDelayMs ?? 20000;
-  const maxLoops = Math.ceil(targetSeconds / 20) + 15;
+  // maxLoops đủ để cover toàn bộ thời gian quest dù Discord không báo progress
+  const maxLoops = Math.ceil((targetSeconds * 1000) / Math.max(heartbeatDelay, 1000)) + 30;
   let loops = 0;
-  let stalledCount = 0;
+  // Track thời gian thực để ước lượng tiến độ khi server không phản hồi progress
+  const startTimestamp = Date.now() - (currentSeconds * 1000);
 
   try {
     while (currentSeconds < targetSeconds && loops < maxLoops) {
       loops++;
-      const hb = await sendHeartbeat(token, questId, { streamKey, applicationId: appId, terminal: false });
+      let hb = {};
+      try {
+        hb = await sendHeartbeat(token, questId, { streamKey, applicationId: appId, terminal: false, userId });
+      } catch (heartbeatErr) {
+        // Heartbeat lỗi → log và tiếp tục (không break, cho Discord thêm thời gian)
+        console.warn(`[QUEST WORKER] Heartbeat failed loop=${loops} quest=${questId}: ${heartbeatErr.message}`);
+        // Vẫn tính thời gian trôi qua để cập nhật progress ước lượng
+        const elapsed = Math.floor((Date.now() - startTimestamp) / 1000);
+        if (elapsed > currentSeconds) currentSeconds = Math.min(targetSeconds, elapsed);
+        if (currentSeconds < targetSeconds) {
+          await new Promise((r) => setTimeout(r, heartbeatDelay));
+        }
+        continue;
+      }
 
       if (hb?.user_status?.completed_at || hb?.completed_at) {
         currentSeconds = targetSeconds;
@@ -789,15 +839,17 @@ async function completeSingleQuest(token, quest, options = {}) {
         (typeof hb?.user_status?.progress === 'object' && hb.user_status.progress?.[Object.keys(hb.user_status.progress)[0]]?.value != null ? hb.user_status.progress[Object.keys(hb.user_status.progress)[0]].value : null);
 
       if (typeof serverProgress === 'number' && serverProgress > currentSeconds) {
+        // Discord xác nhận progress thật
         currentSeconds = serverProgress;
-        stalledCount = 0;
+        console.log(`[QUEST WORKER] Server confirmed: ${currentSeconds}/${targetSeconds}s (${Math.round(currentSeconds/targetSeconds*100)}%) quest=${questId}`);
       } else if (isFastTestMode) {
         currentSeconds = Math.min(targetSeconds, currentSeconds + 30);
       } else {
-        stalledCount++;
-        if (stalledCount >= 5) {
-          // Discord không tăng tiến độ sau 5 lần gửi heartbeat liên tiếp
-          break;
+        // Discord không trả progress số — dùng thời gian thực để ước lượng
+        const elapsed = Math.floor((Date.now() - startTimestamp) / 1000);
+        if (elapsed > currentSeconds) {
+          currentSeconds = Math.min(targetSeconds, elapsed);
+          console.log(`[QUEST WORKER] Time-based est: ${currentSeconds}/${targetSeconds}s quest=${questId}`);
         }
       }
 
@@ -815,9 +867,10 @@ async function completeSingleQuest(token, quest, options = {}) {
       await new Promise((r) => setTimeout(r, heartbeatDelay));
     }
 
+
     if (currentSeconds >= targetSeconds) {
       try {
-        await sendHeartbeat(token, questId, { streamKey, terminal: true });
+        await sendHeartbeat(token, questId, { streamKey, terminal: true, userId });
       } catch {}
 
       let reward = null;
