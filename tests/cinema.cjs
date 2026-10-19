@@ -179,6 +179,13 @@ async function main() {
   };
   await cinemalistCmd.execute(mockInteraction);
   assert(repliedEmbed, 'cinemalist execute must editReply with embed');
+
+  // Verify separated Kho Phim and Schedule Embeds
+  const khoEmbed = cinemalistCmd.buildKhoEmbed(uploadedList, 0, 1, []);
+  assert.match(khoEmbed.data.title, /KHO PHIM CÓ SẴN/);
+  const schedEmbed = cinemalistCmd.buildScheduleEmbed([{ title: 'Phim Sắp Chiếu', startsAt: '2030-01-01T00:00:00Z', endsAt: '2030-01-01T02:00:00Z', roomId: 2 }], 0, 1, 1);
+  assert.match(schedEmbed.data.title, /LỊCH CHIẾU SẮP TỚI/);
+  assert.match(schedEmbed.data.fields[0].value, /Cinema 2/);
   // Test archiveExpiredShows, direct deleteShow, clearHistory, and API endpoints
   const now = Date.now();
   const pastShow = { title: 'Phim Cũ Đã Chiếu', source: 'https://media.example.com/film.mp4', startsAt: new Date(now - 7200000).toISOString(), endsAt: new Date(now - 1000).toISOString() };

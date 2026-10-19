@@ -557,6 +557,18 @@ function clearHistory(guildId) {
   return config;
 }
 
+function normalizeMovieKey(str) {
+  if (!str) return '';
+  try { str = decodeURIComponent(str); } catch {}
+  return str
+    .split('/')
+    .pop()
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/[-_+]/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 async function listUploadedMovies(guildId, env = process.env) {
   const result = [];
   const publicDomain = (env.CINEMA_MEDIA_ORIGIN || 'https://pub-a6f2ebb772de4098b1e01e80864fbf6a.r2.dev').replace(/\/$/, '');
@@ -590,16 +602,20 @@ async function listUploadedMovies(guildId, env = process.env) {
     }
   }
 
-  const seenUrls = new Set();
+  const seenNorms = new Set();
 
   if (r2Objects.length > 0) {
     for (const obj of r2Objects) {
       const url = `${publicDomain}/${obj.Key}`;
-      seenUrls.add(url);
+      const normObjKey = normalizeMovieKey(obj.Key);
+      if (normObjKey) seenNorms.add(normObjKey);
 
       const matchedShow = configuredShows.find(s => {
-        if (!s.source) return false;
-        return s.source === url || s.source.endsWith('/' + obj.Key);
+        if (!s) return false;
+        if (s.source && (s.source === url || s.source.endsWith('/' + obj.Key))) return true;
+        const normSource = normalizeMovieKey(s.source);
+        const normTitle = normalizeMovieKey(s.title);
+        return (normSource && normSource === normObjKey) || (normTitle && normTitle === normObjKey);
       });
 
       result.push({
@@ -615,21 +631,24 @@ async function listUploadedMovies(guildId, env = process.env) {
     }
   }
 
-  // Bổ sung các phim đã lên lịch trong server nhưng chưa có trong danh sách R2 (nếu có)
+  // Bổ sung các phim đã lên lịch trong server nhưng chưa có trong danh sách R2 (nếu có nguồn ngoài riêng biệt)
   for (const s of configuredShows) {
-    if (s.source && !seenUrls.has(s.source)) {
-      seenUrls.add(s.source);
-      const fileName = s.source.split('/').pop() || s.title;
-      result.push({
-        key: fileName,
-        title: movieDetails(fileName, null, s.title).title,
-        durationSeconds: null,
-        source: s.source,
-        size: 0,
-        lastModified: null,
-        scheduled: true,
-        scheduleShow: s,
-      });
+    if (s.source) {
+      const normSource = normalizeMovieKey(s.source) || normalizeMovieKey(s.title);
+      if (normSource && !seenNorms.has(normSource)) {
+        seenNorms.add(normSource);
+        const fileName = s.source.split('/').pop() || s.title;
+        result.push({
+          key: fileName,
+          title: movieDetails(fileName, null, s.title).title,
+          durationSeconds: null,
+          source: s.source,
+          size: 0,
+          lastModified: null,
+          scheduled: true,
+          scheduleShow: s,
+        });
+      }
     }
   }
 
