@@ -500,14 +500,16 @@ function createDashboard(client, options = {}) {
         if (premium) {
           const guild = await managedGuild(premium[1], value);
           const roles = await guild.roles.fetch();
+          const allChannels = typeof guild.channels?.fetch === 'function' ? await guild.channels.fetch() : (guild.channels?.cache || new Map());
           if (req.method === 'GET') return json(res, 200, {
             config: cinema.getConfig(guild.id), available: env.CINEMA_ENABLED === 'true', mediaOrigin: cinema.mediaOrigin(env),
             roles: [...roles.values()].filter(role => role && role.id !== guild.id).map(role => ({ id: role.id, name: role.name })),
+            channels: [...allChannels.values()].filter(Boolean).map(c => ({ id: c.id, name: c.name, type: c.type })),
           });
           if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
           rateLimit(`cinema-save:${guild.id}:${value.user.id}`, 10);
           const input = await body(req);
-          return json(res, 200, { config: cinema.saveConfig(guild.id, input, roles, env) });
+          return json(res, 200, { config: cinema.saveConfig(guild.id, input, roles, env, allChannels) });
         }
         const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test|giveaways|confession-panel|reaction-roles|ticket)$/.exec(route);
         if (!match) fail(404, 'Không tìm thấy trang.');

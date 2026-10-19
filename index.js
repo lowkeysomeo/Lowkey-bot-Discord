@@ -81,6 +81,7 @@ client.once(
     require('./utils/reactionRoles').start(client);
     require('./utils/inviteSystem').start(client);
     require('./utils/questScheduler').start(client);
+    require('./utils/cinemaScheduler').start(client);
     require('./utils/questShop').ensureShopPanel(client).catch(err => console.warn('[QUEST SHOP]', err.message));
     // Nạp thành viên để phân biệt role có sẵn với role vừa được cấp.
     for (const guild of client.guilds.cache.values()) {

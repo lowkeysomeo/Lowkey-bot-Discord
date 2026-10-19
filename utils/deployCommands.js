@@ -11,7 +11,7 @@ async function deployCommands(commands, restClient) {
   });
   if (process.env.CINEMA_ENABLED === 'true') body.push({
     name: 'cinema', description: 'Mở rạp phim VNL Cinema', type: 4, handler: 2,
-    contexts: [0], integration_types: [0],
+    contexts: [0], integration_types: [0], dm_permission: false,
   });
   await rest.put(Routes.applicationCommands(CLIENT_ID), { body });
   console.log(`[DEPLOY] Registered ${body.length} global commands for all servers.`);

@@ -22,17 +22,24 @@ function sourceUrl(value, env) {
 }
 function getConfig(guildId) {
   const raw = getGuildSetting(guildId, 'CINEMA_CONFIG');
-  return raw ? JSON.parse(raw) : { enabled: false, title: 'VNL Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, shows: [], revision: 0 };
+  const d = { enabled: false, title: 'VNL Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, voiceChannelId: null, notifyChannelId: null, shows: [], revision: 0 };
+  return raw ? { ...d, ...JSON.parse(raw) } : d;
 }
 function text(value, max, required = false) {
   if (typeof value !== 'string' || value.length > max || (required && !value.trim())) fail(400, 'Tên hoặc nội dung không hợp lệ.');
   return value.trim();
 }
-function validate(input, roles, env) {
+function validate(input, roles, env, channels) {
   if (!input || typeof input !== 'object' || Array.isArray(input) || typeof input.enabled !== 'boolean' || typeof input.rightsConfirmed !== 'boolean') fail(400, 'Cấu hình Cinema không hợp lệ.');
   if (!['members', 'roles', 'admins'].includes(input.audience)) fail(400, 'Quyền tham gia không hợp lệ.');
   if (!Array.isArray(input.roleIds) || input.roleIds.length > 25 || input.roleIds.some(id => typeof id !== 'string' || !roles.has(id))) fail(400, 'Role phải thuộc server đang quản lý.');
   if (input.audience === 'roles' && !input.roleIds.length) fail(400, 'Hãy chọn ít nhất một role được xem.');
+  const voiceChannelId = typeof input.voiceChannelId === 'string' && /^\d+$/.test(input.voiceChannelId) ? input.voiceChannelId : null;
+  const notifyChannelId = typeof input.notifyChannelId === 'string' && /^\d+$/.test(input.notifyChannelId) ? input.notifyChannelId : null;
+  if (channels) {
+    if (voiceChannelId && !channels.has(voiceChannelId)) fail(400, 'Kênh voice rạp phim phải thuộc server này.');
+    if (notifyChannelId && !channels.has(notifyChannelId)) fail(400, 'Kênh thông báo phải thuộc server này.');
+  }
   if (!Array.isArray(input.shows) || input.shows.length > 20) fail(400, 'Tối đa 20 suất chiếu.');
   const shows = input.shows.map(show => {
     if (!show || typeof show !== 'object') fail(400, 'Suất chiếu không hợp lệ.');
@@ -44,10 +51,10 @@ function validate(input, roles, env) {
   for (let i = 1; i < shows.length; i++) if (shows[i].startsAt < shows[i - 1].endsAt) fail(400, 'Các suất chiếu không được trùng giờ.');
   if (input.enabled && (!input.rightsConfirmed || !shows.length)) fail(400, 'Cần ít nhất một suất chiếu và xác nhận quyền sử dụng video để bật Cinema.');
   return { enabled: input.enabled, title: text(input.title, 80, true), description: text(input.description, 1500), audience: input.audience,
-    roleIds: [...new Set(input.roleIds)], rightsConfirmed: input.rightsConfirmed, shows };
+    roleIds: [...new Set(input.roleIds)], rightsConfirmed: input.rightsConfirmed, voiceChannelId, notifyChannelId, shows };
 }
-function saveConfig(guildId, input, roles, env) {
-  const next = validate(input, roles, env);
+function saveConfig(guildId, input, roles, env, channels) {
+  const next = validate(input, roles, env, channels);
   const current = getConfig(guildId);
   if (input.revision !== current.revision) fail(409, 'Cấu hình đã được admin khác sửa. Hãy tải lại trước khi lưu.');
   next.revision = current.revision + 1;
