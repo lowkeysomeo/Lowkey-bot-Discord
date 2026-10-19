@@ -22,7 +22,7 @@ function sourceUrl(value, env) {
 }
 function getConfig(guildId) {
   const raw = getGuildSetting(guildId, 'CINEMA_CONFIG');
-  const d = { enabled: false, title: 'VNL Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, voiceChannelId: null, notifyChannelId: null, shows: [], revision: 0 };
+  const d = { enabled: false, title: 'VNL Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, voiceChannelId: null, notifyChannelId: null, notifyRoleId: null, notifyMessage: '', shows: [], revision: 0 };
   return raw ? { ...d, ...JSON.parse(raw) } : d;
 }
 function text(value, max, required = false) {
@@ -36,6 +36,14 @@ function validate(input, roles, env, channels) {
   if (input.audience === 'roles' && !input.roleIds.length) fail(400, 'Hãy chọn ít nhất một role được xem.');
   const voiceChannelId = typeof input.voiceChannelId === 'string' && /^\d+$/.test(input.voiceChannelId) ? input.voiceChannelId : null;
   const notifyChannelId = typeof input.notifyChannelId === 'string' && /^\d+$/.test(input.notifyChannelId) ? input.notifyChannelId : null;
+  let notifyRoleId = null;
+  if (input.notifyRoleId === 'everyone' || input.notifyRoleId === 'here') {
+    notifyRoleId = input.notifyRoleId;
+  } else if (typeof input.notifyRoleId === 'string' && /^\d+$/.test(input.notifyRoleId)) {
+    if (roles && !roles.has(input.notifyRoleId)) fail(400, 'Role thông báo phải thuộc server này.');
+    notifyRoleId = input.notifyRoleId;
+  }
+  const notifyMessage = typeof input.notifyMessage === 'string' ? text(input.notifyMessage, 1500) : '';
   if (channels) {
     if (voiceChannelId && !channels.has(voiceChannelId)) fail(400, 'Kênh voice rạp phim phải thuộc server này.');
     if (notifyChannelId && !channels.has(notifyChannelId)) fail(400, 'Kênh thông báo phải thuộc server này.');
@@ -51,7 +59,7 @@ function validate(input, roles, env, channels) {
   for (let i = 1; i < shows.length; i++) if (shows[i].startsAt < shows[i - 1].endsAt) fail(400, 'Các suất chiếu không được trùng giờ.');
   if (input.enabled && (!input.rightsConfirmed || !shows.length)) fail(400, 'Cần ít nhất một suất chiếu và xác nhận quyền sử dụng video để bật Cinema.');
   return { enabled: input.enabled, title: text(input.title, 80, true), description: text(input.description, 1500), audience: input.audience,
-    roleIds: [...new Set(input.roleIds)], rightsConfirmed: input.rightsConfirmed, voiceChannelId, notifyChannelId, shows };
+    roleIds: [...new Set(input.roleIds)], rightsConfirmed: input.rightsConfirmed, voiceChannelId, notifyChannelId, notifyRoleId, notifyMessage, shows };
 }
 function saveConfig(guildId, input, roles, env, channels) {
   const next = validate(input, roles, env, channels);
@@ -121,4 +129,43 @@ async function viewerState(guild, userId, env, now = Date.now()) {
     show: show ? { title: show.title, startsAt: show.startsAt, endsAt: show.endsAt,
       mediaPath: '/.proxy/media' + new URL(sourceUrl(show.source, env)).pathname, position: (now - Date.parse(show.startsAt)) / 1000 } : null };
 }
-module.exports = { getConfig, saveConfig, validate, viewerState, mediaOrigin, isStaffMember, seekShow };
+
+function getAnnouncedShows(guildId) {
+  try {
+    const raw = getGuildSetting(guildId, 'CINEMA_ANNOUNCED_SHOWS');
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function isShowAnnounced(guildId, showKey) {
+  const list = getAnnouncedShows(guildId);
+  return Array.isArray(list) && list.includes(showKey);
+}
+
+function markShowAnnounced(guildId, showKey) {
+  try {
+    const list = getAnnouncedShows(guildId);
+    if (!list.includes(showKey)) {
+      list.push(showKey);
+      const trimmed = list.slice(-100);
+      setGuildSetting(guildId, 'CINEMA_ANNOUNCED_SHOWS', JSON.stringify(trimmed));
+    }
+  } catch (err) {
+    console.error('[CINEMA] Lỗi lưu danh sách suất chiếu đã thông báo:', err.message);
+  }
+}
+
+module.exports = {
+  getConfig,
+  saveConfig,
+  validate,
+  viewerState,
+  mediaOrigin,
+  isStaffMember,
+  seekShow,
+  getAnnouncedShows,
+  isShowAnnounced,
+  markShowAnnounced,
+};

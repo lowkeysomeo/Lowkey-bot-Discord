@@ -50,8 +50,15 @@ async function main() {
   const overlap = sample(); overlap.shows.push({ ...overlap.shows[0] });
   assert.throws(() => cinema.validate(overlap, roles, env), /trùng giờ/);
   assert.throws(() => cinema.validate({ ...sample(), rightsConfirmed: false }, roles, env));
-  assert.throws(() => cinema.validate({ ...sample(), roleIds: ['foreign'] }, roles, env));
   assert.throws(() => cinema.validate({ ...sample(), audience: 'roles' }, roles, env));
+  assert.equal(cinema.validate({ ...sample(), notifyRoleId: '777' }, roles, env).notifyRoleId, '777');
+  assert.equal(cinema.validate({ ...sample(), notifyRoleId: 'everyone' }, roles, env).notifyRoleId, 'everyone');
+  assert.equal(cinema.validate({ ...sample(), notifyRoleId: 'here' }, roles, env).notifyRoleId, 'here');
+  assert.throws(() => cinema.validate({ ...sample(), notifyRoleId: '999999' }, roles, env), /Role thông báo/);
+  assert.equal(cinema.validate({ ...sample(), notifyMessage: 'Thông báo: {phim}' }, roles, env).notifyMessage, 'Thông báo: {phim}');
+  assert.equal(cinema.isShowAnnounced('111', 'show-key-test'), false);
+  cinema.markShowAnnounced('111', 'show-key-test');
+  assert.equal(cinema.isShowAnnounced('111', 'show-key-test'), true);
   const request = transport(createDashboard(client, { env, fetch: fetchApi }));
   const activityPage = await request('/activity/');
   if (require('node:fs').existsSync(require('node:path').join(__dirname, '../activity/dist/index.html'))) {

@@ -86,6 +86,8 @@ async function testScheduler() {
     rightsConfirmed: true,
     voiceChannelId: 'voice-1',
     notifyChannelId: 'text-1',
+    notifyRoleId: 'everyone',
+    notifyMessage: '🍿 Đang chiếu {phim} tại {kenh_voice}! Bấm xem ngay nhé!',
     shows: [
       {
         title: 'Thanh xuân 18x2',
@@ -107,10 +109,25 @@ async function testScheduler() {
   await new Promise(r => setTimeout(r, 50));
 
   assert.equal(inviteCreated, true, 'Activity invite must be created');
-  assert(sentMessages.length >= 1, 'Announcement message must be sent');
+  assert.equal(sentMessages.length, 1, 'Exactly 1 announcement message must be sent per show');
+  assert.equal(sentMessages[0].target, 'text', 'Announcement must target notify channel when specified');
+  assert.equal(sentMessages[0].msg.content, '@everyone', 'Role tag @everyone must be included in message content');
   assert.match(sentMessages[0].msg.embeds[0].data.title, /Thanh xuân 18x2/);
+  assert.match(sentMessages[0].msg.embeds[0].data.description, /Đang chiếu Thanh xuân 18x2 tại <#voice-1>!/);
 
-  // Test 2: Show finishes
+  // Test 2: Subsequent ticks must NOT send duplicate announcement
+  scheduler.checkShows(client);
+  await new Promise(r => setTimeout(r, 50));
+  assert.equal(sentMessages.length, 1, 'Tick 2 must not re-announce an ongoing show');
+
+  // Test 3: Simulated bot restart (clearing activeSessions Map) must NOT re-announce
+  scheduler.activeSessions.clear();
+  assert.equal(scheduler.activeSessions.size, 0, 'Active sessions cleared to simulate bot restart');
+  scheduler.checkShows(client);
+  await new Promise(r => setTimeout(r, 50));
+  assert.equal(sentMessages.length, 1, 'Persistent storage must prevent duplicate announcement after restart');
+
+  // Test 4: Show finishes
   config.shows[0].startsAt = new Date(now - 7200000).toISOString();
   config.shows[0].endsAt = new Date(now - 1000).toISOString(); // ended 1s ago
   setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
@@ -120,7 +137,7 @@ async function testScheduler() {
   assert.equal(voiceDestroyed, true, 'Voice connection must be destroyed on movie end');
   assert.equal(scheduler.activeSessions.has(guildId), false, 'Session must be removed from map');
 
-  console.log('PASS cinemaScheduler: auto-join voice, activity invite, announcements, and auto-leave when show ends.');
+  console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave.');
 }
 
 testScheduler().catch(err => {

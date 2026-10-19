@@ -163,9 +163,14 @@ async function handleSelect(interaction) {
   // Lưu cấu hình vào database
   setGuildSetting(interaction.guildId, 'CINEMA_CONFIG', JSON.stringify(config));
 
+  // Đánh dấu suất chiếu đã được thông báo để bộ scheduler không thông báo lặp
+  const showKey = `${selectedShow.startsAt}_${selectedShow.title}`;
+  cinema.markShowAnnounced(interaction.guildId, showKey);
+
   // 1. Bot tham gia kênh voice
+  let voiceConn = null;
   try {
-    voice.joinVoiceChannel({
+    voiceConn = voice.joinVoiceChannel({
       channelId: targetChannel.id,
       guildId: interaction.guildId,
       adapterCreator: interaction.guild.voiceAdapterCreator,
@@ -176,6 +181,19 @@ async function handleSelect(interaction) {
   } catch (err) {
     console.error('[CINEMA] Lỗi khi vào voice channel:', err.message);
   }
+
+  try {
+    const scheduler = require('../../utils/cinemaScheduler');
+    if (scheduler.activeSessions) {
+      scheduler.activeSessions.set(interaction.guildId, {
+        showKey,
+        show: selectedShow,
+        joined: true,
+        announced: true,
+        connection: voiceConn || voice.getVoiceConnection(interaction.guildId),
+      });
+    }
+  } catch {}
 
   // 2. Tạo Activity Invite
   let inviteUrl = null;
@@ -228,7 +246,24 @@ async function handleSelect(interaction) {
   if (config.notifyChannelId && config.notifyChannelId !== interaction.channelId) {
     const notifyCh = interaction.guild.channels.cache.get(config.notifyChannelId);
     if (notifyCh && typeof notifyCh.send === 'function') {
-      await notifyCh.send({ embeds: [playingEmbed], components }).catch(() => {});
+      let content = undefined;
+      let allowedMentions = undefined;
+      if (config.notifyRoleId === 'everyone') {
+        content = '@everyone';
+        allowedMentions = { parse: ['everyone'] };
+      } else if (config.notifyRoleId === 'here') {
+        content = '@here';
+        allowedMentions = { parse: ['everyone'] };
+      } else if (config.notifyRoleId && /^\d+$/.test(config.notifyRoleId)) {
+        content = `<@&${config.notifyRoleId}>`;
+        allowedMentions = { roles: [config.notifyRoleId] };
+      }
+      await notifyCh.send({
+        content,
+        embeds: [playingEmbed],
+        components,
+        ...(allowedMentions ? { allowedMentions } : {})
+      }).catch(() => {});
     }
   }
 }

@@ -60,9 +60,14 @@ function checkShows(client) {
           }
         }
 
-        // 2. Tự động gửi thông báo & thẻ mời xem phim
-        if (!session.announced) {
+        // 2. Tự động gửi thông báo & thẻ mời xem phim (Chỉ gửi 1 lần duy nhất / 1 suất chiếu)
+        const alreadyAnnounced = session.announced || cinema.isShowAnnounced(guild.id, showKey);
+        if (alreadyAnnounced) {
           session.announced = true;
+        } else {
+          session.announced = true;
+          cinema.markShowAnnounced(guild.id, showKey);
+
           (async () => {
             try {
               const voiceChannel = config.voiceChannelId ? guild.channels.cache.get(config.voiceChannelId) : null;
@@ -83,33 +88,65 @@ function checkShows(client) {
               const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
               const startUnix = Math.floor(Date.parse(currentShow.startsAt) / 1000);
               const endUnix = Math.floor(Date.parse(currentShow.endsAt) / 1000);
+              const activityWebUrl = (process.env.DASHBOARD_URL || 'https://vietnamlegacy.up.railway.app').replace(/\/$/, '') + '/activity';
+              const watchUrl = inviteUrl || activityWebUrl;
+              const voiceTag = voiceChannel ? `<#${voiceChannel.id}>` : 'VNL Cinema';
+
+              let description = '';
+              if (config.notifyMessage && config.notifyMessage.trim()) {
+                description = config.notifyMessage
+                  .replace(/{phim}|{ten_phim}|{title}/gi, currentShow.title)
+                  .replace(/{kenh_voice}|{voice}/gi, voiceTag)
+                  .replace(/{gio_chieu}|{start}/gi, `<t:${startUnix}:t> (<t:${startUnix}:R>)`)
+                  .replace(/{gio_ket_thuc}|{end}/gi, `<t:${endUnix}:t>`)
+                  .replace(/{link_xem}|{link}/gi, watchUrl);
+              } else {
+                description = `Bộ phim **${currentShow.title}** đang được chiếu tại **${voiceTag}**!\n\n⏰ **Suất chiếu:** <t:${startUnix}:t> - <t:${endUnix}:t> (<t:${startUnix}:R>)\n🍿 **Cách xem:** ${inviteUrl ? 'Bấm nút **Vào rạp xem phim** bên dưới hoặc ' : ''}vào phòng thoại và gõ lệnh \`/cinema\` để mở màn hình xem phim cùng mọi người.`;
+              }
+
+              let content = undefined;
+              let allowedMentions = undefined;
+
+              if (config.notifyRoleId === 'everyone') {
+                content = '@everyone';
+                allowedMentions = { parse: ['everyone'] };
+              } else if (config.notifyRoleId === 'here') {
+                content = '@here';
+                allowedMentions = { parse: ['everyone'] };
+              } else if (config.notifyRoleId && /^\d+$/.test(config.notifyRoleId)) {
+                content = `<@&${config.notifyRoleId}>`;
+                allowedMentions = { roles: [config.notifyRoleId] };
+              }
 
               const embed = new EmbedBuilder()
                 .setColor(0xE50914) // Cinema Red
                 .setTitle(`🎬 RẠP PHIM ĐÃ BẮT ĐẦU: ${currentShow.title}`)
-                .setDescription(`Bộ phim **${currentShow.title}** đang được chiếu tại **${voiceChannel ? `<#${voiceChannel.id}>` : 'VNL Cinema'}**!\n\n⏰ **Suất chiếu:** <t:${startUnix}:t> - <t:${endUnix}:t> (<t:${startUnix}:R>)\n🍿 **Cách xem:** ${inviteUrl ? 'Bấm nút **Vào rạp xem phim** bên dưới hoặc ' : ''}vào phòng thoại và gõ lệnh \`/cinema\` để mở màn hình xem phim cùng mọi người.`)
+                .setDescription(description)
                 .setFooter({ text: 'VNL Cinema • Tự động phát theo lịch' })
                 .setTimestamp();
 
-              const activityWebUrl = (process.env.DASHBOARD_URL || 'https://vietnamlegacy.up.railway.app').replace(/\/$/, '') + '/activity';
               const components = [
                 new ActionRowBuilder().addComponents(
                   new ButtonBuilder()
                     .setLabel('🍿 Vào rạp xem phim ngay')
                     .setStyle(ButtonStyle.Link)
-                    .setURL(inviteUrl || activityWebUrl)
+                    .setURL(watchUrl)
                 )
               ];
 
-              if (config.notifyChannelId) {
-                const notifyCh = guild.channels.cache.get(config.notifyChannelId);
-                if (notifyCh && typeof notifyCh.send === 'function') {
-                  await notifyCh.send({ embeds: [embed], components }).catch(() => {});
-                }
-              }
+              // Chỉ gửi 1 lần duy nhất tới kênh chỉ định (hoặc fallback kênh voice nếu chưa chọn kênh thông báo)
+              const targetChannel = (config.notifyChannelId ? guild.channels.cache.get(config.notifyChannelId) : null)
+                || (voiceChannel && typeof voiceChannel.send === 'function' ? voiceChannel : null);
 
-              if (voiceChannel && voiceChannel.id !== config.notifyChannelId && typeof voiceChannel.send === 'function') {
-                await voiceChannel.send({ embeds: [embed], components }).catch(() => {});
+              if (targetChannel && typeof targetChannel.send === 'function') {
+                await targetChannel.send({
+                  content,
+                  embeds: [embed],
+                  components,
+                  ...(allowedMentions ? { allowedMentions } : {})
+                }).catch(err => {
+                  console.error(`[CINEMA SCHEDULER] Không thể gửi thông báo tới #${targetChannel.name}:`, err.message);
+                });
               }
             } catch (annErr) {
               console.error('[CINEMA SCHEDULER] Lỗi thông báo chiếu phim:', annErr.message);
