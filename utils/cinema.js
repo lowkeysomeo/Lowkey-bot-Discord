@@ -43,6 +43,7 @@ function archiveExpiredShows(guildId, now = Date.now()) {
           config.history.unshift({
             title: s.title,
             source: s.source,
+            roomId: s.roomId || 1,
             startsAt: s.startsAt,
             endsAt: s.endsAt,
             endedAt: new Date(now).toISOString(),
@@ -115,9 +116,20 @@ function validate(input, roles, env, channels) {
       end = start + 2.5 * 3600000;
     }
     if (end - start > 24 * 3600000) fail(400, 'Lịch chiếu dài tối đa 24 giờ.');
-    return { title: text(show.title, 120, true), source: sourceUrl(text(show.source, 2048, true), env), startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString() };
+    const roomId = [1, 2, 3].includes(Number(show.roomId)) ? Number(show.roomId) : 1;
+    return { title: text(show.title, 120, true), source: sourceUrl(text(show.source, 2048, true), env), startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString(), roomId };
   }).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
-  for (let i = 1; i < shows.length; i++) if (shows[i].startsAt < shows[i - 1].endsAt) fail(400, 'Các suất chiếu không được trùng giờ.');
+
+  // Kiểm tra trùng giờ riêng biệt theo từng phòng (Cinema 1, 2, 3)
+  for (const rId of [1, 2, 3]) {
+    const roomShows = shows.filter(s => (s.roomId || 1) === rId);
+    for (let i = 1; i < roomShows.length; i++) {
+      if (roomShows[i].startsAt < roomShows[i - 1].endsAt) {
+        fail(400, `Các suất chiếu trong Cinema ${rId} không được trùng giờ.`);
+      }
+    }
+  }
+
   if (input.enabled && shows.length > 0 && !input.rightsConfirmed) {
     fail(400, 'Vui lòng xác nhận quyền sử dụng video để bật Cinema.');
   }
@@ -164,9 +176,12 @@ function isStaffMember(member) {
   return false;
 }
 
-function seekShow(guildId, targetSeconds, now = Date.now()) {
+function seekShow(guildId, targetSeconds, now = Date.now(), roomNumber = null) {
   const config = getConfig(guildId);
-  const show = config.shows.find(s => Date.parse(s.startsAt) <= now && now < Date.parse(s.endsAt));
+  const show = config.shows.find(s => {
+    if (roomNumber !== null && (s.roomId || 1) !== Number(roomNumber)) return false;
+    return Date.parse(s.startsAt) <= now && now < Date.parse(s.endsAt);
+  });
   if (!show) fail(404, 'Hiện không có suất chiếu nào đang phát.');
   const oldDuration = Date.parse(show.endsAt) - Date.parse(show.startsAt);
   const target = Math.max(0, Number(targetSeconds) || 0);
@@ -175,10 +190,10 @@ function seekShow(guildId, targetSeconds, now = Date.now()) {
   show.startsAt = newStartsAt;
   show.endsAt = newEndsAt;
   setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
-  return { position: target, startsAt: newStartsAt, endsAt: newEndsAt };
+  return { position: target, startsAt: newStartsAt, endsAt: newEndsAt, roomId: show.roomId || 1 };
 }
 
-async function viewerState(guild, userId, env, now = Date.now()) {
+async function viewerState(guild, userId, env, now = Date.now(), queryChannelId = null) {
   const config = getConfig(guild.id);
   if (!config.enabled) fail(403, 'Cinema đang tắt tại server này.');
   let member;
@@ -189,12 +204,44 @@ async function viewerState(guild, userId, env, now = Date.now()) {
   if (config.audience === 'admins' && !admin) fail(403, 'Suất chiếu chỉ dành cho Administrator.');
   if (config.audience === 'roles' && !admin && !config.roleIds.some(id => member.roles.cache.has(id))) fail(403, 'Bạn chưa có role được phép xem Cinema.');
   const canSeek = isStaffMember(member);
-  const show = config.shows.find(s => Date.parse(s.startsAt) <= now && now < Date.parse(s.endsAt));
-  return { title: config.title, description: config.description, serverTime: now, canSeek,
-    shows: (config.shows || []).map(({ title, startsAt, endsAt }) => ({ title, startsAt, endsAt })),
-    upcoming: config.shows.filter(s => Date.parse(s.startsAt) > now).map(({ title, startsAt, endsAt }) => ({ title, startsAt, endsAt })),
-    show: show ? { title: show.title, startsAt: show.startsAt, endsAt: show.endsAt,
-      mediaPath: '/.proxy/media' + new URL(sourceUrl(show.source, env)).pathname, position: (now - Date.parse(show.startsAt)) / 1000 } : null };
+
+  const effectiveChannelId = queryChannelId || member.voice?.channelId;
+  let roomNumber = null;
+  if (effectiveChannelId) {
+    const ch = guild.channels?.cache?.get(effectiveChannelId);
+    if (ch) {
+      roomNumber = getRoomNumberFromChannel(ch);
+    }
+  }
+
+  let show = null;
+  if (roomNumber !== null) {
+    show = config.shows.find(s => (s.roomId || 1) === roomNumber && Date.parse(s.startsAt) <= now && now < Date.parse(s.endsAt));
+  }
+  if (!show) {
+    show = config.shows.find(s => Date.parse(s.startsAt) <= now && now < Date.parse(s.endsAt));
+  }
+
+  const activeRoomId = show ? (show.roomId || 1) : (roomNumber || 1);
+  const roomTitle = `Cinema ${activeRoomId}`;
+
+  return {
+    title: show ? `${show.title} (${roomTitle})` : config.title,
+    description: config.description,
+    serverTime: now,
+    canSeek,
+    roomId: activeRoomId,
+    shows: (config.shows || []).map(({ title, startsAt, endsAt, roomId }) => ({ title, startsAt, endsAt, roomId: roomId || 1 })),
+    upcoming: config.shows.filter(s => Date.parse(s.startsAt) > now).map(({ title, startsAt, endsAt, roomId }) => ({ title, startsAt, endsAt, roomId: roomId || 1 })),
+    show: show ? {
+      title: show.title,
+      roomId: show.roomId || 1,
+      startsAt: show.startsAt,
+      endsAt: show.endsAt,
+      mediaPath: '/.proxy/media' + new URL(sourceUrl(show.source, env)).pathname,
+      position: (now - Date.parse(show.startsAt)) / 1000
+    } : null
+  };
 }
 
 function getLastAnnouncedShow(guildId) {
@@ -325,12 +372,64 @@ function isAllowedCinemaVoiceChannel(channel, guild, config) {
   return channel.parentId === category.id;
 }
 
+function getRoomNumberFromChannel(channel) {
+  if (!channel) return null;
+  const name = channel.name || '';
+  const match = name.match(/(?:cinema|phòng|room)?\s*([123])(?:\D|$)/i);
+  if (match) return Number(match[1]);
+  // Khớp ID phòng chiếu cố định nếu có
+  if (channel.id === '1561644668280774707') return 1;
+  if (channel.id === '1561645344796713031') return 2;
+  if (channel.id === '1561645508739727461') return 3;
+  return null;
+}
+
+function getCinemaRoomChannel(guild, config, roomNumber = 1) {
+  if (!guild || !guild.channels?.cache) return null;
+  const targetRoom = Number(roomNumber) || 1;
+  const category = getCinemaCategory(guild, config);
+  const voiceChannels = category
+    ? guild.channels.cache.filter(c => c.parentId === category.id && (c.type === 2 || c.type === 13 || (typeof c.isVoiceBased === 'function' && c.isVoiceBased())))
+    : guild.channels.cache.filter(c => c.type === 2 || c.type === 13 || (typeof c.isVoiceBased === 'function' && c.isVoiceBased()));
+
+  // 1. Tìm kênh voice trong category có số phòng khớp
+  const matchedInCat = voiceChannels.find(c => getRoomNumberFromChannel(c) === targetRoom);
+  if (matchedInCat) return matchedInCat;
+
+  // 2. Nếu roomNumber === 1 và có voiceChannelId trong config
+  if (targetRoom === 1 && config && config.voiceChannelId) {
+    const ch = guild.channels.cache.get(config.voiceChannelId);
+    if (ch) return ch;
+  }
+
+  // 3. Tìm trên toàn server nếu chưa có category
+  const matchedInGuild = guild.channels.cache.find(c =>
+    (c.type === 2 || c.type === 13 || (typeof c.isVoiceBased === 'function' && c.isVoiceBased())) &&
+    getRoomNumberFromChannel(c) === targetRoom
+  );
+  if (matchedInGuild) return matchedInGuild;
+
+  // 4. Fallback: Kênh voice đầu tiên
+  return voiceChannels.first?.() || null;
+}
+
+function getActiveShow(config, now = Date.now(), roomNumber = null) {
+  if (!config || !Array.isArray(config.shows)) return null;
+  return config.shows.find(s => {
+    if (roomNumber !== null && (s.roomId || 1) !== Number(roomNumber)) return false;
+    const start = Date.parse(s.startsAt);
+    const end = Date.parse(s.endsAt);
+    return Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end;
+  }) || null;
+}
+
 function isReminderAnnounced(guildId, showOrKey, type = 'early') {
   if (!showOrKey) return false;
   let key = '';
   if (typeof showOrKey === 'object') {
     const minute = Math.floor(Date.parse(showOrKey.startsAt) / 60000);
-    key = `${type}_${minute}_${showOrKey.title}`;
+    const rId = showOrKey.roomId || 1;
+    key = `${type}_r${rId}_${minute}_${showOrKey.title}`;
   } else {
     key = `${type}_${showOrKey}`;
   }
@@ -343,7 +442,8 @@ function markReminderAnnounced(guildId, showOrKey, type = 'early') {
     let key = '';
     if (typeof showOrKey === 'object') {
       const minute = Math.floor(Date.parse(showOrKey.startsAt) / 60000);
-      key = `${type}_${minute}_${showOrKey.title}`;
+      const rId = showOrKey.roomId || 1;
+      key = `${type}_r${rId}_${minute}_${showOrKey.title}`;
     } else {
       key = `${type}_${showOrKey}`;
     }
@@ -358,7 +458,7 @@ function markReminderAnnounced(guildId, showOrKey, type = 'early') {
   }
 }
 
-function markShowEnded(guildId, now = Date.now()) {
+function markShowEnded(guildId, now = Date.now(), roomNumber = null) {
   try {
     const raw = getGuildSetting(guildId, 'CINEMA_CONFIG');
     if (!raw) return false;
@@ -368,13 +468,16 @@ function markShowEnded(guildId, now = Date.now()) {
     const remainingShows = [];
 
     for (const s of (config.shows || [])) {
+      const showRoom = s.roomId || 1;
+      const roomMatches = roomNumber === null || showRoom === Number(roomNumber);
       const start = Date.parse(s.startsAt);
       const end = Date.parse(s.endsAt);
-      if (Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end) {
+      if (roomMatches && Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end) {
         changed = true;
         config.history.unshift({
           title: s.title,
           source: s.source,
+          roomId: showRoom,
           startsAt: s.startsAt,
           endsAt: new Date(now).toISOString(),
           endedAt: new Date(now).toISOString(),
@@ -385,6 +488,7 @@ function markShowEnded(guildId, now = Date.now()) {
         config.history.unshift({
           title: s.title,
           source: s.source,
+          roomId: showRoom,
           startsAt: s.startsAt,
           endsAt: s.endsAt,
           endedAt: new Date(now).toISOString(),
@@ -415,9 +519,15 @@ function deleteShow(guildId, criteria = {}) {
   if (typeof criteria.index === 'number' && criteria.index >= 0 && criteria.index < shows.length) {
     targetIdx = criteria.index;
   } else if (criteria.startsAt) {
-    targetIdx = shows.findIndex(s => s.startsAt === criteria.startsAt);
+    targetIdx = shows.findIndex(s => {
+      if (criteria.roomId && (s.roomId || 1) !== Number(criteria.roomId)) return false;
+      return s.startsAt === criteria.startsAt;
+    });
   } else if (criteria.title) {
-    targetIdx = shows.findIndex(s => s.title === criteria.title);
+    targetIdx = shows.findIndex(s => {
+      if (criteria.roomId && (s.roomId || 1) !== Number(criteria.roomId)) return false;
+      return s.title === criteria.title;
+    });
   }
 
   if (targetIdx !== -1) {
@@ -426,6 +536,7 @@ function deleteShow(guildId, criteria = {}) {
     config.history.unshift({
       title: deleted.title,
       source: deleted.source,
+      roomId: deleted.roomId || 1,
       startsAt: deleted.startsAt,
       endsAt: deleted.endsAt,
       endedAt: new Date().toISOString(),
@@ -546,4 +657,7 @@ module.exports = {
   archiveExpiredShows,
   deleteShow,
   clearHistory,
+  getRoomNumberFromChannel,
+  getCinemaRoomChannel,
+  getActiveShow,
 };

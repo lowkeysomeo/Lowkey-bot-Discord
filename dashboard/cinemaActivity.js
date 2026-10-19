@@ -88,7 +88,12 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
       if (typeof input?.position !== 'number' || !Number.isFinite(input.position) || input.position < 0) {
         fail(400, 'Vị trí tua không hợp lệ.');
       }
-      const result = cinema.seekShow(guild.id, input.position);
+      let roomNumber = input?.roomId ? Number(input.roomId) : null;
+      if (!roomNumber && input?.channelId) {
+        const ch = guild.channels?.cache?.get(input.channelId);
+        if (ch) roomNumber = cinema.getRoomNumberFromChannel(ch);
+      }
+      const result = cinema.seekShow(guild.id, input.position, Date.now(), roomNumber);
       json(res, 200, { ok: true, ...result });
       return true;
     }
@@ -97,12 +102,18 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
       const token = (req.headers.authorization || '').match(/^Bearer ([a-f0-9]{64})$/)?.[1];
       const value = token && sessions.get(hash(token));
       if (!value || !value.userId) fail(401, 'Phiên xem đã hết hạn.');
+      const input = await body(req).catch(() => ({}));
+      let roomNumber = input?.roomId ? Number(input.roomId) : null;
       const guild = client.guilds.cache.get(endMatch[1]);
+      if (!roomNumber && input?.channelId && guild) {
+        const ch = guild.channels?.cache?.get(input.channelId);
+        if (ch) roomNumber = cinema.getRoomNumberFromChannel(ch);
+      }
       if (guild) {
-        cinema.markShowEnded(guild.id);
+        cinema.markShowEnded(guild.id, Date.now(), roomNumber);
         const scheduler = require('../utils/cinemaScheduler');
         if (typeof scheduler.cleanupSession === 'function') {
-          scheduler.cleanupSession(guild, true);
+          scheduler.cleanupSession(guild, true, roomNumber);
         }
       }
       json(res, 200, { ok: true });
@@ -116,7 +127,9 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
     rateLimit(`cinema-viewer:${value.userId}`, 30);
     const guild = client.guilds.cache.get(match[1]);
     if (!guild) fail(403, 'Bot chưa có trong server này.');
-    json(res, 200, await cinema.viewerState(guild, value.userId, env));
+    const requestUrl = new URL(req.url, 'http://internal');
+    const queryChannelId = requestUrl.searchParams.get('channelId');
+    json(res, 200, await cinema.viewerState(guild, value.userId, env, Date.now(), queryChannelId));
     return true;
   };
 }

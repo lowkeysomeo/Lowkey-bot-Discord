@@ -15,6 +15,7 @@ const endedTitle = document.querySelector('#ended-title');
 
 let session = null;
 let guildId = null;
+let channelId = null;
 let current = null;
 let stopped = false;
 let isStaff = false;
@@ -62,6 +63,7 @@ async function handleMovieEnded() {
       await request(`/guilds/${guildId}/ended`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channelId }),
       });
     } catch (err) {
       console.warn('Không thể gửi thông báo kết thúc suất chiếu lên server:', err.message);
@@ -171,7 +173,7 @@ async function sendStaffSeek(targetSeconds) {
     const res = await request(`/guilds/${guildId}/seek`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ position: clamped }),
+      body: JSON.stringify({ position: clamped, channelId }),
     });
     if (current) {
       current.position = res.position;
@@ -310,7 +312,8 @@ window.addEventListener('keydown', e => {
 async function poll() {
   try {
     const sent = performance.now();
-    const data = await request(`/guilds/${guildId}/state`);
+    const query = channelId ? `?channelId=${encodeURIComponent(channelId)}` : '';
+    const data = await request(`/guilds/${guildId}/state${query}`);
 
     // Staff Permissions
     isStaff = Boolean(data.canSeek);
@@ -461,6 +464,7 @@ async function start() {
     await sdk.ready();
     if (!sdk.guildId) throw new Error('Hãy mở Cinema trong một server Discord.');
     guildId = sdk.guildId;
+    channelId = sdk.channelId || null;
     const state = (window.crypto && typeof window.crypto.randomUUID === 'function')
       ? window.crypto.randomUUID()
       : Math.random().toString(36).slice(2);

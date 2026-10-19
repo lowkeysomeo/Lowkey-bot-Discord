@@ -563,13 +563,20 @@ function cinemaShowRow(show = {}) {
     : (Number.isFinite(sTime) && sTime > now ? ' <span class="badge" style="background:rgba(255,214,90,0.15);border:1px solid rgba(255,214,90,0.5);color:#ffd65a;font-size:11px;padding:2px 8px;margin-left:8px;border-radius:999px;">⏳ Sắp chiếu</span>' : '');
 
   const isSaved = Boolean(show.startsAt && show.title);
+  const roomNum = [1, 2, 3].includes(Number(show.roomId)) ? Number(show.roomId) : 1;
+  const roomBadge = ` <span class="badge" style="background:rgba(0,229,255,0.15);border:1px solid rgba(0,229,255,0.4);color:#00e5ff;font-size:11px;font-weight:700;padding:2px 8px;margin-left:6px;border-radius:999px;">Cinema ${roomNum}</span>`;
 
-  return `<fieldset class="cinema-show" data-starts-at="${h(show.startsAt || '')}" data-title="${h(show.title || '')}"><legend>Suất chiếu${statusBadge}</legend><div class="form-grid">
+  return `<fieldset class="cinema-show" data-starts-at="${h(show.startsAt || '')}" data-title="${h(show.title || '')}" data-room-id="${roomNum}"><legend>Suất chiếu${roomBadge}${statusBadge}</legend><div class="form-grid">
+    <div class="field"><label>Phòng chiếu<select data-show="roomId">
+      <option value="1"${roomNum === 1 ? ' selected' : ''}>🎬 VNL Cinema 1 (Phòng 1)</option>
+      <option value="2"${roomNum === 2 ? ' selected' : ''}>🎬 VNL Cinema 2 (Phòng 2)</option>
+      <option value="3"${roomNum === 3 ? ' selected' : ''}>🎬 VNL Cinema 3 (Phòng 3)</option>
+    </select></label></div>
     <div class="field"><label>Tên phim<input data-show="title" maxlength="120" value="${h(show.title || '')}" required></label></div>
     <div class="field"><label>URL video hợp pháp<input data-show="source" type="url" maxlength="2048" placeholder="https://kho-video.example/phim.mp4" value="${h(show.source || '')}" required></label></div>
     <div class="field"><label>Bắt đầu<input data-show="startsAt" type="datetime-local" value="${h(cinemaLocalTime(startsAt))}" required></label></div>
     <div class="field"><label>Kết thúc<input data-show="endsAt" type="datetime-local" value="${h(cinemaLocalTime(endsAt))}" required></label></div>
-    </div><div style="margin-top:14px;"><button type="button" class="text-button" data-cinema-remove-direct data-starts-at="${h(show.startsAt || '')}" data-title="${h(show.title || '')}" data-saved="${isSaved ? '1' : '0'}" style="color:#ff6b6b;font-weight:600;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:rgba(255,107,107,0.12);border:1px solid rgba(255,107,107,0.3);border-radius:6px;cursor:pointer;">🗑️ Xóa suất chiếu${isRunning ? ' (Dừng chiếu ngay)' : ''}</button></div></fieldset>`;
+    </div><div style="margin-top:14px;"><button type="button" class="text-button" data-cinema-remove-direct data-starts-at="${h(show.startsAt || '')}" data-title="${h(show.title || '')}" data-room-id="${roomNum}" data-saved="${isSaved ? '1' : '0'}" style="color:#ff6b6b;font-weight:600;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:rgba(255,107,107,0.12);border:1px solid rgba(255,107,107,0.3);border-radius:6px;cursor:pointer;">🗑️ Xóa suất chiếu${isRunning ? ' (Dừng chiếu ngay)' : ''}</button></div></fieldset>`;
 }
 function cinemaPage() {
   const data = state.data.cinema;
@@ -601,12 +608,16 @@ function cinemaPage() {
             const statusBadge = item.status === 'deleted'
               ? '<span class="badge" style="background:rgba(255,107,107,0.15);color:#ff6b6b;border:1px solid rgba(255,107,107,0.3);padding:2px 8px;border-radius:999px;font-size:11px;">Đã dừng / Xóa</span>'
               : '<span class="badge" style="background:rgba(87,242,135,0.15);color:#57f287;border:1px solid rgba(87,242,135,0.3);padding:2px 8px;border-radius:999px;font-size:11px;">Hoàn thành</span>';
+            const rNum = [1, 2, 3].includes(Number(item.roomId)) ? Number(item.roomId) : 1;
             return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
-              <td style="padding:10px 8px;font-weight:600;">🎞️ ${h(item.title)}</td>
+              <td style="padding:10px 8px;font-weight:600;">
+                <span class="badge" style="background:rgba(0,229,255,0.15);color:#00e5ff;border:1px solid rgba(0,229,255,0.3);padding:2px 6px;border-radius:4px;font-size:11px;margin-right:6px;">Cinema ${rNum}</span>
+                🎞️ ${h(item.title)}
+              </td>
               <td style="padding:10px 8px;color:#a0a0b0;">${h(timeLabel)}</td>
               <td style="padding:10px 8px;">${statusBadge}</td>
               <td style="padding:10px 8px;text-align:right;">
-                <button type="button" class="secondary" data-cinema-rebook data-title="${h(item.title)}" data-source="${h(item.source || '')}" style="padding:4px 10px;font-size:12px;cursor:pointer;">🔄 Chiếu lại</button>
+                <button type="button" class="secondary" data-cinema-rebook data-title="${h(item.title)}" data-source="${h(item.source || '')}" data-room-id="${rNum}" style="padding:4px 10px;font-size:12px;cursor:pointer;">🔄 Chiếu lại</button>
               </td>
             </tr>`;
           }).join('')}
@@ -735,6 +746,7 @@ function bindCinema() {
         const res = await api(`/api/guilds/${state.guild.id}/premium/cinema/delete-show`, {
           startsAt,
           title,
+          roomId: directBtn.dataset.roomId ? Number(directBtn.dataset.roomId) : undefined,
         });
         if (res && res.config) {
           state.data.cinema.config = res.config;
@@ -755,6 +767,7 @@ function bindCinema() {
       event.preventDefault();
       const title = rebookBtn.dataset.title;
       const source = rebookBtn.dataset.source;
+      const roomId = rebookBtn.dataset.roomId ? Number(rebookBtn.dataset.roomId) : 1;
       const shows = document.querySelector('#cinema-shows');
       const noShows = document.querySelector('#cinema-no-shows');
       if (noShows) noShows.remove();
@@ -765,9 +778,9 @@ function bindCinema() {
       const startsAt = now.toISOString();
       const endsAt = new Date(now.getTime() + 2.5 * 3600000).toISOString();
 
-      shows.insertAdjacentHTML('beforeend', cinemaShowRow({ title, source, startsAt, endsAt }));
+      shows.insertAdjacentHTML('beforeend', cinemaShowRow({ title, source, startsAt, endsAt, roomId }));
       state.dirty = true;
-      notify(`Đã nạp "${title}" vào lịch chiếu. Hãy kiểm tra lại thời gian và bấm "Lưu cấu hình Cinema"!`);
+      notify(`Đã nạp "${title}" vào lịch chiếu (Cinema ${roomId}). Hãy kiểm tra lại thời gian và bấm "Lưu cấu hình Cinema"!`);
       const newFieldset = shows.lastElementChild;
       if (newFieldset && typeof newFieldset.scrollIntoView === 'function') {
         newFieldset.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -789,6 +802,7 @@ function bindCinema() {
       return {
         title: item.title,
         source: item.source,
+        roomId: [1, 2, 3].includes(Number(item.roomId)) ? Number(item.roomId) : 1,
         startsAt: Number.isFinite(sTime) ? new Date(sTime).toISOString() : item.startsAt,
         endsAt: Number.isFinite(eTime) ? new Date(eTime).toISOString() : item.endsAt,
       };

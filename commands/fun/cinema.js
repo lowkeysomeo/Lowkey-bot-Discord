@@ -16,9 +16,19 @@ const { setGuildSetting } = require('../../utils/guildSettings');
 const data = new SlashCommandBuilder()
   .setName('cinema')
   .setDescription('Rạp phim: chọn phim và bắt đầu chiếu ngay lập tức')
+  .addIntegerOption(opt =>
+    opt.setName('phong')
+      .setDescription('Chọn phòng chiếu (1, 2 hoặc 3)')
+      .setRequired(false)
+      .addChoices(
+        { name: '🎬 Cinema 1 (Phòng 1)', value: 1 },
+        { name: '🎬 Cinema 2 (Phòng 2)', value: 2 },
+        { name: '🎬 Cinema 3 (Phòng 3)', value: 3 },
+      )
+  )
   .setDMPermission(false);
 
-async function execute(interaction) {
+async function executeCinemaRoom(interaction, requestedRoom = null) {
   if (!interaction.inGuild()) return;
 
   if (process.env.CINEMA_ENABLED !== 'true') {
@@ -60,39 +70,35 @@ async function execute(interaction) {
     });
   }
 
-  const now = Date.now();
-  const currentShow = Array.isArray(config.shows) ? config.shows.find(s => {
-    const start = Date.parse(s.startsAt);
-    const end = Date.parse(s.endsAt);
-    return Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end;
-  }) : null;
+  // Xác định số phòng chiếu (1, 2 hoặc 3)
+  let roomNumber = requestedRoom ? Number(requestedRoom) : null;
+  if (!roomNumber) {
+    const userCh = member.voice?.channel;
+    const detected = cinema.getRoomNumberFromChannel(userCh);
+    roomNumber = detected || 1;
+  }
+  if (![1, 2, 3].includes(roomNumber)) roomNumber = 1;
 
-  // Xác định kênh voice chiếu phim (chỉ cho phép các kênh thuộc danh mục Cinema nếu có)
+  const now = Date.now();
+  const currentShow = cinema.getActiveShow(config, now, roomNumber);
+
+  // Xác định kênh voice chiếu phim tương ứng với phòng
   const cinemaCategory = cinema.getCinemaCategory(interaction.guild, config);
   const cinemaVoices = cinema.getCinemaVoiceChannels(interaction.guild, config);
   const hasCategory = cinemaCategory && cinemaVoices && cinemaVoices.size > 0;
   const userVoice = member.voice?.channel;
+  const targetChannel = cinema.getCinemaRoomChannel(interaction.guild, config, roomNumber);
 
-  // TRƯỜNG HỢP 1: Đang có phim chiếu (dù là lịch sẵn hay bất kỳ ai tạo)
-  // Khi /cinema, dẫn thẳng tới suất chiếu đang chiếu với nút [Vào xem phim ngay], không tạo suất mới
+  // TRƯỜNG HỢP 1: Đang có phim chiếu tại phòng này -> Dẫn thẳng tới suất chiếu với nút [Vào xem phim ngay]
   if (currentShow) {
-    let targetChannel = null;
-    if (userVoice && (!hasCategory || userVoice.parentId === cinemaCategory.id)) {
-      targetChannel = userVoice;
-    } else if (config.voiceChannelId) {
-      targetChannel = interaction.guild.channels.cache.get(config.voiceChannelId);
-    } else if (hasCategory && typeof cinemaVoices.first === 'function') {
-      targetChannel = cinemaVoices.first();
-    } else {
-      targetChannel = interaction.guild.channels.cache.find(c => c.isVoiceBased?.());
-    }
+    const playChannel = targetChannel || userVoice;
 
-    if (targetChannel && targetChannel.isVoiceBased?.()) {
+    if (playChannel && playChannel.isVoiceBased?.()) {
       try {
         const existingConn = voice.getVoiceConnection(interaction.guildId);
         if (!existingConn) {
           voice.joinVoiceChannel({
-            channelId: targetChannel.id,
+            channelId: playChannel.id,
             guildId: interaction.guildId,
             adapterCreator: interaction.guild.voiceAdapterCreator,
             selfDeaf: true,
@@ -100,16 +106,16 @@ async function execute(interaction) {
           });
         }
       } catch (err) {
-        console.warn('[CINEMA] Không thể join voice channel:', err.message);
+        console.warn(`[CINEMA] Không thể join voice channel #${playChannel.name}:`, err.message);
       }
     }
 
     const startUnix = Math.floor(Date.parse(currentShow.startsAt) / 1000);
     const endUnix = Math.floor(Date.parse(currentShow.endsAt) / 1000);
     let inviteUrl = null;
-    if (targetChannel && typeof targetChannel.createInvite === 'function') {
+    if (playChannel && typeof playChannel.createInvite === 'function') {
       try {
-        const invite = await targetChannel.createInvite({
+        const invite = await playChannel.createInvite({
           targetApplication: interaction.client?.user?.id || 'bot',
           targetType: 2, // EmbeddedApplication
           maxAge: Math.max(600, endUnix - Math.floor(now / 1000)),
@@ -128,12 +134,14 @@ async function execute(interaction) {
     const elapsedMins = Math.floor(elapsedSeconds / 60);
     const totalMins = Math.floor(totalSeconds / 60);
 
-    const voiceTag = targetChannel ? `<#${targetChannel.id}>` : 'phòng chiếu phim';
+    const voiceTag = playChannel ? `<#${playChannel.id}>` : `Cinema ${roomNumber}`;
 
-    const futureShows = config.shows.filter(s => Date.parse(s.startsAt) > now).slice(0, 5);
+    const futureShows = config.shows
+      .filter(s => (s.roomId || 1) === roomNumber && Date.parse(s.startsAt) > now)
+      .slice(0, 5);
     let upcomingText = '';
     if (futureShows.length) {
-      upcomingText = '\n\n**📅 Lịch chiếu tiếp theo:**\n' + futureShows.map(s => {
+      upcomingText = `\n\n**📅 Lịch chiếu tiếp theo tại Cinema ${roomNumber}:**\n` + futureShows.map(s => {
         const uStart = Math.floor(Date.parse(s.startsAt) / 1000);
         const uEnd = Math.floor(Date.parse(s.endsAt) / 1000);
         return `• **${s.title}** — <t:${uStart}:t> - <t:${uEnd}:t> (<t:${uStart}:R>)`;
@@ -142,20 +150,20 @@ async function execute(interaction) {
 
     const embed = new EmbedBuilder()
       .setColor(0xE50914)
-      .setTitle(`🎬 VNL CINEMA · ĐANG CHIẾU: ${currentShow.title}`)
+      .setTitle(`🎬 VNL CINEMA ${roomNumber} · ĐANG CHIẾU: ${currentShow.title}`)
       .setDescription(
-        `Bộ phim **${currentShow.title}** đang được chiếu trực tiếp tại **${voiceTag}**!\n\n` +
+        `Bộ phim **${currentShow.title}** đang được chiếu trực tiếp tại **${voiceTag}** (Phòng ${roomNumber})!\n\n` +
         `⏰ **Suất chiếu:** <t:${startUnix}:t> - <t:${endUnix}:t> (<t:${startUnix}:R>)\n` +
         `⏱️ **Tiến trình:** Đang chiếu ở phút thứ **${elapsedMins}** / **${totalMins}**\n\n` +
         `🍿 Bấm nút **[Vào xem phim ngay]** bên dưới để mở màn hình xem phim đồng bộ cùng mọi người!` +
         upcomingText
       )
-      .setFooter({ text: 'VNL Cinema • Đồng bộ thời gian thực' })
+      .setFooter({ text: `VNL Cinema ${roomNumber} • Đồng bộ thời gian thực` })
       .setTimestamp();
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setLabel('🍿 Vào xem phim ngay')
+        .setLabel(`🍿 Vào xem phim ngay (Cinema ${roomNumber})`)
         .setStyle(ButtonStyle.Link)
         .setURL(watchUrl)
     );
@@ -166,8 +174,7 @@ async function execute(interaction) {
     });
   }
 
-  // TRƯỜNG HỢP 2: Chưa có phim nào đang chiếu -> Cho phép chọn phim phát ngay
-  let targetChannel = null;
+  // TRƯỜNG HỢP 2: Chưa có phim nào đang chiếu trong phòng này -> Cho phép chọn phim phát ngay
   if (hasCategory) {
     if (!userVoice) {
       const allowedNames = cinemaVoices.map(c => `**${c.name}**`).join(', ');
@@ -185,16 +192,14 @@ async function execute(interaction) {
       });
     }
 
-    targetChannel = userVoice;
+    if (targetChannel && userVoice.id !== targetChannel.id) {
+      return interaction.reply({
+        content: `⚠️ Bạn đang ở phòng **${userVoice.name}**. Để phát phim vào **Cinema ${roomNumber}**, vui lòng chuyển sang phòng thoại **<#${targetChannel.id}>**!`,
+        flags: 64,
+      });
+    }
   } else {
-    if (config.voiceChannelId) {
-      targetChannel = interaction.guild.channels.cache.get(config.voiceChannelId);
-    }
-    if (!targetChannel) {
-      targetChannel = userVoice;
-    }
-
-    if (!targetChannel) {
+    if (!targetChannel && !userVoice) {
       return interaction.reply({
         content: 'Bạn cần tham gia vào một kênh thoại (hoặc Admin cần cài đặt Kênh Voice chiếu phim trên Dashboard) trước khi phát phim!',
         flags: 64,
@@ -202,11 +207,13 @@ async function execute(interaction) {
     }
   }
 
+  const activeChannel = targetChannel || userVoice;
+
   const options = config.shows.slice(0, 25).map((show, idx) => {
     const durMins = Math.round((Date.parse(show.endsAt) - Date.parse(show.startsAt)) / 60000) || 120;
     return {
       label: show.title.slice(0, 100),
-      description: `Thời lượng dự kiến: ~${durMins} phút`,
+      description: `Thời lượng dự kiến: ~${durMins} phút (Phòng mặc định: Cinema ${show.roomId || 1})`,
       value: String(idx),
       emoji: '🎬',
     };
@@ -214,16 +221,18 @@ async function execute(interaction) {
 
   const userId = interaction.user?.id || interaction.member?.user?.id || interaction.member?.id || 'unknown';
   const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId(`cinema:select_movie:${userId}`)
-    .setPlaceholder('🍿 Chọn bộ phim bạn muốn phát ngay...')
+    .setCustomId(`cinema:select_movie:${roomNumber}:${userId}`)
+    .setPlaceholder(`🍿 Chọn bộ phim bạn muốn phát tại Cinema ${roomNumber}...`)
     .addOptions(options);
 
   const row = new ActionRowBuilder().addComponents(selectMenu);
 
-  const futureShows = config.shows.filter(s => Date.parse(s.startsAt) > now).slice(0, 5);
+  const futureShows = config.shows
+    .filter(s => (s.roomId || 1) === roomNumber && Date.parse(s.startsAt) > now)
+    .slice(0, 5);
   let upcomingDesc = '';
   if (futureShows.length) {
-    upcomingDesc = '\n\n**📅 Lịch chiếu đã lên lịch:**\n' + futureShows.map(s => {
+    upcomingDesc = `\n\n**📅 Lịch chiếu đã lên lịch tại Cinema ${roomNumber}:**\n` + futureShows.map(s => {
       const uStart = Math.floor(Date.parse(s.startsAt) / 1000);
       const uEnd = Math.floor(Date.parse(s.endsAt) / 1000);
       return `• **${s.title}** — <t:${uStart}:t> - <t:${uEnd}:t> (<t:${uStart}:R>)`;
@@ -232,9 +241,9 @@ async function execute(interaction) {
 
   const embed = new EmbedBuilder()
     .setColor(0xE50914)
-    .setTitle('🎬 VNL CINEMA · CHỌN PHIM PHÁT NGAY')
-    .setDescription(`Chọn một bộ phim từ danh sách bên dưới để bắt đầu chiếu ngay lập tức tại **<#${targetChannel.id}>**!\n\n🍿 **Đồng bộ thời gian thực:** Mọi người trong phòng thoại sẽ xem cùng một mốc thời gian.${upcomingDesc}`)
-    .setFooter({ text: 'VNL Cinema • Phát phim theo yêu cầu' })
+    .setTitle(`🎬 VNL CINEMA ${roomNumber} · CHỌN PHIM PHÁT NGAY`)
+    .setDescription(`Chọn một bộ phim từ danh sách bên dưới để bắt đầu chiếu ngay lập tức tại **<#${activeChannel.id}>**!\n\n🍿 **Đồng bộ thời gian thực:** Mọi người trong phòng thoại sẽ xem cùng một mốc thời gian.${upcomingDesc}`)
+    .setFooter({ text: `VNL Cinema ${roomNumber} • Phát phim theo yêu cầu` })
     .setTimestamp();
 
   return interaction.reply({
@@ -243,15 +252,33 @@ async function execute(interaction) {
   });
 }
 
+async function execute(interaction) {
+  let roomNumber = interaction.options?.getInteger?.('phong');
+  if (!roomNumber) {
+    const detected = cinema.getRoomNumberFromChannel(interaction.member?.voice?.channel);
+    roomNumber = detected || 1;
+  }
+  return executeCinemaRoom(interaction, roomNumber);
+}
+
 async function handleSelect(interaction) {
   if (!interaction.isStringSelectMenu() || !interaction.customId.startsWith('cinema:select_movie:')) return;
 
   const parts = interaction.customId.split(':');
-  const authorId = parts[2];
+  let roomNumber = 1;
+  let authorId = null;
+
+  if (parts.length >= 4) {
+    roomNumber = Number(parts[2]) || 1;
+    authorId = parts[3];
+  } else {
+    roomNumber = 1;
+    authorId = parts[2];
+  }
 
   if (authorId && interaction.user.id !== authorId) {
     return interaction.reply({
-      content: 'Chỉ người dùng lệnh `/cinema` mới có thể chọn phim trên bảng này.',
+      content: `Chỉ người dùng lệnh \`/cinema${roomNumber}\` mới có thể chọn phim trên bảng này.`,
       flags: 64,
     });
   }
@@ -271,62 +298,26 @@ async function handleSelect(interaction) {
   }
 
   const now = Date.now();
-  const currentActiveShow = Array.isArray(config.shows) ? config.shows.find(s => {
-    const start = Date.parse(s.startsAt);
-    const end = Date.parse(s.endsAt);
-    return Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end;
-  }) : null;
+  const currentActiveShow = cinema.getActiveShow(config, now, roomNumber);
 
   if (currentActiveShow) {
     const endUnix = Math.floor(Date.parse(currentActiveShow.endsAt) / 1000);
     return interaction.editReply({
-      content: `⚠️ Hiện tại rạp đang chiếu bộ phim **${currentActiveShow.title}** (dự kiến kết thúc lúc <t:${endUnix}:t>). Không thể tạo suất chiếu mới trong thời gian suất chiếu hiện tại đang diễn ra!`,
+      content: `⚠️ Hiện tại Cinema ${roomNumber} đang chiếu bộ phim **${currentActiveShow.title}** (dự kiến kết thúc lúc <t:${endUnix}:t>). Không thể tạo suất chiếu mới trong thời gian suất chiếu hiện tại đang diễn ra!`,
       embeds: [],
       components: [],
     });
   }
 
   // Xác định kênh voice chiếu
-  const cinemaCategory = cinema.getCinemaCategory(interaction.guild, config);
-  const cinemaVoices = cinema.getCinemaVoiceChannels(interaction.guild, config);
-  const hasCategory = cinemaCategory && cinemaVoices && cinemaVoices.size > 0;
+  const targetChannel = cinema.getCinemaRoomChannel(interaction.guild, config, roomNumber) || interaction.member.voice?.channel;
 
-  let targetChannel = null;
-  const userVoice = interaction.member.voice?.channel;
-
-  if (hasCategory) {
-    if (userVoice && userVoice.parentId === cinemaCategory.id) {
-      targetChannel = userVoice;
-    } else if (config.voiceChannelId) {
-      const cfgVoice = interaction.guild.channels.cache.get(config.voiceChannelId);
-      if (cfgVoice && cfgVoice.parentId === cinemaCategory.id) {
-        targetChannel = cfgVoice;
-      }
-    }
-
-    if (!targetChannel) {
-      const allowedNames = cinemaVoices.map(c => `**${c.name}**`).join(', ');
-      return interaction.editReply({
-        content: `⚠️ Không tìm thấy phòng chiếu hợp lệ. Phim chỉ được phép chiếu tại các kênh thoại thuộc danh mục **${cinemaCategory.name}** (${allowedNames}).`,
-        embeds: [],
-        components: [],
-      });
-    }
-  } else {
-    if (config.voiceChannelId) {
-      targetChannel = interaction.guild.channels.cache.get(config.voiceChannelId);
-    }
-    if (!targetChannel) {
-      targetChannel = userVoice;
-    }
-
-    if (!targetChannel) {
-      return interaction.editReply({
-        content: 'Không tìm thấy phòng thoại để phát phim. Hãy đảm bảo bạn đang ở trong phòng thoại hoặc kênh voice trên Dashboard hợp lệ.',
-        embeds: [],
-        components: [],
-      });
-    }
+  if (!targetChannel) {
+    return interaction.editReply({
+      content: `Không tìm thấy phòng thoại để phát phim cho Cinema ${roomNumber}. Hãy đảm bảo bạn đang ở trong phòng thoại hoặc kênh voice trên Dashboard hợp lệ.`,
+      embeds: [],
+      components: [],
+    });
   }
 
   // 1. Xác định thời lượng dự kiến
@@ -335,19 +326,18 @@ async function handleSelect(interaction) {
     duration = 2.5 * 3600 * 1000; // Mặc định 2.5 tiếng nếu lịch cũ không chuẩn
   }
 
-  // 2. Bảo toàn toàn bộ các suất chiếu đã đặt lịch (tuyệt đối không cắt ngắn hay xóa các suất đã lên lịch)
+  // 2. Bảo toàn toàn bộ các suất chiếu đã đặt lịch
   const safeExistingShows = config.shows.map(s => ({ ...s }));
 
-  // Kiểm tra không đè vào suất chiếu kế tiếp trong tương lai
-  const futureShows = safeExistingShows
-    .filter(s => Date.parse(s.startsAt) > now)
+  // Kiểm tra không đè vào suất chiếu kế tiếp TRONG CÙNG PHÒNG
+  const futureShowsSameRoom = safeExistingShows
+    .filter(s => (s.roomId || 1) === roomNumber && Date.parse(s.startsAt) > now)
     .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
 
   let finalEndsAt = now + duration;
-  if (futureShows.length > 0) {
-    const nextStart = Date.parse(futureShows[0].startsAt);
+  if (futureShowsSameRoom.length > 0) {
+    const nextStart = Date.parse(futureShowsSameRoom[0].startsAt);
     if (finalEndsAt > nextStart) {
-      // Giới hạn giờ kết thúc ngay trước khi suất chiếu đã đặt bắt đầu để không trùng lịch
       finalEndsAt = Math.max(now + 60000, nextStart);
     }
   }
@@ -355,23 +345,24 @@ async function handleSelect(interaction) {
   const immediateShow = {
     title: selectedShow.title,
     source: selectedShow.source,
+    roomId: roomNumber,
     startsAt: new Date(now).toISOString(),
     endsAt: new Date(finalEndsAt).toISOString(),
   };
 
-  // Ghép suất chiếu mới phát ngay cùng với các suất chiếu đã đặt sẵn (tối đa 20 suất)
+  // Ghép suất chiếu mới phát ngay cùng với các suất chiếu đã đặt sẵn (tối đa 30 suất)
   config.shows = [...safeExistingShows, immediateShow]
     .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
-    .slice(-20);
+    .slice(-30);
 
   // Lưu cấu hình vào database
   setGuildSetting(interaction.guildId, 'CINEMA_CONFIG', JSON.stringify(config));
 
-  // Đánh dấu suất chiếu đã được thông báo để bộ scheduler không thông báo lặp
+  // Đánh dấu suất chiếu đã được thông báo
   const showKey = `${immediateShow.startsAt}_${immediateShow.title}`;
-  cinema.markShowAnnounced(interaction.guildId, showKey);
+  cinema.markShowAnnounced(interaction.guildId, immediateShow);
 
-  // 1. Bot tham gia kênh voice
+  // 1. Bot tham gia kênh voice nếu có thể
   let voiceConn = null;
   try {
     voiceConn = voice.joinVoiceChannel({
@@ -381,21 +372,26 @@ async function handleSelect(interaction) {
       selfDeaf: true,
       selfMute: true,
     });
-    console.log(`[CINEMA] ✅ Bot đã vào kênh thoại #${targetChannel.name} để phát "${immediateShow.title}" (${interaction.guild.name})`);
+    console.log(`[CINEMA] ✅ Bot đã vào kênh thoại #${targetChannel.name} để phát "${immediateShow.title}" tại Cinema ${roomNumber} (${interaction.guild.name})`);
   } catch (err) {
-    console.error('[CINEMA] Lỗi khi vào voice channel:', err.message);
+    // Nếu bot đã ở phòng khác thì không làm crash luồng, activity vẫn chạy bình thường
   }
 
   try {
     const scheduler = require('../../utils/cinemaScheduler');
     if (scheduler.activeSessions) {
-      scheduler.activeSessions.set(interaction.guildId, {
+      const sess = {
         showKey,
         show: immediateShow,
-        joined: true,
+        roomId: roomNumber,
+        joined: Boolean(voiceConn),
         announced: true,
-        connection: voiceConn || voice.getVoiceConnection(interaction.guildId),
-      });
+        connection: voiceConn || null,
+      };
+      scheduler.activeSessions.set(`${interaction.guildId}_room${roomNumber}`, sess);
+      if (roomNumber === 1 || !scheduler.activeSessions.has(interaction.guildId)) {
+        scheduler.activeSessions.set(interaction.guildId, sess);
+      }
     }
   } catch {}
 
@@ -418,10 +414,12 @@ async function handleSelect(interaction) {
   const endUnix = Math.floor(finalEndsAt / 1000);
   const activityWebUrl = (process.env.DASHBOARD_URL || 'https://vietnamlegacy.up.railway.app').replace(/\/$/, '') + '/activity';
 
-  const upcomingList = config.shows.filter(s => Date.parse(s.startsAt) > now && s.startsAt !== immediateShow.startsAt).slice(0, 5);
+  const upcomingList = config.shows
+    .filter(s => (s.roomId || 1) === roomNumber && Date.parse(s.startsAt) > now && s.startsAt !== immediateShow.startsAt)
+    .slice(0, 5);
   let upcomingText = '';
   if (upcomingList.length) {
-    upcomingText = '\n\n**📅 Lịch chiếu tiếp theo:**\n' + upcomingList.map(s => {
+    upcomingText = `\n\n**📅 Lịch chiếu tiếp theo tại Cinema ${roomNumber}:**\n` + upcomingList.map(s => {
       const uStart = Math.floor(Date.parse(s.startsAt) / 1000);
       const uEnd = Math.floor(Date.parse(s.endsAt) / 1000);
       return `• **${s.title}** — <t:${uStart}:t> - <t:${uEnd}:t> (<t:${uStart}:R>)`;
@@ -430,22 +428,22 @@ async function handleSelect(interaction) {
 
   const playingEmbed = new EmbedBuilder()
     .setColor(0xE50914)
-    .setTitle(`🎬 ĐANG PHÁT PHIM: ${immediateShow.title}`)
+    .setTitle(`🎬 ĐANG PHÁT PHIM: ${immediateShow.title} (Cinema ${roomNumber})`)
     .setDescription(
-      `🍿 Bộ phim **${immediateShow.title}** đã được khởi chiếu tại **<#${targetChannel.id}>** theo yêu cầu của <@${interaction.user.id}>!\n\n` +
+      `🍿 Bộ phim **${immediateShow.title}** đã được khởi chiếu tại **<#${targetChannel.id}>** (Cinema ${roomNumber}) theo yêu cầu của <@${interaction.user.id}>!\n\n` +
       `⏰ **Thời gian:** <t:${startUnix}:t> - <t:${endUnix}:t> (Kết thúc <t:${endUnix}:R>)\n\n` +
       `👇 **Cách xem:**\n` +
       `1. Bấm nút **"Vào rạp xem phim"** bên dưới (hoặc bấm biểu tượng **Tên Lửa / Hoạt Động (Activities)** ở thanh điều khiển cuộc gọi).\n` +
       `2. Màn hình rạp chiếu sẽ tự động mở lên đồng bộ cho tất cả mọi người cùng xem!` +
       upcomingText
     )
-    .setFooter({ text: 'VNL Cinema • Phát phim đồng bộ thời gian thực' })
+    .setFooter({ text: `VNL Cinema ${roomNumber} • Phát phim đồng bộ thời gian thực` })
     .setTimestamp();
 
   const components = [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setLabel('🍿 Vào rạp xem phim ngay')
+        .setLabel(`🍿 Vào rạp xem phim ngay (Cinema ${roomNumber})`)
         .setStyle(ButtonStyle.Link)
         .setURL(inviteUrl || activityWebUrl)
     )
@@ -459,14 +457,14 @@ async function handleSelect(interaction) {
 
   try {
     const scheduler = require('../../utils/cinemaScheduler');
-    const sess = scheduler.activeSessions?.get(interaction.guildId);
+    const sess = scheduler.activeSessions?.get(`${interaction.guildId}_room${roomNumber}`) || scheduler.activeSessions?.get(interaction.guildId);
     if (sess) {
       if (!Array.isArray(sess.messages)) sess.messages = [];
       if (replyMsg) sess.messages.push(replyMsg);
     }
   } catch {}
 
-  // Nếu có cấu hình kênh thông báo riêng khác với kênh lệnh thì thông báo thêm vào đó
+  // Thông báo tới kênh thông báo chung nếu có
   if (config.notifyChannelId && config.notifyChannelId !== interaction.channelId) {
     const notifyCh = interaction.guild.channels.cache.get(config.notifyChannelId);
     if (notifyCh && typeof notifyCh.send === 'function') {
@@ -490,7 +488,7 @@ async function handleSelect(interaction) {
       }).then(msg => {
         try {
           const scheduler = require('../../utils/cinemaScheduler');
-          const sess = scheduler.activeSessions?.get(interaction.guildId);
+          const sess = scheduler.activeSessions?.get(`${interaction.guildId}_room${roomNumber}`) || scheduler.activeSessions?.get(interaction.guildId);
           if (sess && msg) {
             if (!Array.isArray(sess.messages)) sess.messages = [];
             sess.messages.push(msg);
@@ -504,5 +502,6 @@ async function handleSelect(interaction) {
 module.exports = {
   data,
   execute,
+  executeCinemaRoom,
   handleSelect,
 };

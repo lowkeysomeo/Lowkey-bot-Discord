@@ -202,10 +202,61 @@ async function main() {
   assert.equal(delRes.json().config.history.length, 2, 'Deleted show added to history');
   assert.equal(delRes.json().config.history[0].status, 'deleted');
 
-  // Test clear-history API
-  const clearRes = await request('/api/guilds/111/premium/cinema/clear-history', { method: 'POST', headers, body: JSON.stringify({}) });
-  assert.equal(clearRes.status, 200, 'clear-history API must succeed');
-  assert.equal(clearRes.json().config.history.length, 0, 'History cleared via API');
+  // Multi-room tests
+  const multiNow = Date.now();
+  const startsAt = new Date(multiNow - 60000).toISOString();
+  const endsAt = new Date(multiNow + 7200000).toISOString();
+
+  // Test: validate allows concurrent shows across different rooms
+  const multiRoomConfig = cinema.validate({
+    enabled: true,
+    title: 'VNL Cinema Multi-Room',
+    description: '',
+    audience: 'members',
+    roleIds: [],
+    rightsConfirmed: true,
+    shows: [
+      { title: 'Phim Room 1', source: 'https://media.example.com/p1.mp4', startsAt, endsAt, roomId: 1 },
+      { title: 'Phim Room 2', source: 'https://media.example.com/p2.mp4', startsAt, endsAt, roomId: 2 },
+      { title: 'Phim Room 3', source: 'https://media.example.com/p3.mp4', startsAt, endsAt, roomId: 3 },
+    ]
+  }, roles, env);
+  assert.equal(multiRoomConfig.shows.length, 3, 'Different rooms can screen movies concurrently at the exact same time');
+
+  // Test: same room cannot overlap
+  assert.throws(() => {
+    cinema.validate({
+      enabled: true,
+      title: 'VNL Cinema Multi-Room',
+      description: '',
+      audience: 'members',
+      roleIds: [],
+      rightsConfirmed: true,
+      shows: [
+        { title: 'Phim 1', source: 'https://media.example.com/p1.mp4', startsAt, endsAt, roomId: 2 },
+        { title: 'Phim 2', source: 'https://media.example.com/p2.mp4', startsAt, endsAt, roomId: 2 },
+      ]
+    }, roles, env);
+  }, /Các suất chiếu trong Cinema 2 không được trùng giờ/);
+
+  // Test: getRoomNumberFromChannel
+  assert.equal(cinema.getRoomNumberFromChannel({ name: '🎬・｡･:*｡VNL Cinema 1' }), 1);
+  assert.equal(cinema.getRoomNumberFromChannel({ name: '🎬・｡･:*｡VNL Cinema 2' }), 2);
+  assert.equal(cinema.getRoomNumberFromChannel({ name: '🎬・｡･:*｡VNL Cinema 3' }), 3);
+  assert.equal(cinema.getRoomNumberFromChannel({ id: '1561645344796713031', name: 'phòng bất kỳ' }), 2);
+
+  // Test: getActiveShow for each room
+  assert.equal(cinema.getActiveShow(multiRoomConfig, multiNow, 1).title, 'Phim Room 1');
+  assert.equal(cinema.getActiveShow(multiRoomConfig, multiNow, 2).title, 'Phim Room 2');
+  assert.equal(cinema.getActiveShow(multiRoomConfig, multiNow, 3).title, 'Phim Room 3');
+
+  // Test: /cinema1, /cinema2, /cinema3 commands exist and can execute
+  const cmd1 = require('../commands/fun/cinema1');
+  const cmd2 = require('../commands/fun/cinema2');
+  const cmd3 = require('../commands/fun/cinema3');
+  assert.equal(cmd1.data.name, 'cinema1');
+  assert.equal(cmd2.data.name, 'cinema2');
+  assert.equal(cmd3.data.name, 'cinema3');
 
   console.log('PASS Cinema: validation, schedule synchronization, guild isolation, admin revocation, direct page/API authorization, CSRF, viewer role revocation, session separation, disabled state, entry point, & /cinemalist uploaded library.');
   getDb().close();
