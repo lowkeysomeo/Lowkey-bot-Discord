@@ -51,7 +51,8 @@ async function start() {
     await sdk.ready();
     if (!sdk.guildId) throw new Error('Hãy mở Cinema trong một server Discord.');
     guildId = sdk.guildId;
-    const { code } = await sdk.commands.authorize({ client_id: clientId, response_type: 'code', state: crypto.randomUUID(), prompt: 'none', scope: ['identify'] });
+    const state = (window.crypto && typeof window.crypto.randomUUID === 'function') ? window.crypto.randomUUID() : Math.random().toString(36).slice(2);
+    const { code } = await sdk.commands.authorize({ client_id: clientId, response_type: 'code', state, prompt: 'none', scope: ['identify'] });
     const auth = await request('/session', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code }) });
     await sdk.commands.authenticate({ access_token: auth.access_token });
     session = auth.session;

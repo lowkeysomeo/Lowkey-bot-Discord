@@ -10,17 +10,32 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
   const appOrigin = `https://${env.CLIENT_ID}.discordsays.com`;
   return async function handle(req, res, route) {
     if (route === '/activity') route = '/activity/';
-    if (!route.startsWith('/cinema-api/') && !route.startsWith('/activity/')) return false;
+    const isDiscordClient = req.headers.referer?.includes('discordsays.com') || req.headers.origin?.includes('discordsays.com');
+    const activityAssetMap = {
+      '/activity/': ['index.html', 'text/html'],
+      '/activity/index.html': ['index.html', 'text/html'],
+      '/activity/main.js': ['main.js', 'text/javascript'],
+      '/activity/style.css': ['style.css', 'text/css'],
+      '/.proxy/activity/': ['index.html', 'text/html'],
+      '/.proxy/activity/index.html': ['index.html', 'text/html'],
+      '/.proxy/activity/main.js': ['main.js', 'text/javascript'],
+      '/.proxy/activity/style.css': ['style.css', 'text/css'],
+      '/main.js': ['main.js', 'text/javascript'],
+    };
+    if (isDiscordClient && route === '/style.css') {
+      activityAssetMap['/style.css'] = ['style.css', 'text/css'];
+    }
+    const isActivityAsset = Object.hasOwn(activityAssetMap, route);
+    if (!route.startsWith('/cinema-api/') && !route.startsWith('/activity/') && !isActivityAsset) return false;
     if (env.CINEMA_ENABLED !== 'true') fail(503, 'Cinema chưa được bật bởi chủ bot.');
     for (const [key, value] of sessions) if (value.expires <= Date.now()) sessions.delete(key);
-    if (route.startsWith('/activity/')) {
-      const files = { '/activity/': ['index.html', 'text/html'], '/activity/main.js': ['main.js', 'text/javascript'], '/activity/style.css': ['style.css', 'text/css'] };
-      if (req.method !== 'GET' || !files[route]) fail(404, 'Không tìm thấy Activity.');
-      const [file, mime] = files[route];
+    if (isActivityAsset || route.startsWith('/activity/')) {
+      if (req.method !== 'GET' || !activityAssetMap[route]) fail(404, 'Không tìm thấy Activity.');
+      const [file, mime] = activityAssetMap[route];
       const target = path.join(__dirname, '../activity/dist', file);
       if (!fs.existsSync(target)) fail(503, 'Activity chưa được build.');
       res.removeHeader('X-Frame-Options');
-      res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; media-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors https://discord.com https://*.discord.com https://*.discordsays.com; base-uri 'none'; form-action 'none'");
+      res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; media-src 'self' https: blob:; connect-src 'self' https:; img-src 'self' https: data:; frame-ancestors https://discord.com https://*.discord.com https://*.discordsays.com; base-uri 'none'; form-action 'none'");
       res.writeHead(200, { 'Content-Type': `${mime}; charset=utf-8` });
       res.end(fs.readFileSync(target));
       return true;
@@ -28,7 +43,8 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
     if (req.method === 'GET' && route === '/cinema-api/config') { json(res, 200, { clientId: env.CLIENT_ID }); return true; }
     if (req.method === 'POST' && route === '/cinema-api/session') {
       if (!env.CLIENT_ID || !env.DISCORD_CLIENT_SECRET) fail(503, 'Cinema chưa được cấu hình OAuth.');
-      if (req.headers.origin !== appOrigin) fail(403, 'Hãy mở Cinema từ Discord Activity.');
+      const origin = (req.headers.origin || '').replace(/\/$/, '');
+      if (origin !== appOrigin && !origin.endsWith('.discordsays.com')) fail(403, 'Hãy mở Cinema từ Discord Activity.');
       // Do not trust X-Forwarded-For without a configured trusted reverse proxy.
       rateLimit(`cinema-login:${req.socket.remoteAddress}`, 30);
       if (sessions.size >= 5000) fail(503, 'Cinema đang đầy. Hãy thử lại.');
