@@ -384,6 +384,42 @@ function getRoomNumberFromChannel(channel) {
   return null;
 }
 
+async function ensureCinemaChannelPermissions(guild, config) {
+  if (!guild || !guild.members?.me) return;
+  const me = guild.members.me;
+  if (!me.permissions?.has?.(PermissionFlagsBits.ManageChannels) && !me.permissions?.has?.(PermissionFlagsBits.Administrator)) {
+    return;
+  }
+  const category = getCinemaCategory(guild, config);
+  const voiceChannels = getCinemaVoiceChannels(guild, config);
+  const targets = [];
+  if (category) targets.push(category);
+  if (voiceChannels && voiceChannels.size > 0) {
+    for (const vc of voiceChannels.values()) targets.push(vc);
+  }
+  if (config?.voiceChannelId && guild.channels?.cache) {
+    const ch = guild.channels.cache.get(config.voiceChannelId);
+    if (ch && !targets.some(t => t.id === ch.id)) targets.push(ch);
+  }
+
+  for (const channel of targets) {
+    try {
+      if (!channel || typeof channel.permissionOverwrites?.edit !== 'function') continue;
+      const overwrite = channel.permissionOverwrites.cache?.get(guild.roles.everyone.id);
+      const hasPerm = overwrite?.allow?.has?.(PermissionFlagsBits.UseEmbeddedActivities);
+      if (!hasPerm) {
+        await channel.permissionOverwrites.edit(guild.roles.everyone, {
+          ViewChannel: true,
+          Connect: true,
+          UseEmbeddedActivities: true,
+        }, { reason: 'VNL Cinema: Cho phép thành viên sử dụng Hoạt động (Activities)' });
+      }
+    } catch (err) {
+      console.warn(`[CINEMA] Không thể cập nhật quyền Activity cho kênh #${channel?.name}:`, err.message);
+    }
+  }
+}
+
 function getCinemaRoomChannel(guild, config, roomNumber = 1) {
   if (!guild || !guild.channels?.cache) return null;
   const targetRoom = Number(roomNumber) || 1;
@@ -678,5 +714,6 @@ module.exports = {
   clearHistory,
   getRoomNumberFromChannel,
   getCinemaRoomChannel,
+  ensureCinemaChannelPermissions,
   getActiveShow,
 };

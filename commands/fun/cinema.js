@@ -78,6 +78,9 @@ async function executeCinemaRoom(interaction, requestedRoom = null) {
   // Xác định kênh voice chiếu phim tương ứng với phòng
   const cinemaCategory = cinema.getCinemaCategory(interaction.guild, config);
   const cinemaVoices = cinema.getCinemaVoiceChannels(interaction.guild, config);
+  if (typeof cinema.ensureCinemaChannelPermissions === 'function') {
+    cinema.ensureCinemaChannelPermissions(interaction.guild, config).catch(() => {});
+  }
   const hasCategory = cinemaCategory && cinemaVoices && cinemaVoices.size > 0;
   const userVoice = member.voice?.channel;
   const targetChannel = cinema.getCinemaRoomChannel(interaction.guild, config, roomNumber);

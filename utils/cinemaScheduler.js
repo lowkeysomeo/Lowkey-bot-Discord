@@ -18,6 +18,10 @@ function checkShows(client) {
         continue;
       }
 
+      if (typeof cinema.ensureCinemaChannelPermissions === 'function') {
+        cinema.ensureCinemaChannelPermissions(guild, config).catch(() => {});
+      }
+
       // 1. Kiểm tra các suất chiếu sắp tới để gửi thông báo nhắc trước (2 lần: Lần 1 trước 3 tiếng/tùy chọn, Lần 2 trước 10 phút)
       const preHours = typeof config.preReminderHours === 'number' ? config.preReminderHours : 3;
       const remind10mEnabled = config.remind10m !== false;
