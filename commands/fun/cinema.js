@@ -60,14 +60,103 @@ async function execute(interaction) {
     });
   }
 
+  const now = Date.now();
+  const currentShow = Array.isArray(config.shows) ? config.shows.find(s => {
+    const start = Date.parse(s.startsAt);
+    const end = Date.parse(s.endsAt);
+    return Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end;
+  }) : null;
+
   // Xác định kênh voice chiếu phim (chỉ cho phép các kênh thuộc danh mục Cinema nếu có)
   const cinemaCategory = cinema.getCinemaCategory(interaction.guild, config);
   const cinemaVoices = cinema.getCinemaVoiceChannels(interaction.guild, config);
   const hasCategory = cinemaCategory && cinemaVoices && cinemaVoices.size > 0;
-
-  let targetChannel = null;
   const userVoice = member.voice?.channel;
 
+  // TRƯỜNG HỢP 1: Đang có phim chiếu (dù là lịch sẵn hay bất kỳ ai tạo)
+  // Khi /cinema, dẫn thẳng tới suất chiếu đang chiếu với nút [Vào xem phim ngay], không tạo suất mới
+  if (currentShow) {
+    let targetChannel = null;
+    if (userVoice && (!hasCategory || userVoice.parentId === cinemaCategory.id)) {
+      targetChannel = userVoice;
+    } else if (config.voiceChannelId) {
+      targetChannel = interaction.guild.channels.cache.get(config.voiceChannelId);
+    } else if (hasCategory && typeof cinemaVoices.first === 'function') {
+      targetChannel = cinemaVoices.first();
+    } else {
+      targetChannel = interaction.guild.channels.cache.find(c => c.isVoiceBased?.());
+    }
+
+    if (targetChannel && targetChannel.isVoiceBased?.()) {
+      try {
+        const existingConn = voice.getVoiceConnection(interaction.guildId);
+        if (!existingConn) {
+          voice.joinVoiceChannel({
+            channelId: targetChannel.id,
+            guildId: interaction.guildId,
+            adapterCreator: interaction.guild.voiceAdapterCreator,
+            selfDeaf: true,
+            selfMute: true,
+          });
+        }
+      } catch (err) {
+        console.warn('[CINEMA] Không thể join voice channel:', err.message);
+      }
+    }
+
+    const startUnix = Math.floor(Date.parse(currentShow.startsAt) / 1000);
+    const endUnix = Math.floor(Date.parse(currentShow.endsAt) / 1000);
+    let inviteUrl = null;
+    if (targetChannel && typeof targetChannel.createInvite === 'function') {
+      try {
+        const invite = await targetChannel.createInvite({
+          targetApplication: interaction.client?.user?.id || 'bot',
+          targetType: 2, // EmbeddedApplication
+          maxAge: Math.max(600, endUnix - Math.floor(now / 1000)),
+        });
+        inviteUrl = invite.url;
+      } catch (e) {
+        console.warn('[CINEMA] Không thể tạo invite:', e.message);
+      }
+    }
+
+    const activityWebUrl = (process.env.DASHBOARD_URL || 'https://vietnamlegacy.up.railway.app').replace(/\/$/, '') + '/activity';
+    const watchUrl = inviteUrl || activityWebUrl;
+
+    const elapsedSeconds = Math.max(0, Math.floor((now - Date.parse(currentShow.startsAt)) / 1000));
+    const totalSeconds = Math.max(1, Math.floor((Date.parse(currentShow.endsAt) - Date.parse(currentShow.startsAt)) / 1000));
+    const elapsedMins = Math.floor(elapsedSeconds / 60);
+    const totalMins = Math.floor(totalSeconds / 60);
+
+    const voiceTag = targetChannel ? `<#${targetChannel.id}>` : 'phòng chiếu phim';
+
+    const embed = new EmbedBuilder()
+      .setColor(0xE50914)
+      .setTitle(`🎬 VNL CINEMA · ĐANG CHIẾU: ${currentShow.title}`)
+      .setDescription(
+        `Bộ phim **${currentShow.title}** đang được chiếu trực tiếp tại **${voiceTag}**!\n\n` +
+        `⏰ **Suất chiếu:** <t:${startUnix}:t> - <t:${endUnix}:t> (<t:${startUnix}:R>)\n` +
+        `⏱️ **Tiến trình:** Đang chiếu ở phút thứ **${elapsedMins}** / **${totalMins}**\n\n` +
+        `🍿 Bấm nút **[Vào xem phim ngay]** bên dưới để mở màn hình xem phim đồng bộ cùng mọi người!`
+      )
+      .setFooter({ text: 'VNL Cinema • Đồng bộ thời gian thực' })
+      .setTimestamp();
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setLabel('🍿 Vào xem phim ngay')
+        .setStyle(ButtonStyle.Link)
+        .setURL(watchUrl)
+    );
+
+    return interaction.reply({
+      embeds: [embed],
+      components: [row],
+    });
+  }
+
+  // TRƯỜNG HỢP 2: Chưa có phim nào đang chiếu -> Cho phép chọn phim phát ngay
+  let targetChannel = null;
   if (hasCategory) {
     if (!userVoice) {
       const allowedNames = cinemaVoices.map(c => `**${c.name}**`).join(', ');
@@ -160,6 +249,22 @@ async function handleSelect(interaction) {
     });
   }
 
+  const now = Date.now();
+  const currentActiveShow = Array.isArray(config.shows) ? config.shows.find(s => {
+    const start = Date.parse(s.startsAt);
+    const end = Date.parse(s.endsAt);
+    return Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end;
+  }) : null;
+
+  if (currentActiveShow) {
+    const endUnix = Math.floor(Date.parse(currentActiveShow.endsAt) / 1000);
+    return interaction.editReply({
+      content: `⚠️ Hiện tại rạp đang chiếu bộ phim **${currentActiveShow.title}** (dự kiến kết thúc lúc <t:${endUnix}:t>). Không thể tạo suất chiếu mới trong thời gian suất chiếu hiện tại đang diễn ra!`,
+      embeds: [],
+      components: [],
+    });
+  }
+
   // Xác định kênh voice chiếu
   const cinemaCategory = cinema.getCinemaCategory(interaction.guild, config);
   const cinemaVoices = cinema.getCinemaVoiceChannels(interaction.guild, config);
@@ -204,7 +309,6 @@ async function handleSelect(interaction) {
   }
 
   // 1. Xác định thời lượng dự kiến
-  const now = Date.now();
   let duration = Date.parse(selectedShow.endsAt) - Date.parse(selectedShow.startsAt);
   if (!duration || duration <= 0 || duration > 24 * 3600000) {
     duration = 2.5 * 3600 * 1000; // Mặc định 2.5 tiếng nếu lịch cũ không chuẩn

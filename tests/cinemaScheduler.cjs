@@ -177,7 +177,10 @@ async function testScheduler() {
   assert(foundImmediate, 'Immediate show must be created and added to schedule');
   assert(Date.parse(foundImmediate.startsAt) <= Date.now(), 'Immediate show starts now');
 
-  // Test 6: Category restriction on /cinema command
+  // Test 6: Category restriction on /cinema command when starting a new show (no active show)
+  config.shows = [scheduledShow]; // only future show, no active show
+  setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+
   const categoryChannel = { id: 'cat-cinema', name: '╭─ VNL Cinema ─╮', type: 4, isCategory: () => true };
   voiceChannel.parentId = 'cat-cinema';
   const outsideVoice = { id: 'voice-outside', name: 'Phòng ngoài', isVoiceBased: () => true, parentId: 'cat-other' };
@@ -189,6 +192,7 @@ async function testScheduler() {
     inGuild: () => true,
     guildId,
     guild,
+    client,
     user: { id: 'u123' },
     member: {
       voice: { channel: outsideVoice },
@@ -206,12 +210,69 @@ async function testScheduler() {
   await cinemaCommand.execute(outsideInteraction);
   assert(replyPayload && replyPayload.content.includes('cần tham gia vào một trong các phòng chiếu'), 'Must prompt user to join cinema category voice channel');
 
-  // When in cinema voice channel
+  // When in cinema voice channel -> shows selection menu
   outsideInteraction.member.voice = { channel: voiceChannel };
   await cinemaCommand.execute(outsideInteraction);
-  assert(replyPayload && replyPayload.embeds && replyPayload.embeds.length > 0, 'Must allow /cinema when in cinema category channel');
+  assert(replyPayload && replyPayload.embeds && replyPayload.embeds[0].data.title.includes('CHỌN PHIM PHÁT NGAY'), 'Must show select menu when no movie is playing');
 
-  console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave, /cinema preserves scheduled shows, category restriction enforced.');
+  // Test 7: When a movie IS currently screening, /cinema routes directly to current show with watch button & blocks new show
+  const activeMovie = {
+    title: 'Phim Đang Chiếu Hot',
+    source: 'https://pub-a6f2ebb772de4098b1e01e80864fbf6a.r2.dev/test.mp4',
+    startsAt: new Date(now - 120000).toISOString(),
+    endsAt: new Date(now + 3600000).toISOString(),
+  };
+  config.shows = [activeMovie];
+  setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+
+  replyPayload = null;
+  await cinemaCommand.execute(outsideInteraction);
+  assert(replyPayload && replyPayload.embeds && replyPayload.embeds[0].data.title.includes('ĐANG CHIẾU: Phim Đang Chiếu Hot'), 'Must display active movie card');
+  assert(replyPayload.components[0].components[0].data.label.includes('Vào xem phim ngay'), 'Must offer Vào xem phim ngay button');
+
+  // Any attempt to create new show via handleSelect while movie is screening is rejected
+  let editReplyPayload = null;
+  const selectWhileActive = {
+    ...selectInteraction,
+    editReply: async (payload) => { editReplyPayload = payload; },
+  };
+  await cinemaCommand.handleSelect(selectWhileActive);
+  assert(editReplyPayload && editReplyPayload.content.includes('Không thể tạo suất chiếu mới trong thời gian suất chiếu hiện tại đang diễn ra'), 'Must reject creating new show during active movie');
+
+  // Test 8: 2 advance reminder notifications (Early reminder ~3h & 10m reminder)
+  sentMessages.length = 0;
+  const earlyShow = {
+    title: 'Phim Tối Nay 3h',
+    source: 'https://pub-a6f2ebb772de4098b1e01e80864fbf6a.r2.dev/test.mp4',
+    startsAt: new Date(now + 2 * 3600 * 1000).toISOString(), // 2 hours in future (<= 3h)
+    endsAt: new Date(now + 4 * 3600 * 1000).toISOString(),
+  };
+  const tenMinShow = {
+    title: 'Phim Sắp Chiếu 10p',
+    source: 'https://pub-a6f2ebb772de4098b1e01e80864fbf6a.r2.dev/test.mp4',
+    startsAt: new Date(now + 8 * 60 * 1000).toISOString(), // 8 minutes in future (<= 10m)
+    endsAt: new Date(now + 2 * 3600 * 1000).toISOString(),
+  };
+
+  config.shows = [earlyShow, tenMinShow];
+  config.preReminderHours = 3;
+  config.remind10m = true;
+  setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+
+  scheduler.checkShows(client);
+
+  const earlyNotice = sentMessages.find(m => m.msg.embeds?.[0]?.data?.title?.includes('SẮP CÔNG CHIẾU: Phim Tối Nay 3h'));
+  assert(earlyNotice, 'Must send early reminder (~3h) for upcoming show');
+
+  const tenMinNotice = sentMessages.find(m => m.msg.embeds?.[0]?.data?.title?.includes('CHUẨN BỊ LÊN SÓNG: Phim Sắp Chiếu 10p'));
+  assert(tenMinNotice, 'Must send 10-minute reminder for imminent show');
+
+  // Re-running checkShows must NOT send duplicate reminders
+  const countBefore = sentMessages.length;
+  scheduler.checkShows(client);
+  assert.equal(sentMessages.length, countBefore, 'Must not duplicate reminders on subsequent checkShows cycles');
+
+  console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave, /cinema preserves scheduled shows, category restriction, active show direct watch routing & 2 advance reminders.');
 }
 
 testScheduler().catch(err => {

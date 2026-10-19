@@ -575,6 +575,17 @@ function cinemaPage() {
       return `<option value="${h(ch.id)}" ${c.notifyChannelId === ch.id ? 'selected' : ''}>💬 #${h(ch.name)}${inCat ? ' ★' : ''}</option>`;
     }).join('')}</select></label></div>
     <div class="field"><label>Role được tag khi có suất chiếu<select name="notifyRoleId"><option value="">Không tag role nào</option><option value="everyone" ${c.notifyRoleId === 'everyone' ? 'selected' : ''}>@everyone</option><option value="here" ${c.notifyRoleId === 'here' ? 'selected' : ''}>@here</option>${(data.roles || []).map(r => `<option value="${h(r.id)}" ${c.notifyRoleId === r.id ? 'selected' : ''}>@ ${h(r.name)}</option>`).join('')}</select></label></div>
+    <div class="field"><label>Nhắc trước giờ chiếu (Lần 1)<select name="preReminderHours">
+      <option value="0" ${c.preReminderHours === 0 ? 'selected' : ''}>Tắt thông báo sớm</option>
+      <option value="1" ${c.preReminderHours === 1 ? 'selected' : ''}>Trước 1 tiếng</option>
+      <option value="2" ${c.preReminderHours === 2 ? 'selected' : ''}>Trước 2 tiếng</option>
+      <option value="3" ${c.preReminderHours === 3 || c.preReminderHours === undefined ? 'selected' : ''}>Trước 3 tiếng (Khuyên dùng)</option>
+      <option value="5" ${c.preReminderHours === 5 ? 'selected' : ''}>Trước 5 tiếng</option>
+      <option value="6" ${c.preReminderHours === 6 ? 'selected' : ''}>Trước 6 tiếng</option>
+      <option value="12" ${c.preReminderHours === 12 ? 'selected' : ''}>Trước 12 tiếng</option>
+      <option value="24" ${c.preReminderHours === 24 ? 'selected' : ''}>Trước 24 tiếng (1 ngày)</option>
+    </select></label></div>
+    <div class="field" style="display:flex;align-items:center;padding-top:24px;"><label class="cinema-check"><input type="checkbox" name="remind10m" ${c.remind10m !== false ? 'checked' : ''}> Nhắc trước khi chiếu 10 phút (Lần 2)</label></div>
     <div class="field" style="grid-column: 1 / -1;"><label>Nội dung thông báo tùy chỉnh (Để trống để dùng mẫu mặc định)<textarea name="notifyMessage" maxlength="1500" rows="3" placeholder="Ví dụ: 🍿 Bộ phim {phim} đang được chiếu tại {kenh_voice}! Suất chiếu từ {gio_chieu} đến {gio_ket_thuc}. Mọi người vào xem cùng nhé!">${h(c.notifyMessage || '')}</textarea><small class="subtle">Biến có sẵn: <code>{phim}</code>, <code>{kenh_voice}</code>, <code>{gio_chieu}</code>, <code>{gio_ket_thuc}</code>, <code>{link_xem}</code>, <code>{role}</code></small></label></div></div></section>
     <section class="card cinema-card"><h2>Ai được vào xem?</h2><p>Quyền xem không cấp quyền quản lý Premium.</p>
     <div class="field"><label>Đối tượng<select name="audience">${[['members','Tất cả thành viên server'],['roles','Thành viên có role được chọn'],['admins','Chỉ Administrator']].map(([key, label]) => `<option value="${key}" ${c.audience === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div>
@@ -603,6 +614,8 @@ function bindCinema() {
       categoryId: data.get('categoryId') || null,
       voiceChannelId: data.get('voiceChannelId') || null, notifyChannelId: data.get('notifyChannelId') || null,
       notifyRoleId: data.get('notifyRoleId') || null, notifyMessage: (data.get('notifyMessage') || '').trim(),
+      preReminderHours: Number(data.get('preReminderHours') !== null ? data.get('preReminderHours') : 3),
+      remind10m: data.has('remind10m'),
       roleIds: data.getAll('roleIds'), rightsConfirmed: data.has('rightsConfirmed'), revision: state.data.cinema.config.revision,
       shows: [...form.querySelectorAll('.cinema-show')].map(row => Object.fromEntries([...row.querySelectorAll('[data-show]')].map(input => [input.dataset.show, input.type === 'datetime-local' ? new Date(input.value).toISOString() : input.value]))) };
     button.disabled = true;

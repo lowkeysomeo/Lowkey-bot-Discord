@@ -22,7 +22,7 @@ function sourceUrl(value, env) {
 }
 function getConfig(guildId) {
   const raw = getGuildSetting(guildId, 'CINEMA_CONFIG');
-  const d = { enabled: false, title: 'VNL Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, categoryId: null, voiceChannelId: null, notifyChannelId: null, notifyRoleId: null, notifyMessage: '', shows: [], revision: 0 };
+  const d = { enabled: false, title: 'VNL Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, categoryId: null, voiceChannelId: null, notifyChannelId: null, notifyRoleId: null, notifyMessage: '', preReminderHours: 3, remind10m: true, shows: [], revision: 0 };
   return raw ? { ...d, ...JSON.parse(raw) } : d;
 }
 function text(value, max, required = false) {
@@ -45,6 +45,14 @@ function validate(input, roles, env, channels) {
     notifyRoleId = input.notifyRoleId;
   }
   const notifyMessage = typeof input.notifyMessage === 'string' ? text(input.notifyMessage, 1500) : '';
+  let preReminderHours = 3;
+  if (input.preReminderHours !== undefined && input.preReminderHours !== null && input.preReminderHours !== '') {
+    const val = Number(input.preReminderHours);
+    if (Number.isFinite(val) && val >= 0 && val <= 72) {
+      preReminderHours = Math.round(val);
+    }
+  }
+  const remind10m = input.remind10m !== false && input.remind10m !== 'false';
   if (channels) {
     if (categoryId && !channels.has(categoryId)) fail(400, 'Danh mục Cinema phải thuộc server này.');
     if (voiceChannelId && !channels.has(voiceChannelId)) fail(400, 'Kênh voice rạp phim phải thuộc server này.');
@@ -61,7 +69,7 @@ function validate(input, roles, env, channels) {
   for (let i = 1; i < shows.length; i++) if (shows[i].startsAt < shows[i - 1].endsAt) fail(400, 'Các suất chiếu không được trùng giờ.');
   if (input.enabled && (!input.rightsConfirmed || !shows.length)) fail(400, 'Cần ít nhất một suất chiếu và xác nhận quyền sử dụng video để bật Cinema.');
   return { enabled: input.enabled, title: text(input.title, 80, true), description: text(input.description, 1500), audience: input.audience,
-    roleIds: [...new Set(input.roleIds)], rightsConfirmed: input.rightsConfirmed, categoryId, voiceChannelId, notifyChannelId, notifyRoleId, notifyMessage, shows };
+    roleIds: [...new Set(input.roleIds)], rightsConfirmed: input.rightsConfirmed, categoryId, voiceChannelId, notifyChannelId, notifyRoleId, notifyMessage, preReminderHours, remind10m, shows };
 }
 function saveConfig(guildId, input, roles, env, channels) {
   const next = validate(input, roles, env, channels);
@@ -260,6 +268,39 @@ function isAllowedCinemaVoiceChannel(channel, guild, config) {
   return channel.parentId === category.id;
 }
 
+function isReminderAnnounced(guildId, showOrKey, type = 'early') {
+  if (!showOrKey) return false;
+  let key = '';
+  if (typeof showOrKey === 'object') {
+    const minute = Math.floor(Date.parse(showOrKey.startsAt) / 60000);
+    key = `${type}_${minute}_${showOrKey.title}`;
+  } else {
+    key = `${type}_${showOrKey}`;
+  }
+  const list = getAnnouncedShows(guildId);
+  return Array.isArray(list) && list.includes(key);
+}
+
+function markReminderAnnounced(guildId, showOrKey, type = 'early') {
+  try {
+    let key = '';
+    if (typeof showOrKey === 'object') {
+      const minute = Math.floor(Date.parse(showOrKey.startsAt) / 60000);
+      key = `${type}_${minute}_${showOrKey.title}`;
+    } else {
+      key = `${type}_${showOrKey}`;
+    }
+    const list = getAnnouncedShows(guildId);
+    if (key && !list.includes(key)) {
+      list.push(key);
+      const trimmed = list.slice(-150);
+      setGuildSetting(guildId, 'CINEMA_ANNOUNCED_SHOWS', JSON.stringify(trimmed));
+    }
+  } catch (err) {
+    console.error('[CINEMA] Lỗi lưu trạng thái thông báo nhắc trước:', err.message);
+  }
+}
+
 module.exports = {
   getConfig,
   saveConfig,
@@ -274,4 +315,6 @@ module.exports = {
   getCinemaCategory,
   getCinemaVoiceChannels,
   isAllowedCinemaVoiceChannel,
+  isReminderAnnounced,
+  markReminderAnnounced,
 };

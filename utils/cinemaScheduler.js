@@ -18,6 +18,113 @@ function checkShows(client) {
         continue;
       }
 
+      // 1. Kiểm tra các suất chiếu sắp tới để gửi thông báo nhắc trước (2 lần: Lần 1 trước 3 tiếng/tùy chọn, Lần 2 trước 10 phút)
+      const preHours = typeof config.preReminderHours === 'number' ? config.preReminderHours : 3;
+      const remind10mEnabled = config.remind10m !== false;
+
+      const upcomingShows = config.shows.filter(s => {
+        const start = Date.parse(s.startsAt);
+        return Number.isFinite(start) && start > now;
+      });
+
+      for (const upcoming of upcomingShows) {
+        const startUnix = Math.floor(Date.parse(upcoming.startsAt) / 1000);
+        const msUntilStart = Date.parse(upcoming.startsAt) - now;
+
+        const cinemaCat = cinema.getCinemaCategory(guild, config);
+        let notifyChan = config.notifyChannelId ? guild.channels.cache.get(config.notifyChannelId) : null;
+        if (!notifyChan && cinemaCat) {
+          notifyChan = guild.channels.cache.find(c =>
+            c.parentId === cinemaCat.id && (c.type === 0 || c.type === 5) && /thông[- ]?báo/i.test(c.name || '')
+          ) || guild.channels.cache.find(c =>
+            c.parentId === cinemaCat.id && (c.type === 0 || c.type === 5)
+          );
+        }
+        if (!notifyChan && config.voiceChannelId) {
+          notifyChan = guild.channels.cache.get(config.voiceChannelId);
+        }
+
+        let voiceCh = config.voiceChannelId ? guild.channels.cache.get(config.voiceChannelId) : null;
+        if (!voiceCh && cinemaCat) {
+          const cinemaVoices = cinema.getCinemaVoiceChannels(guild, config);
+          voiceCh = (cinemaVoices && typeof cinemaVoices.first === 'function' ? cinemaVoices.first() : null) || null;
+        }
+        const vTag = voiceCh ? `<#${voiceCh.id}>` : (cinemaCat ? `danh mục ${cinemaCat.name}` : 'phòng chiếu phim');
+
+        let content = undefined;
+        let allowedMentions = undefined;
+        if (config.notifyRoleId === 'everyone') {
+          content = '@everyone';
+          allowedMentions = { parse: ['everyone'] };
+        } else if (config.notifyRoleId === 'here') {
+          content = '@here';
+          allowedMentions = { parse: ['everyone'] };
+        } else if (config.notifyRoleId && /^\d+$/.test(config.notifyRoleId)) {
+          content = `<@&${config.notifyRoleId}>`;
+          allowedMentions = { roles: [config.notifyRoleId] };
+        }
+
+        const { EmbedBuilder } = require('discord.js');
+
+        // MỐC 1: Thông báo sớm (trước X tiếng, mặc định 3 tiếng hoặc tùy chọn)
+        if (preHours > 0) {
+          const preMs = preHours * 3600 * 1000;
+          if (msUntilStart <= preMs && msUntilStart > 10 * 60 * 1000) {
+            if (!cinema.isReminderAnnounced(guild.id, upcoming, 'early')) {
+              cinema.markReminderAnnounced(guild.id, upcoming, 'early');
+              if (notifyChan && typeof notifyChan.send === 'function') {
+                const hoursLabel = preHours >= 1 ? `${preHours} tiếng` : `${Math.round(preHours * 60)} phút`;
+                const embedEarly = new EmbedBuilder()
+                  .setColor(0x5865F2)
+                  .setTitle(`📢 SẮP CÔNG CHIẾU: ${upcoming.title} (Còn ~${hoursLabel})`)
+                  .setDescription(
+                    `Rạp phim VNL Cinema sẽ phát sóng bộ phim **${upcoming.title}** vào lúc **<t:${startUnix}:t>** (<t:${startUnix}:R>)!\n\n` +
+                    `⏰ **Thời gian:** <t:${startUnix}:F>\n` +
+                    `🔊 **Kênh chiếu:** ${vTag}\n\n` +
+                    `🍿 Mọi người hãy chuẩn bị sẵn sàng và đừng bỏ lỡ nhé!`
+                  )
+                  .setFooter({ text: 'VNL Cinema • Thông báo lịch chiếu' })
+                  .setTimestamp();
+
+                notifyChan.send({
+                  content,
+                  embeds: [embedEarly],
+                  ...(allowedMentions ? { allowedMentions } : {})
+                }).catch(err => console.error('[CINEMA SCHEDULER] Lỗi gửi thông báo sớm:', err.message));
+              }
+            }
+          }
+        }
+
+        // MỐC 2: Thông báo trước khi chiếu 10 phút
+        if (remind10mEnabled) {
+          if (msUntilStart <= 10 * 60 * 1000 && msUntilStart > 0) {
+            if (!cinema.isReminderAnnounced(guild.id, upcoming, '10m')) {
+              cinema.markReminderAnnounced(guild.id, upcoming, '10m');
+              if (notifyChan && typeof notifyChan.send === 'function') {
+                const embed10m = new EmbedBuilder()
+                  .setColor(0xFEE75C)
+                  .setTitle(`⏰ CHUẨN BỊ LÊN SÓNG: ${upcoming.title} (Còn 10 phút)`)
+                  .setDescription(
+                    `Chỉ còn **10 phút** nữa, bộ phim **${upcoming.title}** sẽ chính thức lên sóng tại ${vTag}!\n\n` +
+                    `⏰ **Bắt đầu lúc:** <t:${startUnix}:t> (<t:${startUnix}:R>)\n\n` +
+                    `🍿 Mọi người hãy nhanh chóng vào phòng thoại để ổn định chỗ ngồi và sẵn sàng cùng thưởng thức bộ phim!`
+                  )
+                  .setFooter({ text: 'VNL Cinema • Đếm ngược 10 phút' })
+                  .setTimestamp();
+
+                notifyChan.send({
+                  content,
+                  embeds: [embed10m],
+                  ...(allowedMentions ? { allowedMentions } : {})
+                }).catch(err => console.error('[CINEMA SCHEDULER] Lỗi gửi thông báo 10p:', err.message));
+              }
+            }
+          }
+        }
+      }
+
+      // 2. Kiểm tra suất chiếu đang diễn ra
       const currentShow = config.shows.find(s => {
         const start = Date.parse(s.startsAt);
         const end = Date.parse(s.endsAt);
