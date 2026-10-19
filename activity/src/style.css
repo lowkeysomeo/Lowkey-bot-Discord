@@ -250,6 +250,12 @@ body.theater-mode video {
 }
 
 /* OVERLAYS */
+[hidden],
+.join-overlay[hidden],
+.join-overlay.hidden {
+  display: none !important;
+}
+
 .join-overlay {
   position: absolute;
   inset: 0;

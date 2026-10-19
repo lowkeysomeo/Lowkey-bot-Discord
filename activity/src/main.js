@@ -53,12 +53,31 @@ async function request(route, options = {}) {
   return data;
 }
 
+function hideJoinOverlay() {
+  hasStarted = true;
+  if (joinOverlay) {
+    joinOverlay.hidden = true;
+    joinOverlay.classList.add('hidden');
+    joinOverlay.style.setProperty('display', 'none', 'important');
+  }
+}
+
+function showJoinOverlay() {
+  if (hasStarted) return;
+  if (joinOverlay) {
+    joinOverlay.hidden = false;
+    joinOverlay.classList.remove('hidden');
+    joinOverlay.style.setProperty('display', 'flex', 'important');
+  }
+}
+
 function clearVideo() {
   current = null;
+  hasStarted = false;
   video.pause();
   video.removeAttribute('src');
   video.load();
-  if (joinOverlay) joinOverlay.hidden = true;
+  hideJoinOverlay();
 }
 
 function getSyncedPosition() {
@@ -80,8 +99,7 @@ function sync() {
 }
 
 async function play() {
-  hasStarted = true;
-  if (joinOverlay) joinOverlay.hidden = true;
+  hideJoinOverlay();
   try {
     await video.play();
     sync();
@@ -94,8 +112,7 @@ async function play() {
       showToast('🔊 Video đã phát. Hãy bấm biểu tượng loa để bật tiếng nhé!');
     } catch (e) {
       console.warn('Playback error:', e);
-      if (joinOverlay) joinOverlay.hidden = false;
-      hasStarted = false;
+      // Giữ ẩn bảng bắt đầu xem để người dùng tương tác trực tiếp với thanh điều khiển video
     }
   }
 }
@@ -155,6 +172,7 @@ function toggleTheater(force) {
 
 // Global window helpers for inline onclick resilience
 window.vnlPlay = play;
+window.vnlDismissOverlay = play;
 window.vnlToggleTheater = toggleTheater;
 window.vnlSeekBack = () => sendStaffSeek(video.currentTime - 10);
 window.vnlSeekFwd = () => sendStaffSeek(video.currentTime + 10);
@@ -291,15 +309,15 @@ async function poll() {
       if (changed) {
         video.src = current.mediaPath;
         video.load();
-        if (!hasStarted && joinOverlay) {
-          joinOverlay.hidden = false;
+        if (!hasStarted) {
+          showJoinOverlay();
         }
       } else {
         isSyncingFromServer = true;
         sync();
         setTimeout(() => { isSyncingFromServer = false; }, 300);
-        if (!hasStarted && video.paused && !video.ended && joinOverlay) {
-          joinOverlay.hidden = false;
+        if (!hasStarted && video.paused && !video.ended) {
+          showJoinOverlay();
         }
       }
     }

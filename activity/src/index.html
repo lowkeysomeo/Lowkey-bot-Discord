@@ -4,7 +4,28 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>VNL Cinema · VietNam Legacy</title>
-  <link rel="stylesheet" href="style.css?v=2.2">
+  <link rel="stylesheet" href="style.css?v=2.3">
+  <script>
+    window.vnlDismissOverlay = function() {
+      var el = document.getElementById('join-overlay');
+      if (el) {
+        el.hidden = true;
+        el.classList.add('hidden');
+        el.style.setProperty('display', 'none', 'important');
+      }
+      if (typeof window.vnlPlay === 'function') {
+        window.vnlPlay();
+      } else {
+        var v = document.getElementById('video');
+        if (v) {
+          v.play().catch(function() {
+            v.muted = true;
+            v.play().catch(function() {});
+          });
+        }
+      }
+    };
+  </script>
   <style>
     :root {
       color-scheme: dark;
@@ -129,7 +150,11 @@
       backdrop-filter: blur(10px); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.8);
       transition: all 0.2s;
     }
-    .theater-exit-btn:hover { background: var(--vnl-red); color: #fff; transform: scale(1.05); }
+    [hidden],
+    .join-overlay[hidden],
+    .join-overlay.hidden {
+      display: none !important;
+    }
     .join-overlay {
       position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
       background: rgba(12, 4, 6, 0.7); backdrop-filter: blur(6px); z-index: 40;
@@ -167,7 +192,7 @@
     ul#upcoming li:before { content: "🎬"; font-size: 14px; }
     .note { color: var(--text-muted); font-size: 12px; margin-top: 16px; line-height: 1.6; }
   </style>
-  <script type="module" src="main.js?v=2.5"></script>
+  <script type="module" src="main.js?v=2.6"></script>
 </head>
 <body>
   <main>
@@ -193,8 +218,8 @@
         <video id="video" playsinline controls preload="metadata"></video>
         <button id="theater-exit" class="theater-exit-btn" title="Thu nhỏ (Esc)" onclick="window.vnlToggleTheater && window.vnlToggleTheater(false)" hidden>🗗 Thu nhỏ (Esc)</button>
         <div id="toast" class="toast" hidden></div>
-        <div id="join-overlay" class="join-overlay" onclick="window.vnlPlay && window.vnlPlay()" hidden>
-          <button id="join" class="btn-join" onclick="event.stopPropagation(); window.vnlPlay && window.vnlPlay()">▶ Bắt đầu xem</button>
+        <div id="join-overlay" class="join-overlay" onclick="window.vnlDismissOverlay()" hidden>
+          <button id="join" class="btn-join" onclick="event.stopPropagation(); window.vnlDismissOverlay()">▶ Bắt đầu xem</button>
         </div>
       </div>
 
