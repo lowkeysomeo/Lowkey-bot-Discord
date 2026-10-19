@@ -17,6 +17,7 @@ let current = null;
 let stopped = false;
 let isStaff = false;
 let isSyncingFromServer = false;
+let hasStarted = false;
 let toastTimeout = null;
 
 function showToast(msg) {
@@ -79,12 +80,23 @@ function sync() {
 }
 
 async function play() {
-  sync();
+  hasStarted = true;
+  if (joinOverlay) joinOverlay.hidden = true;
   try {
     await video.play();
-    if (joinOverlay) joinOverlay.hidden = true;
-  } catch {
-    if (joinOverlay) joinOverlay.hidden = false;
+    sync();
+  } catch (err) {
+    // If unmuted playback is blocked by browser autoplay policy, fallback to muted play
+    try {
+      video.muted = true;
+      await video.play();
+      sync();
+      showToast('🔊 Video đã phát. Hãy bấm biểu tượng loa để bật tiếng nhé!');
+    } catch (e) {
+      console.warn('Playback error:', e);
+      if (joinOverlay) joinOverlay.hidden = false;
+      hasStarted = false;
+    }
   }
 }
 
@@ -141,9 +153,30 @@ function toggleTheater(force) {
   }
 }
 
+// Global window helpers for inline onclick resilience
+window.vnlPlay = play;
+window.vnlToggleTheater = toggleTheater;
+window.vnlSeekBack = () => sendStaffSeek(video.currentTime - 10);
+window.vnlSeekFwd = () => sendStaffSeek(video.currentTime + 10);
+
 // Attach Video Event Listeners
-if (join) join.onclick = play;
-video.addEventListener('loadedmetadata', play);
+if (join) {
+  join.onclick = e => {
+    e.stopPropagation();
+    play();
+  };
+}
+if (joinOverlay) {
+  joinOverlay.onclick = () => {
+    play();
+  };
+}
+
+video.addEventListener('loadedmetadata', () => {
+  if (hasStarted) sync();
+  else play();
+});
+
 video.addEventListener('error', () => {
   status.textContent = 'Không tải được video. Admin cần kiểm tra URL mapping /media và định dạng tệp.';
 });
@@ -258,11 +291,14 @@ async function poll() {
       if (changed) {
         video.src = current.mediaPath;
         video.load();
+        if (!hasStarted && joinOverlay) {
+          joinOverlay.hidden = false;
+        }
       } else {
         isSyncingFromServer = true;
         sync();
         setTimeout(() => { isSyncingFromServer = false; }, 300);
-        if (video.paused && !video.ended && joinOverlay) {
+        if (!hasStarted && video.paused && !video.ended && joinOverlay) {
           joinOverlay.hidden = false;
         }
       }

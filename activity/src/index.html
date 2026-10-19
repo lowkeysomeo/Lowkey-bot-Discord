@@ -167,7 +167,7 @@
     ul#upcoming li:before { content: "🎬"; font-size: 14px; }
     .note { color: var(--text-muted); font-size: 12px; margin-top: 16px; line-height: 1.6; }
   </style>
-  <script type="module" src="main.js?v=2.2"></script>
+  <script type="module" src="main.js?v=2.5"></script>
 </head>
 <body>
   <main>
@@ -181,20 +181,20 @@
       <div class="screen-header">
         <div class="screen-header-left">
           <span id="role-badge" class="badge-sync">🔴 ĐỒNG BỘ TRỰC TIẾP</span>
-          <button id="btn-seek-back" class="btn-staff-pill" title="Tua lùi 10 giây (Staff)" hidden>⏪ -10s</button>
-          <button id="btn-seek-fwd" class="btn-staff-pill" title="Tua tới 10 giây (Staff)" hidden>+10s ⏩</button>
+          <button id="btn-seek-back" class="btn-staff-pill" title="Tua lùi 10 giây (Staff)" onclick="window.vnlSeekBack && window.vnlSeekBack()" hidden>⏪ -10s</button>
+          <button id="btn-seek-fwd" class="btn-staff-pill" title="Tua tới 10 giây (Staff)" onclick="window.vnlSeekFwd && window.vnlSeekFwd()" hidden>+10s ⏩</button>
         </div>
         <div class="screen-header-right">
-          <button id="btn-zoom" class="btn-zoom" title="Phóng to màn hình để xem phim nét hơn (F)">🗖 Phóng to màn hình</button>
+          <button id="btn-zoom" class="btn-zoom" title="Phóng to màn hình để xem phim nét hơn (F)" onclick="window.vnlToggleTheater && window.vnlToggleTheater()">🗖 Phóng to màn hình</button>
         </div>
       </div>
 
       <div class="video-container" id="video-container">
         <video id="video" playsinline controls preload="metadata"></video>
-        <button id="theater-exit" class="theater-exit-btn" title="Thu nhỏ (Esc)" hidden>🗗 Thu nhỏ (Esc)</button>
+        <button id="theater-exit" class="theater-exit-btn" title="Thu nhỏ (Esc)" onclick="window.vnlToggleTheater && window.vnlToggleTheater(false)" hidden>🗗 Thu nhỏ (Esc)</button>
         <div id="toast" class="toast" hidden></div>
-        <div id="join-overlay" class="join-overlay" hidden>
-          <button id="join" class="btn-join">▶ Bắt đầu xem</button>
+        <div id="join-overlay" class="join-overlay" onclick="window.vnlPlay && window.vnlPlay()" hidden>
+          <button id="join" class="btn-join" onclick="event.stopPropagation(); window.vnlPlay && window.vnlPlay()">▶ Bắt đầu xem</button>
         </div>
       </div>
 
