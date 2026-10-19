@@ -158,7 +158,30 @@ async function main() {
   let deployed;
   await deployCommands([{ data: { name: 'existing', description: 'Existing command' } }], { put: async (_, { body }) => { deployed = body; } });
   assert.equal(deployed.length, 2); assert.equal(deployed[0].name, 'existing'); assert.equal(deployed[1].type, 4); assert.equal(deployed[1].handler, 2);
-  console.log('PASS Cinema: validation, schedule synchronization, guild isolation, admin revocation, direct page/API authorization, CSRF, viewer role revocation, session separation, disabled state and entry point. In-process transport; no live Discord/network.');
+
+  // Test listUploadedMovies and /cinemalist command
+  const uploadedList = await cinema.listUploadedMovies('111', env);
+  assert(Array.isArray(uploadedList), 'listUploadedMovies must return array');
+  assert(uploadedList.some(m => m.source === 'https://media.example.com/film.mp4'), 'Should include configured show in uploaded list');
+
+  const cinemalistCmd = require('../commands/fun/cinemalist');
+  assert(cinemalistCmd.data && cinemalistCmd.data.name === 'cinemalist', 'cinemalist command must have valid data');
+  let repliedEmbed = null;
+  const mockInteraction = {
+    inGuild: () => true,
+    guildId: '111',
+    user: { id: '444' },
+    deferReply: async () => true,
+    editReply: async (payload) => {
+      repliedEmbed = payload.embeds?.[0];
+      return { createMessageComponentCollector: () => ({ on: () => {} }) };
+    },
+  };
+  await cinemalistCmd.execute(mockInteraction);
+  assert(repliedEmbed, 'cinemalist execute must editReply with embed');
+  assert.match(repliedEmbed.data.title, /KHO PHIM/i);
+
+  console.log('PASS Cinema: validation, schedule synchronization, guild isolation, admin revocation, direct page/API authorization, CSRF, viewer role revocation, session separation, disabled state, entry point, & /cinemalist uploaded library.');
   getDb().close();
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

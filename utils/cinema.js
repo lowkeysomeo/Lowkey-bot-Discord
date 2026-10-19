@@ -331,6 +331,92 @@ function markShowEnded(guildId, now = Date.now()) {
   }
 }
 
+function formatTitleFromKey(key) {
+  if (!key) return 'Phim không tên';
+  const base = key.replace(/\.[^.]+$/, '');
+  return base
+    .replace(/[-_.]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+async function listUploadedMovies(guildId, env = process.env) {
+  const result = [];
+  const publicDomain = (env.CINEMA_MEDIA_ORIGIN || 'https://pub-a6f2ebb772de4098b1e01e80864fbf6a.r2.dev').replace(/\/$/, '');
+  const config = guildId ? getConfig(guildId) : null;
+  const configuredShows = (config && Array.isArray(config.shows)) ? config.shows : [];
+
+  const accountId = env.R2_ACCOUNT_ID || '64c6ad1cf148f3d10b27cc9b5ff9347c';
+  const accessKeyId = env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = env.R2_SECRET_ACCESS_KEY;
+  const bucketName = env.R2_BUCKET_NAME || 'vnl-cinema';
+
+  let r2Objects = [];
+  if (accessKeyId && secretAccessKey) {
+    try {
+      const { S3Client, ListObjectsV2Command } = require('@aws-sdk/client-s3');
+      const s3 = new S3Client({
+        region: 'auto',
+        endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
+        credentials: {
+          accessKeyId,
+          secretAccessKey,
+        },
+      });
+
+      const res = await s3.send(new ListObjectsV2Command({ Bucket: bucketName }));
+      if (Array.isArray(res.Contents)) {
+        r2Objects = res.Contents.filter(o => o.Key && /\.(mp4|webm|mkv|mov)$/i.test(o.Key));
+      }
+    } catch (err) {
+      console.warn('[CINEMA] Không thể lấy danh sách phim từ R2:', err.message);
+    }
+  }
+
+  const seenUrls = new Set();
+
+  if (r2Objects.length > 0) {
+    for (const obj of r2Objects) {
+      const url = `${publicDomain}/${obj.Key}`;
+      seenUrls.add(url);
+
+      const matchedShow = configuredShows.find(s => {
+        if (!s.source) return false;
+        return s.source === url || s.source.endsWith('/' + obj.Key);
+      });
+
+      result.push({
+        key: obj.Key,
+        title: matchedShow?.title || formatTitleFromKey(obj.Key),
+        source: url,
+        size: obj.Size || 0,
+        lastModified: obj.LastModified ? new Date(obj.LastModified) : null,
+        scheduled: Boolean(matchedShow),
+        scheduleShow: matchedShow || null,
+      });
+    }
+  }
+
+  // Bổ sung các phim đã lên lịch trong server nhưng chưa có trong danh sách R2 (nếu có)
+  for (const s of configuredShows) {
+    if (s.source && !seenUrls.has(s.source)) {
+      seenUrls.add(s.source);
+      const fileName = s.source.split('/').pop() || s.title;
+      result.push({
+        key: fileName,
+        title: s.title,
+        source: s.source,
+        size: 0,
+        lastModified: null,
+        scheduled: true,
+        scheduleShow: s,
+      });
+    }
+  }
+
+  return result;
+}
+
 module.exports = {
   getConfig,
   saveConfig,
@@ -348,4 +434,5 @@ module.exports = {
   isReminderAnnounced,
   markReminderAnnounced,
   markShowEnded,
+  listUploadedMovies,
 };
