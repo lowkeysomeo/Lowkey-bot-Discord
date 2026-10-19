@@ -48,6 +48,13 @@ async function testScheduler() {
     id: guildId,
     name: 'Test Guild',
     channels: { cache: channels },
+    members: {
+      fetch: async () => ({
+        permissions: { has: () => true },
+        user: { bot: false },
+        roles: { cache: new Collection() },
+      }),
+    },
     voiceAdapterCreator: {},
   };
 
@@ -287,7 +294,48 @@ async function testScheduler() {
   assert.equal(scheduler.activeSessions.has(guildId), false, 'Active session must be destroyed when ongoing show is deleted');
   assert.equal(voiceDestroyed, true, 'Voice connection must be destroyed when ongoing show is deleted');
 
-  console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave, /cinema preserves scheduled shows, category restriction, active show direct watch routing, 2 advance reminders & deleting ongoing show cleanup.');
+  // Test 10: Mark show ended when video finishes -> updates endsAt, disconnects bot, disables watch button
+  voiceDestroyed = false;
+  let announcementMsgEdited = false;
+  let disabledButtonLabel = '';
+  const mockAnnouncementMsg = {
+    edit: async ({ components }) => {
+      announcementMsgEdited = true;
+      const btn = components?.[0]?.components?.[0];
+      if (btn) disabledButtonLabel = btn.data?.label || btn.label;
+      return true;
+    }
+  };
+
+  const finishingShow = {
+    title: 'Phim Sắp Hết Giờ',
+    source: 'https://pub-a6f2ebb772de4098b1e01e80864fbf6a.r2.dev/test.mp4',
+    startsAt: new Date(now - 1800000).toISOString(),
+    endsAt: new Date(now + 1800000).toISOString(),
+  };
+  config.shows = [finishingShow];
+  setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+  scheduler.checkShows(client);
+  assert.equal(scheduler.activeSessions.has(guildId), true, 'Session must be active');
+
+  const sess = scheduler.activeSessions.get(guildId);
+  sess.announcementMessage = mockAnnouncementMsg;
+
+  // Movie finishes (e.g. video ended event triggers markShowEnded & cleanupSession)
+  const marked = cinema.markShowEnded(guildId);
+  assert.equal(marked, true, 'markShowEnded must successfully update running show');
+
+  scheduler.cleanupSession(guild, true);
+  assert.equal(scheduler.activeSessions.has(guildId), false, 'Session must be cleaned up on movie end');
+  assert.equal(voiceDestroyed, true, 'Bot must disconnect from voice on movie end');
+  assert.equal(announcementMsgEdited, true, 'Announcement message must be edited');
+  assert.equal(disabledButtonLabel, '⏹️ Suất chiếu đã kết thúc', 'Button must be changed to disabled ended label');
+
+  // Verify viewerState returns no current show
+  const vState = await cinema.viewerState(guild, 'user-1', process.env);
+  assert.equal(vState.show, null, 'viewerState must return show: null after show has ended');
+
+  console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave, /cinema preserves scheduled shows, category restriction, active show direct watch routing, 2 advance reminders, deleting ongoing show cleanup, & movie end bot-out and button disabling.');
 }
 
 testScheduler().catch(err => {

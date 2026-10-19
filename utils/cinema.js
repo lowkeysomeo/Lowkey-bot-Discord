@@ -308,6 +308,29 @@ function markReminderAnnounced(guildId, showOrKey, type = 'early') {
   }
 }
 
+function markShowEnded(guildId, now = Date.now()) {
+  try {
+    const config = getConfig(guildId);
+    let changed = false;
+    config.shows = (config.shows || []).map(s => {
+      const start = Date.parse(s.startsAt);
+      const end = Date.parse(s.endsAt);
+      if (Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end) {
+        changed = true;
+        return { ...s, endsAt: new Date(now).toISOString() };
+      }
+      return s;
+    });
+    if (changed) {
+      setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+    }
+    return changed;
+  } catch (err) {
+    console.error('[CINEMA] Lỗi đánh dấu kết thúc suất chiếu:', err.message);
+    return false;
+  }
+}
+
 module.exports = {
   getConfig,
   saveConfig,
@@ -324,4 +347,5 @@ module.exports = {
   isAllowedCinemaVoiceChannel,
   isReminderAnnounced,
   markReminderAnnounced,
+  markShowEnded,
 };

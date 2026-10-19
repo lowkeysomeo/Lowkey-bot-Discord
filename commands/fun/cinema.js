@@ -452,10 +452,19 @@ async function handleSelect(interaction) {
   ];
 
   // Cập nhật tin nhắn phản hồi
-  await interaction.editReply({
+  const replyMsg = await interaction.editReply({
     embeds: [playingEmbed],
     components,
   });
+
+  try {
+    const scheduler = require('../../utils/cinemaScheduler');
+    const sess = scheduler.activeSessions?.get(interaction.guildId);
+    if (sess) {
+      if (!Array.isArray(sess.messages)) sess.messages = [];
+      if (replyMsg) sess.messages.push(replyMsg);
+    }
+  } catch {}
 
   // Nếu có cấu hình kênh thông báo riêng khác với kênh lệnh thì thông báo thêm vào đó
   if (config.notifyChannelId && config.notifyChannelId !== interaction.channelId) {
@@ -473,11 +482,20 @@ async function handleSelect(interaction) {
         content = `<@&${config.notifyRoleId}>`;
         allowedMentions = { roles: [config.notifyRoleId] };
       }
-      await notifyCh.send({
+      notifyCh.send({
         content,
         embeds: [playingEmbed],
         components,
         ...(allowedMentions ? { allowedMentions } : {})
+      }).then(msg => {
+        try {
+          const scheduler = require('../../utils/cinemaScheduler');
+          const sess = scheduler.activeSessions?.get(interaction.guildId);
+          if (sess && msg) {
+            if (!Array.isArray(sess.messages)) sess.messages = [];
+            sess.messages.push(msg);
+          }
+        } catch {}
       }).catch(() => {});
     }
   }

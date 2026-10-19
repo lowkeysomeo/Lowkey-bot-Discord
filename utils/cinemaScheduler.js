@@ -284,7 +284,7 @@ function checkShows(client) {
               }
 
               if (targetChannel && typeof targetChannel.send === 'function') {
-                await targetChannel.send({
+                const msg = await targetChannel.send({
                   content,
                   embeds: [embed],
                   components,
@@ -292,6 +292,7 @@ function checkShows(client) {
                 }).catch(err => {
                   console.error(`[CINEMA SCHEDULER] Không thể gửi thông báo tới #${targetChannel.name}:`, err.message);
                 });
+                if (msg) session.announcementMessage = msg;
               }
             } catch (annErr) {
               console.error('[CINEMA SCHEDULER] Lỗi thông báo chiếu phim:', annErr.message);
@@ -312,17 +313,48 @@ function checkShows(client) {
 
 function cleanupSession(guild, notifyEnd = false) {
   const session = activeCinemaSessions.get(guild.id);
-  if (!session) return;
-
-  try {
-    if (session.connection) {
-      session.connection.destroy();
-    } else {
+  if (!session) {
+    try {
       const { getVoiceConnection } = require('@discordjs/voice');
       const conn = getVoiceConnection(guild.id);
       if (conn) conn.destroy();
+    } catch {}
+    return;
+  }
+
+  try {
+    if (session.connection) {
+      try { session.connection.destroy(); } catch {}
     }
+    try {
+      const { getVoiceConnection } = require('@discordjs/voice');
+      const conn = getVoiceConnection(guild.id);
+      if (conn) conn.destroy();
+    } catch {}
+
     console.log(`[CINEMA SCHEDULER] ⏹️ Đã rời kênh thoại tại ${guild.name} (Suất chiếu "${session.show?.title || ''}" kết thúc).`);
+
+    // Vô hiệu hóa nút "Vào rạp xem phim ngay" trên tất cả tin nhắn thông báo của suất chiếu này
+    const messages = [
+      session.announcementMessage,
+      ...(Array.isArray(session.messages) ? session.messages : [])
+    ].filter(Boolean);
+
+    for (const msg of messages) {
+      if (typeof msg.edit === 'function') {
+        try {
+          const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+          const disabledRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setLabel('⏹️ Suất chiếu đã kết thúc')
+              .setStyle(ButtonStyle.Secondary)
+              .setDisabled(true)
+              .setCustomId('cinema:ended_' + Math.random().toString(36).slice(2, 6))
+          );
+          msg.edit({ components: [disabledRow] }).catch(() => {});
+        } catch {}
+      }
+    }
 
     if (notifyEnd) {
       const config = cinema.getConfig(guild.id);
@@ -356,5 +388,6 @@ function startCinemaScheduler(client) {
 module.exports = {
   start: startCinemaScheduler,
   checkShows,
+  cleanupSession,
   activeSessions: activeCinemaSessions,
 };

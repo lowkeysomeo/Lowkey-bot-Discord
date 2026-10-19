@@ -92,6 +92,22 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
       json(res, 200, { ok: true, ...result });
       return true;
     }
+    const endMatch = /^\/cinema-api\/guilds\/(\d+)\/ended$/.exec(route);
+    if (endMatch && req.method === 'POST') {
+      const token = (req.headers.authorization || '').match(/^Bearer ([a-f0-9]{64})$/)?.[1];
+      const value = token && sessions.get(hash(token));
+      if (!value || !value.userId) fail(401, 'Phiên xem đã hết hạn.');
+      const guild = client.guilds.cache.get(endMatch[1]);
+      if (guild) {
+        cinema.markShowEnded(guild.id);
+        const scheduler = require('../utils/cinemaScheduler');
+        if (typeof scheduler.cleanupSession === 'function') {
+          scheduler.cleanupSession(guild, true);
+        }
+      }
+      json(res, 200, { ok: true });
+      return true;
+    }
     const match = /^\/cinema-api\/guilds\/(\d+)\/state$/.exec(route);
     if (!match || req.method !== 'GET') fail(404, 'Không tìm thấy API Cinema.');
     const token = (req.headers.authorization || '').match(/^Bearer ([a-f0-9]{64})$/)?.[1];

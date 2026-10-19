@@ -166,6 +166,24 @@
       cursor: pointer; box-shadow: 0 8px 30px var(--vnl-red-glow);
     }
     .btn-join:hover { transform: scale(1.05); }
+    .ended-overlay {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: rgba(10, 3, 5, 0.95); backdrop-filter: blur(14px);
+      z-index: 60; text-align: center; padding: 24px;
+    }
+    .ended-card {
+      max-width: 480px; display: flex; flex-direction: column; align-items: center; gap: 12px;
+    }
+    .ended-icon { font-size: 46px; line-height: 1; }
+    .ended-title { font-size: 22px; font-weight: 800; color: var(--vnl-gold); }
+    .ended-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+    .ended-badge {
+      display: inline-flex; margin-top: 6px;
+      background: rgba(229, 9, 20, 0.2); border: 1px solid rgba(255, 214, 90, 0.4);
+      color: var(--vnl-gold); font-size: 12px; font-weight: 700;
+      padding: 6px 16px; border-radius: 999px;
+    }
     .toast {
       position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
       background: rgba(22, 6, 9, 0.95); border: 1px solid var(--vnl-gold);
@@ -237,6 +255,14 @@
         <div id="toast" class="toast" hidden></div>
         <div id="join-overlay" class="join-overlay" onclick="window.vnlDismissOverlay()" hidden>
           <button id="join" class="btn-join" onclick="event.stopPropagation(); window.vnlDismissOverlay()">▶ Bắt đầu xem</button>
+        </div>
+        <div id="ended-overlay" class="ended-overlay" hidden>
+          <div class="ended-card">
+            <span class="ended-icon">🎬</span>
+            <div class="ended-title" id="ended-title">Suất chiếu đã kết thúc</div>
+            <div class="ended-desc">Phim đã hoàn tất thời lượng chiếu. Cảm ơn bạn đã đồng hành cùng VNL Cinema! Hẹn gặp lại bạn ở các suất chiếu tiếp theo.</div>
+            <span class="ended-badge">⏹️ ĐÃ ĐÓNG RẠP</span>
+          </div>
         </div>
       </div>
 

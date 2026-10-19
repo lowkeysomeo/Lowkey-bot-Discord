@@ -10,6 +10,8 @@ const roleBadge = document.querySelector('#role-badge');
 const btnZoom = document.querySelector('#btn-zoom');
 const btnSeekBack = document.querySelector('#btn-seek-back');
 const btnSeekFwd = document.querySelector('#btn-seek-fwd');
+const endedOverlay = document.querySelector('#ended-overlay');
+const endedTitle = document.querySelector('#ended-title');
 
 let session = null;
 let guildId = null;
@@ -18,6 +20,7 @@ let stopped = false;
 let isStaff = false;
 let isSyncingFromServer = false;
 let hasStarted = false;
+let hasEndedNotified = false;
 let toastTimeout = null;
 
 function showToast(msg) {
@@ -26,6 +29,44 @@ function showToast(msg) {
   toast.hidden = false;
   clearTimeout(toastTimeout);
   toastTimeout = setTimeout(() => { toast.hidden = true; }, 2600);
+}
+
+function showEndedScreen(movieTitle) {
+  if (endedOverlay) {
+    if (endedTitle && movieTitle) {
+      endedTitle.textContent = `Suất chiếu "${movieTitle}" đã kết thúc`;
+    }
+    endedOverlay.hidden = false;
+    endedOverlay.style.setProperty('display', 'flex', 'important');
+  }
+  hideJoinOverlay();
+  if (status) {
+    status.textContent = 'Suất chiếu đã kết thúc. Rạp đã đóng cửa.';
+  }
+}
+
+function hideEndedScreen() {
+  if (endedOverlay) {
+    endedOverlay.hidden = true;
+    endedOverlay.style.setProperty('display', 'none', 'important');
+  }
+}
+
+async function handleMovieEnded() {
+  const finishedTitle = current?.title;
+  clearVideo();
+  showEndedScreen(finishedTitle);
+  if (!hasEndedNotified && guildId) {
+    hasEndedNotified = true;
+    try {
+      await request(`/guilds/${guildId}/ended`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (err) {
+      console.warn('Không thể gửi thông báo kết thúc suất chiếu lên server:', err.message);
+    }
+  }
 }
 
 function formatTime(seconds) {
@@ -63,7 +104,7 @@ function hideJoinOverlay() {
 }
 
 function showJoinOverlay() {
-  if (hasStarted) return;
+  if (hasStarted || (endedOverlay && !endedOverlay.hidden)) return;
   if (joinOverlay) {
     joinOverlay.hidden = false;
     joinOverlay.classList.remove('hidden');
@@ -88,9 +129,8 @@ function getSyncedPosition() {
 function sync() {
   if (!current || !video.readyState) return;
   const position = getSyncedPosition();
-  if (Number.isFinite(video.duration) && position >= video.duration) {
-    video.pause();
-    status.textContent = 'Phim đã kết thúc. Đang chờ suất tiếp theo.';
+  if (Number.isFinite(video.duration) && video.duration > 0 && position >= video.duration) {
+    handleMovieEnded();
     return;
   }
   if (Math.abs(video.currentTime - position) > 2) {
@@ -191,8 +231,17 @@ if (joinOverlay) {
 }
 
 video.addEventListener('loadedmetadata', () => {
+  const position = getSyncedPosition();
+  if (Number.isFinite(video.duration) && video.duration > 0 && position >= video.duration) {
+    handleMovieEnded();
+    return;
+  }
   if (hasStarted) sync();
   else play();
+});
+
+video.addEventListener('ended', () => {
+  handleMovieEnded();
 });
 
 video.addEventListener('error', () => {
@@ -319,6 +368,7 @@ async function poll() {
       const isCurrent = data.show && item.title === data.show.title &&
         (Math.abs(Date.parse(data.show.startsAt) - sStart) < 60000 || (Number.isFinite(sStart) && Number.isFinite(sEnd) && sStart <= nowMs && nowMs < sEnd));
       const isUpcoming = Number.isFinite(sStart) && sStart > nowMs;
+      const isPast = Number.isFinite(sEnd) && sEnd <= nowMs;
 
       if (isCurrent) {
         row.className = 'show-item live';
@@ -328,6 +378,12 @@ async function poll() {
         row.className = 'show-item upcoming';
         badge.className = 'badge-show badge-upcoming';
         badge.textContent = '⏳ Sắp chiếu';
+      } else if (isPast) {
+        row.className = 'show-item past';
+        badge.className = 'badge-show badge-past';
+        badge.style.background = 'rgba(255, 255, 255, 0.12)';
+        badge.style.color = '#bbb';
+        badge.textContent = '🎬 Đã kết thúc';
       } else {
         row.className = 'show-item past';
         badge.className = 'badge-show';
@@ -353,8 +409,19 @@ async function poll() {
 
     if (!data.show) {
       clearVideo();
-      status.textContent = 'Chưa tới giờ chiếu. Lịch sẽ tự cập nhật.';
+      const pastShows = allShows.filter(s => Number.isFinite(Date.parse(s.endsAt)) && Date.parse(s.endsAt) <= nowMs);
+      const upcomingShows = allShows.filter(s => Number.isFinite(Date.parse(s.startsAt)) && Date.parse(s.startsAt) > nowMs);
+      if (hasEndedNotified || (pastShows.length > 0 && upcomingShows.length === 0)) {
+        showEndedScreen(pastShows[pastShows.length - 1]?.title);
+      } else {
+        hideEndedScreen();
+        status.textContent = upcomingShows.length > 0
+          ? 'Chưa tới giờ chiếu. Lịch sẽ tự cập nhật khi tới giờ.'
+          : 'Chưa có suất chiếu nào được lên lịch.';
+      }
     } else {
+      hideEndedScreen();
+      hasEndedNotified = false;
       const changed = !current || current.mediaPath !== data.show.mediaPath || current.startsAt !== data.show.startsAt;
       current = {
         ...data.show,
