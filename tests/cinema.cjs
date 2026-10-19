@@ -47,6 +47,10 @@ async function main() {
     const data = sample(); data.shows[0].source = source;
     assert.throws(() => cinema.validate(data, roles, env));
   }
+  assert.throws(() => cinema.imageUrl('javascript:alert(1)'), { status: 400 });
+  assert.throws(() => cinema.imageUrl('https://user:secret@media.example.com/a.png'), { status: 400 });
+  assert.equal(cinema.validate({ ...sample(), shows: [{ ...sample().shows[0], imageUrl: 'https://media.example.com/poster.png' }] }, roles, env).shows[0].imageUrl, 'https://media.example.com/poster.png');
+  assert.equal(cinema.isStaffMember({ permissions: { has: flag => flag === P.ManageGuild }, roles: { cache: new Collection([['fake', { name: 'Admin Staff', permissions: { any: () => false } }]]) } }), false, 'A role name or ManageGuild must not grant Cinema management');
   const overlap = sample(); overlap.shows.push({ ...overlap.shows[0] });
   assert.throws(() => cinema.validate(overlap, roles, env), /trùng giờ/);
   assert.throws(() => cinema.validate({ ...sample(), rightsConfirmed: false }, roles, env));
@@ -82,7 +86,13 @@ async function main() {
   assert.equal(cinema.isShowAnnounced('111', 'show-key-test'), false);
   cinema.markShowAnnounced('111', 'show-key-test');
   assert.equal(cinema.isShowAnnounced('111', 'show-key-test'), true);
-  const request = transport(createDashboard(client, { env, fetch: fetchApi }));
+  const { setGuildSetting: setLegacy } = require('../utils/guildSettings');
+  const legacy = sample().shows[0];
+  setLegacy('legacy', 'CINEMA_CONFIG', JSON.stringify({ shows: [legacy] }));
+  setLegacy('legacy', 'CINEMA_ANNOUNCED_SHOWS', JSON.stringify([`${legacy.startsAt}_${legacy.title}`]));
+  assert.equal(cinema.isShowAnnounced('legacy', cinema.getConfig('legacy').shows[0]), true, 'Existing announcements migrate without re-announcing');
+  let uploadedPoster;
+  const request = transport(createDashboard(client, { env: { ...env, R2_ACCOUNT_ID: 'test', R2_BUCKET_NAME: 'test', R2_ACCESS_KEY_ID: 'test', R2_SECRET_ACCESS_KEY: 'test' }, fetch: fetchApi, putCinemaPoster: async object => { uploadedPoster = object; } }));
   const activityPage = await request('/activity/');
   if (require('node:fs').existsSync(require('node:path').join(__dirname, '../activity/dist/index.html'))) {
     assert.equal(activityPage.status, 200);
@@ -106,6 +116,13 @@ async function main() {
   assert.equal((await request('/premium/guilds/111/cinema', { headers })).status, 200);
   assert.equal((await request('/api/guilds/222/premium/cinema', { headers })).status, 403);
   const post = input => request(route, { method: 'POST', headers, body: JSON.stringify(input) });
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS4sAAAAASUVORK5CYII=', 'base64');
+  assert.equal((await request(route + '/poster', { method: 'POST', headers: { cookie }, body: JSON.stringify({ data: png.toString('base64') }) })).status, 403);
+  const poster = await request(route + '/poster', { method: 'POST', headers, body: JSON.stringify({ data: png.toString('base64') }) });
+  assert.equal(poster.status, 200);
+  assert.match(poster.json().imageUrl, /^https:\/\/media.example.com\/cinema-posters\/111\/.*\.png$/);
+  assert.equal(uploadedPoster.ContentType, 'image/png');
+  assert.equal((await request(route + '/poster', { method: 'POST', headers, body: JSON.stringify({ data: Buffer.from('<svg onload=alert(1)>').toString('base64') }) })).status, 400);
   assert.equal((await request(route, { method: 'POST', headers: { cookie }, body: JSON.stringify(sample()) })).status, 403);
   assert.equal((await request(route, { method: 'POST', headers: { ...headers, origin: 'https://evil.example' }, body: JSON.stringify(sample()) })).status, 403);
   assert.equal((await post(sample())).status, 200);
@@ -144,11 +161,27 @@ async function main() {
   viewerRoles.add('777');
   const activeShowConfig = { ...sample(), audience: 'roles', roleIds: ['777'], revision: cinema.getConfig('111').revision, shows: [{ title: 'Đang chiếu', source: 'https://media.example.com/film.mp4', startsAt: new Date(Date.now() - 60000).toISOString(), endsAt: new Date(Date.now() + 3600000).toISOString() }] };
   assert.equal((await post(activeShowConfig)).status, 200);
+  const beforeSeek = cinema.getConfig('111').shows[0];
+  const endRequest = body => request('/cinema-api/guilds/111/ended', { method: 'POST', headers: { ...viewerHeaders, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  assert.equal((await endRequest({ roomId: 1, showId: beforeSeek.id })).status, 403, 'An ordinary viewer cannot end a screening');
+  isMember = false;
+  assert.equal((await endRequest({ roomId: 1, showId: beforeSeek.id })).status, 403, 'A removed member cannot end a screening');
+  isMember = true;
+  assert.equal((await request('/cinema-api/guilds/222/ended', { method: 'POST', headers: { ...viewerHeaders, 'content-type': 'application/json' }, body: '{}' })).status, 403, 'Cross-guild end denied');
+  assert.equal((await request('/cinema-api/session', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://other-app.discordsays.com' }, body: '{"code":"fake"}' })).status, 403);
   assert.equal((await request('/cinema-api/guilds/111/seek', { method: 'POST', headers: { ...viewerHeaders, 'content-type': 'application/json' }, body: JSON.stringify({ position: 600 }) })).status, 403, 'Non-staff cannot seek');
   viewerAdmin = true;
   const seekRes = await request('/cinema-api/guilds/111/seek', { method: 'POST', headers: { ...viewerHeaders, 'content-type': 'application/json' }, body: JSON.stringify({ position: 600 }) });
   assert.equal(seekRes.status, 200, 'Staff can seek');
   assert.equal(seekRes.json().position, 600);
+  const afterSeek = cinema.getConfig('111').shows[0];
+  assert.equal(afterSeek.startsAt, beforeSeek.startsAt, 'Seek preserves scheduled start');
+  assert.equal(afterSeek.endsAt, beforeSeek.endsAt, 'Seek preserves scheduled end');
+  assert.equal(cinema.playbackPosition(afterSeek, afterSeek.playback.updatedAt + 5000), 605);
+  assert.throws(() => cinema.seekShow('111', 999999, Date.now(), 1), { status: 400 });
+  assert.equal((await endRequest({ roomId: 1, showId: 'old-screening' })).status, 409, 'Old ended events cannot stop a new show');
+  guild.channels = { cache: new Collection([['room2', { name: 'Cinema 2', type: 2 }]]) };
+  assert.equal((await cinema.viewerState(guild, '444', env, Date.now(), 'room2')).show, null, 'An empty room does not play another room movie');
   viewerAdmin = false;
   assert.equal((await post({ ...activeShowConfig, enabled: false, revision: cinema.getConfig('111').revision })).status, 200);
   assert.equal((await request('/cinema-api/guilds/111/state', { headers: viewerHeaders })).status, 403);
@@ -188,7 +221,7 @@ async function main() {
   assert.match(schedEmbed.data.fields[0].value, /Cinema 2/);
   // Test archiveExpiredShows, direct deleteShow, clearHistory, and API endpoints
   const now = Date.now();
-  const pastShow = { title: 'Phim Cũ Đã Chiếu', source: 'https://media.example.com/film.mp4', startsAt: new Date(now - 7200000).toISOString(), endsAt: new Date(now - 1000).toISOString() };
+  const pastShow = { title: 'Phim Cũ Đã Chiếu', imageUrl: 'https://media.example.com/poster.png', source: 'https://media.example.com/film.mp4', startsAt: new Date(now - 7200000).toISOString(), endsAt: new Date(now - 1000).toISOString() };
   const upcomingShow = { title: 'Phim Tương Lai', source: 'https://media.example.com/film.mp4', startsAt: new Date(now + 3600000).toISOString(), endsAt: new Date(now + 7200000).toISOString() };
   const testCfg = cinema.getConfig('111');
   testCfg.shows = [pastShow, upcomingShow];
@@ -201,6 +234,7 @@ async function main() {
   assert.equal(checkedCfg.history.length, 1, 'Past show archived to history');
   assert.equal(checkedCfg.history[0].title, 'Phim Cũ Đã Chiếu');
   assert.equal(checkedCfg.history[0].status, 'completed');
+  assert.equal(checkedCfg.history[0].imageUrl, pastShow.imageUrl, 'Archive preserves poster for rebooking');
 
   // Test direct delete-show API
   const delRes = await request('/api/guilds/111/premium/cinema/delete-show', { method: 'POST', headers, body: JSON.stringify({ startsAt: upcomingShow.startsAt, title: upcomingShow.title }) });

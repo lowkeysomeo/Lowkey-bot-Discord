@@ -1,6 +1,8 @@
 'use strict';
 
 const cinema = require('./cinema');
+const { withPoster } = require('./cinemaPresentation');
+const pendingReminders = new Set();
 
 const activeCinemaSessions = new Map(); // guildId -> { showKey, show, joined, announced, connection }
 let timer = null;
@@ -14,7 +16,7 @@ function checkShows(client) {
     try {
       const config = cinema.getConfig(guild.id);
       if (!config.enabled || !Array.isArray(config.shows) || !config.shows.length) {
-        cleanupSession(guild);
+        cleanupSession(guild, true);
         continue;
       }
 
@@ -48,11 +50,7 @@ function checkShows(client) {
           notifyChan = guild.channels.cache.get(config.voiceChannelId);
         }
 
-        let voiceCh = config.voiceChannelId ? guild.channels.cache.get(config.voiceChannelId) : null;
-        if (!voiceCh && cinemaCat) {
-          const cinemaVoices = cinema.getCinemaVoiceChannels(guild, config);
-          voiceCh = (cinemaVoices && typeof cinemaVoices.first === 'function' ? cinemaVoices.first() : null) || null;
-        }
+        const voiceCh = cinema.getCinemaRoomChannel(guild, config, upcoming.roomId || 1);
         const vTag = voiceCh ? `<#${voiceCh.id}>` : (cinemaCat ? `danh mục ${cinemaCat.name}` : 'phòng chiếu phim');
 
         let content = undefined;
@@ -75,8 +73,9 @@ function checkShows(client) {
           const preMs = preHours * 3600 * 1000;
           if (msUntilStart <= preMs && msUntilStart > 10 * 60 * 1000) {
             if (!cinema.isReminderAnnounced(guild.id, upcoming, 'early')) {
-              cinema.markReminderAnnounced(guild.id, upcoming, 'early');
-              if (notifyChan && typeof notifyChan.send === 'function') {
+              const reminderKey = `${guild.id}:${cinema.showIdentity(upcoming)}:early`;
+              if (notifyChan && typeof notifyChan.send === 'function' && !pendingReminders.has(reminderKey)) {
+                pendingReminders.add(reminderKey);
                 const hoursLabel = preHours >= 1 ? `${preHours} tiếng` : `${Math.round(preHours * 60)} phút`;
                 const embedEarly = new EmbedBuilder()
                   .setColor(0x5865F2)
@@ -92,9 +91,11 @@ function checkShows(client) {
 
                 notifyChan.send({
                   content,
-                  embeds: [embedEarly],
+                  embeds: withPoster(embedEarly, upcoming),
                   ...(allowedMentions ? { allowedMentions } : {})
-                }).catch(err => console.error('[CINEMA SCHEDULER] Lỗi gửi thông báo sớm:', err.message));
+                }).then(() => cinema.markReminderAnnounced(guild.id, upcoming, 'early'))
+                  .catch(err => console.error('[CINEMA SCHEDULER] Lỗi gửi thông báo sớm:', err.message))
+                  .finally(() => pendingReminders.delete(reminderKey));
               }
             }
           }
@@ -104,8 +105,9 @@ function checkShows(client) {
         if (remind10mEnabled) {
           if (msUntilStart <= 10 * 60 * 1000 && msUntilStart > 0) {
             if (!cinema.isReminderAnnounced(guild.id, upcoming, '10m')) {
-              cinema.markReminderAnnounced(guild.id, upcoming, '10m');
-              if (notifyChan && typeof notifyChan.send === 'function') {
+              const reminderKey = `${guild.id}:${cinema.showIdentity(upcoming)}:10m`;
+              if (notifyChan && typeof notifyChan.send === 'function' && !pendingReminders.has(reminderKey)) {
+                pendingReminders.add(reminderKey);
                 const embed10m = new EmbedBuilder()
                   .setColor(0xFEE75C)
                   .setTitle(`⏰ CHUẨN BỊ LÊN SÓNG: ${upcoming.title} (Còn 10 phút)`)
@@ -119,9 +121,11 @@ function checkShows(client) {
 
                 notifyChan.send({
                   content,
-                  embeds: [embed10m],
+                  embeds: withPoster(embed10m, upcoming),
                   ...(allowedMentions ? { allowedMentions } : {})
-                }).catch(err => console.error('[CINEMA SCHEDULER] Lỗi gửi thông báo 10p:', err.message));
+                }).then(() => cinema.markReminderAnnounced(guild.id, upcoming, '10m'))
+                  .catch(err => console.error('[CINEMA SCHEDULER] Lỗi gửi thông báo 10p:', err.message))
+                  .finally(() => pendingReminders.delete(reminderKey));
               }
             }
           }
@@ -143,10 +147,10 @@ function checkShows(client) {
 
         if (currentShow) {
           anyRoomActive = true;
-          const showKey = `${currentShow.startsAt}_${currentShow.title}`;
+          const showKey = cinema.showIdentity(currentShow);
           const isSameShow = session && (
             session.showKey === showKey ||
-            (session.show && session.show.title === currentShow.title &&
+            (session.show && !session.show.id && session.show.title === currentShow.title &&
              Math.abs(Date.parse(session.show.startsAt) - Date.parse(currentShow.startsAt)) < 30 * 60 * 1000)
           );
 
@@ -172,10 +176,9 @@ function checkShows(client) {
           const voiceChannel = cinema.getCinemaRoomChannel(guild, config, roomNum);
 
           if (voiceChannel && session.voiceStatusSet !== currentShow.title) {
-            session.voiceStatusSet = currentShow.title;
             session.voiceChannelId = voiceChannel.id;
             const statusText = cinema.formatCinemaVoiceStatus(currentShow.title);
-            cinema.updateVoiceChannelStatus(client, voiceChannel.id, statusText).catch(() => {});
+            cinema.updateVoiceChannelStatus(client, voiceChannel.id, statusText).then(ok => { if (ok) session.voiceStatusSet = currentShow.title; }).catch(() => {});
           }
 
           if (voiceChannel && voiceChannel.isVoiceBased() && !session.joined) {
@@ -201,9 +204,8 @@ function checkShows(client) {
           const alreadyAnnounced = session.announced || cinema.isShowAnnounced(guild.id, currentShow, now);
           if (alreadyAnnounced) {
             session.announced = true;
-          } else {
-            session.announced = true;
-            cinema.markShowAnnounced(guild.id, currentShow);
+          } else if (!session.announcing) {
+            session.announcing = true;
 
             (async () => {
               try {
@@ -221,6 +223,7 @@ function checkShows(client) {
                   }
                 }
 
+                if (activeCinemaSessions.get(sessionKey) !== session) return;
                 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
                 const startUnix = Math.floor(Date.parse(currentShow.startsAt) / 1000);
                 const endUnix = Math.floor(Date.parse(currentShow.endsAt) / 1000);
@@ -286,16 +289,24 @@ function checkShows(client) {
                 if (targetChannel && typeof targetChannel.send === 'function') {
                   const msg = await targetChannel.send({
                     content,
-                    embeds: [embed],
+                    embeds: withPoster(embed, currentShow),
                     components,
                     ...(allowedMentions ? { allowedMentions } : {})
                   }).catch(err => {
                     console.error(`[CINEMA SCHEDULER] Không thể gửi thông báo tới #${targetChannel.name}:`, err.message);
+                    throw err;
                   });
+                  // A successful send may return undefined in test adapters.
                   if (msg) session.announcementMessage = msg;
+                  if (activeCinemaSessions.get(sessionKey) === session) {
+                    session.announced = true;
+                    cinema.markShowAnnounced(guild.id, currentShow);
+                  }
                 }
               } catch (annErr) {
                 console.error('[CINEMA SCHEDULER] Lỗi thông báo chiếu phim:', annErr.message);
+              } finally {
+                session.announcing = false;
               }
             })();
           }
@@ -399,12 +410,10 @@ function cleanupSession(guild, notifyEnd = false, roomNumber = null) {
   }
 
   if (!hasAnySessionLeft) {
-    try {
-      const { getVoiceConnection } = require('@discordjs/voice');
-      const conn = getVoiceConnection(guild.id);
-      if (conn) conn.destroy();
-    } catch {}
     activeCinemaSessions.delete(guild.id);
+  } else {
+    const remaining = [1, 2, 3].map(id => activeCinemaSessions.get(`${guild.id}_room${id}`)).find(Boolean);
+    activeCinemaSessions.set(guild.id, remaining);
   }
 }
 

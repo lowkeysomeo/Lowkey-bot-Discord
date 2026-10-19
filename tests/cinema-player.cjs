@@ -1,0 +1,47 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+function element() {
+  return { hidden: true, style: { setProperty() {} }, classList: { add() {}, remove() {}, contains() { return false; } },
+    textContent: '', src: '', paused: false, ended: false, readyState: 1, currentTime: 0, duration: 7200, loads: 0,
+    addEventListener() {}, pause() { this.paused = true; }, play: async function () { this.paused = false; },
+    removeAttribute(name) { if (name === 'src') this.src = ''; }, load() { this.loads++; }, replaceChildren() {}, append() {} };
+}
+const nodes = new Map();
+const node = selector => { if (!nodes.has(selector)) nodes.set(selector, element()); return nodes.get(selector); };
+let clock = 1000, response = null, fetchCalls = [], networkError = null;
+const context = vm.createContext({
+  document: { querySelector: node, createElement: element, body: element(), documentElement: element() },
+  window: { addEventListener() {}, crypto: { randomUUID: () => 'state' } },
+  console: { log() {}, warn() {} }, Date, JSON, Math, Boolean, Number, String, Error, Promise, encodeURIComponent,
+  performance: { now: () => clock }, AbortSignal, setTimeout() {}, clearTimeout() {},
+  fetch: async (url, options) => { fetchCalls.push({ url, options }); if (networkError) throw networkError; return { ok: response.status === 200, status: response.status, text: async () => JSON.stringify(response.data) }; },
+});
+let source = fs.readFileSync(path.join(__dirname, '../activity/src/main.js'), 'utf8');
+source = source.replace(/^import .*\n/, '').replace(/\nstart\(\);\s*$/, '\n');
+vm.runInContext(source, context);
+const run = code => vm.runInContext(code, context);
+const show = { id: 'a', title: 'Movie', roomId: 2, startsAt: '2030-01-01T12:00:00Z', endsAt: '2030-01-01T14:00:00Z', mediaPath: '/.proxy/media/movie.mp4', position: 300 };
+function prime() {
+  run(`guildId='111'; channelId='222'; session='test'; stopped=false; hasStarted=true; lastStateAt=1000; endedShowId=null; current=${JSON.stringify({ ...show, receivedAt: 1000 })}`);
+  Object.assign(node('#video'), { src: show.mediaPath, paused: false, loads: 0 });
+}
+async function main() {
+  prime(); response = { status: 403, data: { error: 'Role revoked' } };
+  await run('poll()'); assert.equal(node('#video').src, '', 'Authorization failure unloads media immediately');
+  assert.equal(run('hasStarted'), false);
+  prime(); networkError = new Error('Temporary network error');
+  await run('poll()'); assert.equal(node('#video').src, show.mediaPath, 'Brief outages do not interrupt playback');
+  clock = 32000; await run('poll()'); assert.equal(node('#video').src, '', 'Long outages fail closed');
+  clock = 1000; networkError = null; prime(); fetchCalls = [];
+  await run('handleMovieEnded()'); assert.equal(fetchCalls.length, 0, 'Local end does not mutate the guild schedule');
+  response = { status: 200, data: { title: 'Cinema', description: '', canSeek: false, show, shows: [], upcoming: [] } };
+  await run('poll()'); assert.equal(node('#video').src, '', 'Polling does not reload the same completed file');
+  prime(); response.data.show = { ...show, position: 600 };
+  await run('poll()'); assert.equal(node('#video').loads, 0, 'Seek synchronization does not reload media');
+  assert.equal(node('#video').currentTime, 600);
+  console.log('PASS Cinema player: permission loss, transient vs prolonged network outage, local-ended isolation and no reload on seek.');
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

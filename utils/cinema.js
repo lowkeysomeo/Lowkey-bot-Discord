@@ -1,8 +1,24 @@
 const { movieDetails } = require('./movieCatalog');
 const { getGuildSetting, setGuildSetting } = require('./guildSettings');
 const { PermissionFlagsBits, Routes } = require('discord.js');
+const { randomUUID } = require('node:crypto');
 
 function fail(status, message) { throw Object.assign(new Error(message), { status }); }
+function imageUrl(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string' || value.length > 2048) fail(400, 'Ảnh phim không hợp lệ.');
+  let url;
+  try { url = new URL(value); } catch { fail(400, 'Ảnh phim cần URL HTTPS công khai.'); }
+  if (url.protocol !== 'https:' || url.username || url.password || !/^[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}$/i.test(url.hostname) || /(?:^|\.)(?:localhost|local|internal)$/i.test(url.hostname)) fail(400, 'Ảnh phim cần URL HTTPS công khai.');
+  return url.href;
+}
+function showIdentity(show) { return show.id || `${show.roomId || 1}_${show.startsAt}_${show.title}_${show.source || ''}`; }
+function playbackPosition(show, now = Date.now()) {
+  if (show.playback && Number.isFinite(show.playback.position) && Number.isFinite(show.playback.updatedAt)) {
+    return Math.max(0, show.playback.position + (now - show.playback.updatedAt) / 1000);
+  }
+  return Math.max(0, (now - Date.parse(show.startsAt)) / 1000);
+}
 function mediaOrigin(env) {
   try {
     const url = new URL(env.CINEMA_MEDIA_ORIGIN);
@@ -41,6 +57,7 @@ function archiveExpiredShows(guildId, now = Date.now()) {
         );
         if (!alreadyInHistory) {
           config.history.unshift({
+            id: s.id, imageUrl: s.imageUrl || '',
             title: s.title,
             source: s.source,
             roomId: s.roomId || 1,
@@ -58,6 +75,7 @@ function archiveExpiredShows(guildId, now = Date.now()) {
     if (changed) {
       config.shows = activeShows;
       config.history = config.history.slice(0, 50);
+      config.revision = (config.revision || 0) + 1;
       setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
     }
     return config;
@@ -71,7 +89,18 @@ function getConfig(guildId) {
   archiveExpiredShows(guildId);
   const raw = getGuildSetting(guildId, 'CINEMA_CONFIG');
   const d = { enabled: false, title: 'VNL Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, categoryId: null, voiceChannelId: null, notifyChannelId: null, notifyRoleId: null, notifyMessage: '', preReminderHours: 3, remind10m: true, shows: [], history: [], revision: 0 };
-  return raw ? { ...d, ...JSON.parse(raw) } : d;
+  const config = raw ? { ...d, ...JSON.parse(raw) } : d;
+  let migrated = false;
+  const announced = getAnnouncedShows(guildId);
+  for (const show of config.shows) if (!show.id) {
+    show.id = randomUUID(); migrated = true;
+    const minute = Math.floor(Date.parse(show.startsAt) / 60000);
+    // Legacy records had no room in their key. Migrate room 1 without suppressing other rooms.
+    if ((show.roomId || 1) === 1 && (announced.includes(`${show.startsAt}_${show.title}`) || announced.includes(`${minute}_${show.title}`))) announced.push(`show:${show.id}`);
+  }
+  if (migrated) setGuildSetting(guildId, 'CINEMA_ANNOUNCED_SHOWS', JSON.stringify(announced.slice(-150)));
+  if (migrated) setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+  return config;
 }
 function text(value, max, required = false) {
   if (typeof value !== 'string' || value.length > max || (required && !value.trim())) fail(400, 'Tên hoặc nội dung không hợp lệ.');
@@ -102,9 +131,9 @@ function validate(input, roles, env, channels) {
   }
   const remind10m = input.remind10m !== false && input.remind10m !== 'false';
   if (channels) {
-    if (categoryId && !channels.has(categoryId)) fail(400, 'Danh mục Cinema phải thuộc server này.');
-    if (voiceChannelId && !channels.has(voiceChannelId)) fail(400, 'Kênh voice rạp phim phải thuộc server này.');
-    if (notifyChannelId && !channels.has(notifyChannelId)) fail(400, 'Kênh thông báo phải thuộc server này.');
+    if (categoryId && (!channels.has(categoryId) || channels.get(categoryId)?.type !== 4)) fail(400, 'Danh mục Cinema phải là danh mục thuộc server này.');
+    if (voiceChannelId && (!channels.has(voiceChannelId) || channels.get(voiceChannelId)?.type !== 2)) fail(400, 'Kênh voice rạp phim phải là kênh thoại thuộc server này.');
+    if (notifyChannelId && (!channels.has(notifyChannelId) || ![0, 5, 2].includes(channels.get(notifyChannelId)?.type))) fail(400, 'Kênh thông báo không hợp lệ trong server này.');
   }
   if (!Array.isArray(input.shows) || input.shows.length > 20) fail(400, 'Tối đa 20 suất chiếu.');
   const shows = input.shows.map(show => {
@@ -117,7 +146,7 @@ function validate(input, roles, env, channels) {
     }
     if (end - start > 24 * 3600000) fail(400, 'Lịch chiếu dài tối đa 24 giờ.');
     const roomId = [1, 2, 3].includes(Number(show.roomId)) ? Number(show.roomId) : 1;
-    return { title: text(show.title, 120, true), source: sourceUrl(text(show.source, 2048, true), env), startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString(), roomId };
+    return { id: typeof show.id === 'string' && /^[a-f0-9-]{36}$/i.test(show.id) ? show.id : randomUUID(), imageUrl: imageUrl(show.imageUrl), title: text(show.title, 120, true), source: sourceUrl(text(show.source, 2048, true), env), startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString(), roomId };
   }).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
 
   // Kiểm tra trùng giờ riêng biệt theo từng phòng (Cinema 1, 2, 3)
@@ -135,15 +164,23 @@ function validate(input, roles, env, channels) {
   }
   return { enabled: input.enabled, title: text(input.title, 80, true), description: text(input.description, 1500), audience: input.audience,
     roleIds: [...new Set(input.roleIds)], rightsConfirmed: input.rightsConfirmed, categoryId, voiceChannelId, notifyChannelId, notifyRoleId, notifyMessage, preReminderHours, remind10m, shows,
-    history: Array.isArray(input.history) ? input.history.slice(0, 50) : [] };
+    history: [] };
 }
 function saveConfig(guildId, input, roles, env, channels) {
   const next = validate(input, roles, env, channels);
   const current = getConfig(guildId);
   if (input.revision !== current.revision) fail(409, 'Cấu hình đã được admin khác sửa. Hãy tải lại trước khi lưu.');
-  next.history = Array.isArray(input.history) && input.history.length > 0
-    ? input.history.slice(0, 50)
-    : (Array.isArray(current.history) ? current.history : []);
+  next.history = current.history;
+  for (let i = 0; i < next.shows.length; i++) {
+    const show = next.shows[i];
+    const previous = current.shows.find(s => s.id === show.id ||
+      (s.startsAt === show.startsAt && s.source === show.source && (s.roomId || 1) === show.roomId));
+    if (previous) {
+      show.id = previous.source === show.source ? previous.id : randomUUID();
+      if (previous.source === show.source && previous.startsAt === show.startsAt && previous.playback) show.playback = previous.playback;
+    }
+  }
+  if (new Set(next.shows.map(s => s.id)).size !== next.shows.length) fail(400, 'Mã suất chiếu bị trùng.');
   next.revision = current.revision + 1;
   setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(next));
   return next;
@@ -152,45 +189,24 @@ function isStaffMember(member) {
   if (!member) return false;
   const memberId = member.id || member.user?.id;
   if (memberId && member.guild?.ownerId && memberId === member.guild.ownerId) return true;
-  const admin = member.permissions?.has?.(PermissionFlagsBits.Administrator) ||
-                member.permissions?.has?.(PermissionFlagsBits.ManageGuild);
-  if (admin) return true;
-  const roles = member.roles?.cache;
-  if (!roles) return false;
-  const checkRole = role => {
-    if (!role || typeof role === 'string') return false;
-    if (role.permissions?.any?.([
-      PermissionFlagsBits.Administrator,
-      PermissionFlagsBits.ManageGuild,
-      PermissionFlagsBits.ManageRoles,
-      PermissionFlagsBits.BanMembers,
-      PermissionFlagsBits.KickMembers,
-      PermissionFlagsBits.ModerateMembers,
-    ])) return true;
-    return /(staff|admin|mod|quản\s*trị|bảo\s*vệ|partner\s*management|hỗ\s*trợ|supporter|kiểm\s*duyệt)/i.test(role.name || '');
-  };
-  if (typeof roles.some === 'function') return roles.some(checkRole);
-  if (typeof roles.values === 'function') {
-    for (const role of roles.values()) if (checkRole(role)) return true;
-  }
-  return false;
+  return Boolean(member.permissions?.has?.(PermissionFlagsBits.Administrator));
 }
 
-function seekShow(guildId, targetSeconds, now = Date.now(), roomNumber = null) {
+function seekShow(guildId, targetSeconds, now = Date.now(), roomNumber = null, showId = null) {
   const config = getConfig(guildId);
   const show = config.shows.find(s => {
     if (roomNumber !== null && (s.roomId || 1) !== Number(roomNumber)) return false;
     return Date.parse(s.startsAt) <= now && now < Date.parse(s.endsAt);
   });
   if (!show) fail(404, 'Hiện không có suất chiếu nào đang phát.');
-  const oldDuration = Date.parse(show.endsAt) - Date.parse(show.startsAt);
-  const target = Math.max(0, Number(targetSeconds) || 0);
-  const newStartsAt = new Date(now - target * 1000).toISOString();
-  const newEndsAt = new Date(Date.parse(newStartsAt) + oldDuration).toISOString();
-  show.startsAt = newStartsAt;
-  show.endsAt = newEndsAt;
+  if (showId && show.id !== showId) fail(409, 'Suất chiếu đã thay đổi. Hãy tải lại.');
+  const duration = (Date.parse(show.endsAt) - Date.parse(show.startsAt)) / 1000;
+  if (!Number.isFinite(targetSeconds) || targetSeconds < 0 || targetSeconds >= duration) fail(400, 'Vị trí tua nằm ngoài thời lượng suất chiếu.');
+  const target = targetSeconds;
+  show.playback = { position: target, updatedAt: now };
+  config.revision = (config.revision || 0) + 1;
   setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
-  return { position: target, startsAt: newStartsAt, endsAt: newEndsAt, roomId: show.roomId || 1 };
+  return { position: target, startsAt: show.startsAt, endsAt: show.endsAt, roomId: show.roomId || 1, id: show.id };
 }
 
 async function viewerState(guild, userId, env, now = Date.now(), queryChannelId = null) {
@@ -218,7 +234,7 @@ async function viewerState(guild, userId, env, now = Date.now(), queryChannelId 
   if (roomNumber !== null) {
     show = config.shows.find(s => (s.roomId || 1) === roomNumber && Date.parse(s.startsAt) <= now && now < Date.parse(s.endsAt));
   }
-  if (!show) {
+  if (!show && roomNumber === null) {
     show = config.shows.find(s => Date.parse(s.startsAt) <= now && now < Date.parse(s.endsAt));
   }
 
@@ -234,12 +250,13 @@ async function viewerState(guild, userId, env, now = Date.now(), queryChannelId 
     shows: (config.shows || []).map(({ title, startsAt, endsAt, roomId }) => ({ title, startsAt, endsAt, roomId: roomId || 1 })),
     upcoming: config.shows.filter(s => Date.parse(s.startsAt) > now).map(({ title, startsAt, endsAt, roomId }) => ({ title, startsAt, endsAt, roomId: roomId || 1 })),
     show: show ? {
+      id: show.id,
       title: show.title,
       roomId: show.roomId || 1,
       startsAt: show.startsAt,
       endsAt: show.endsAt,
       mediaPath: '/.proxy/media' + new URL(sourceUrl(show.source, env)).pathname,
-      position: (now - Date.parse(show.startsAt)) / 1000
+      position: playbackPosition(show, now)
     } : null
   };
 }
@@ -264,7 +281,7 @@ function getAnnouncedShows(guildId) {
 
 function isShowAnnounced(guildId, showOrKey, now = Date.now()) {
   const last = getLastAnnouncedShow(guildId);
-  if (last && typeof showOrKey === 'object' && showOrKey !== null) {
+  if (last && typeof showOrKey === 'object' && showOrKey !== null && !showOrKey.id) {
     const show = showOrKey;
     const sameTitle = last.title && show.title && last.title.trim().toLowerCase() === show.title.trim().toLowerCase();
     const showStart = Date.parse(show.startsAt);
@@ -287,10 +304,10 @@ function isShowAnnounced(guildId, showOrKey, now = Date.now()) {
     return Array.isArray(list) && list.includes(showOrKey);
   }
   if (typeof showOrKey === 'object' && showOrKey !== null) {
-    const rawKey = `${showOrKey.startsAt}_${showOrKey.title}`;
+    const rawKey = `show:${showIdentity(showOrKey)}`;
     const minute = Math.floor(Date.parse(showOrKey.startsAt) / 60000);
     const minuteKey = `${minute}_${showOrKey.title}`;
-    return Array.isArray(list) && (list.includes(rawKey) || list.includes(minuteKey));
+    return Array.isArray(list) && (list.includes(rawKey) || (!showOrKey.id && list.includes(minuteKey)));
   }
   return false;
 }
@@ -308,7 +325,7 @@ function markShowAnnounced(guildId, showOrKey) {
       title = showOrKey.title || '';
       startsAt = showOrKey.startsAt || new Date(now).toISOString();
       endsAt = showOrKey.endsAt || new Date(now + 2.5 * 3600000).toISOString();
-      rawKey = `${startsAt}_${title}`;
+      rawKey = `show:${showIdentity(showOrKey)}`;
       const minute = Math.floor(Date.parse(startsAt) / 60000);
       minuteKey = `${minute}_${title}`;
     } else if (typeof showOrKey === 'string') {
@@ -407,13 +424,10 @@ async function ensureCinemaChannelPermissions(guild, config) {
       if (!channel || typeof channel.permissionOverwrites?.edit !== 'function') continue;
       const overwrite = channel.permissionOverwrites.cache?.get(guild.roles.everyone.id);
       const hasAllow = overwrite?.allow?.has?.(PermissionFlagsBits.UseEmbeddedActivities) &&
-                       overwrite?.allow?.has?.(PermissionFlagsBits.Connect) &&
                        overwrite?.allow?.has?.(PermissionFlagsBits.Speak);
       const hasDeny = overwrite?.deny?.has?.(PermissionFlagsBits.UseSoundboard);
       if (!hasAllow || !hasDeny) {
         await channel.permissionOverwrites.edit(guild.roles.everyone, {
-          ViewChannel: true,
-          Connect: true,
           UseEmbeddedActivities: true,
           Speak: true,
           UseSoundboard: false,
@@ -467,18 +481,19 @@ function getCinemaRoomChannel(guild, config, roomNumber = 1) {
   // 2. Nếu roomNumber === 1 và có voiceChannelId trong config
   if (targetRoom === 1 && config && config.voiceChannelId) {
     const ch = guild.channels.cache.get(config.voiceChannelId);
-    if (ch) return ch;
+    if (ch && (ch.type === 2 || ch.isVoiceBased?.()) && (!category || ch.parentId === category.id)) return ch;
   }
 
   // 3. Tìm trên toàn server nếu chưa có category
-  const matchedInGuild = guild.channels.cache.find(c =>
+  const matchedInGuild = !category && guild.channels.cache.find(c =>
     (c.type === 2 || c.type === 13 || (typeof c.isVoiceBased === 'function' && c.isVoiceBased())) &&
     getRoomNumberFromChannel(c) === targetRoom
   );
   if (matchedInGuild) return matchedInGuild;
 
   // 4. Fallback: Kênh voice đầu tiên
-  return voiceChannels.first?.() || null;
+  const onlyVoice = voiceChannels.size === 1 ? voiceChannels.first?.() : null;
+  return targetRoom === 1 && onlyVoice && getRoomNumberFromChannel(onlyVoice) === null ? onlyVoice : null;
 }
 
 function getActiveShow(config, now = Date.now(), roomNumber = null) {
@@ -544,6 +559,7 @@ function markShowEnded(guildId, now = Date.now(), roomNumber = null) {
         changed = true;
         config.history.unshift({
           title: s.title,
+          id: s.id, imageUrl: s.imageUrl || '',
           source: s.source,
           roomId: showRoom,
           startsAt: s.startsAt,
@@ -555,6 +571,7 @@ function markShowEnded(guildId, now = Date.now(), roomNumber = null) {
         changed = true;
         config.history.unshift({
           title: s.title,
+          id: s.id, imageUrl: s.imageUrl || '',
           source: s.source,
           roomId: showRoom,
           startsAt: s.startsAt,
@@ -569,6 +586,7 @@ function markShowEnded(guildId, now = Date.now(), roomNumber = null) {
     if (changed) {
       config.shows = remainingShows;
       config.history = config.history.slice(0, 50);
+      config.revision = (config.revision || 0) + 1;
       setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
     }
     return changed;
@@ -603,6 +621,7 @@ function deleteShow(guildId, criteria = {}) {
     if (!Array.isArray(config.history)) config.history = [];
     config.history.unshift({
       title: deleted.title,
+      id: deleted.id, imageUrl: deleted.imageUrl || '',
       source: deleted.source,
       roomId: deleted.roomId || 1,
       startsAt: deleted.startsAt,
@@ -687,6 +706,7 @@ async function listUploadedMovies(guildId, env = process.env) {
       });
 
       result.push({
+        imageUrl: matchedShow?.imageUrl || '',
         key: obj.Key,
         title: movieDetails(obj.Key, obj.Size, matchedShow?.title).title,
         durationSeconds: movieDetails(obj.Key, obj.Size).durationSeconds,
@@ -707,6 +727,7 @@ async function listUploadedMovies(guildId, env = process.env) {
         seenNorms.add(normSource);
         const fileName = s.source.split('/').pop() || s.title;
         result.push({
+          imageUrl: s.imageUrl || '',
           key: fileName,
           title: movieDetails(fileName, null, s.title).title,
           durationSeconds: null,
@@ -724,6 +745,7 @@ async function listUploadedMovies(guildId, env = process.env) {
 }
 
 module.exports = {
+  imageUrl, sourceUrl, showIdentity, playbackPosition,
   getConfig,
   saveConfig,
   validate,

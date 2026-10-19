@@ -11,7 +11,7 @@ async function api(route, data) {
   const result = await response.json();
   if (!response.ok) {
     if (response.status === 401) { state.session = { ...state.session, user: null }; render(); }
-    throw new Error(result.error || 'Không tải được dữ liệu.');
+    throw Object.assign(new Error(result.error || 'Không tải được dữ liệu.'), { status: response.status });
   }
   return result;
 }
@@ -543,6 +543,12 @@ function cinemaLocalTime(value) {
   if (isNaN(date.getTime())) return '';
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
+function cinemaPosterUrl(value) { try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password ? url.href : ''; } catch { return ''; } }
+function updateCinemaPoster(row) {
+  const image = row.querySelector('[data-poster-preview]'), url = cinemaPosterUrl(row.querySelector('[data-show="imageUrl"]').value);
+  image.hidden = !url;
+  if (url) image.src = url; else image.removeAttribute('src');
+}
 function cinemaShowRow(show = {}) {
   let startsAt = show.startsAt;
   let endsAt = show.endsAt;
@@ -566,7 +572,7 @@ function cinemaShowRow(show = {}) {
   const roomNum = [1, 2, 3].includes(Number(show.roomId)) ? Number(show.roomId) : 1;
   const roomBadge = ` <span class="badge" style="background:rgba(0,229,255,0.15);border:1px solid rgba(0,229,255,0.4);color:#00e5ff;font-size:11px;font-weight:700;padding:2px 8px;margin-left:6px;border-radius:999px;">Cinema ${roomNum}</span>`;
 
-  return `<fieldset class="cinema-show" data-starts-at="${h(show.startsAt || '')}" data-title="${h(show.title || '')}" data-room-id="${roomNum}"><legend>Suất chiếu${roomBadge}${statusBadge}</legend><div class="form-grid">
+  return `<fieldset class="cinema-show" data-show-id="${h(show.id || '')}" data-starts-at="${h(show.startsAt || '')}" data-title="${h(show.title || '')}" data-room-id="${roomNum}"><legend>Suất chiếu${roomBadge}${statusBadge}</legend><div class="form-grid">
     <div class="field"><label>Phòng chiếu<select data-show="roomId">
       <option value="1"${roomNum === 1 ? ' selected' : ''}>🎬 VNL Cinema 1 (Phòng 1)</option>
       <option value="2"${roomNum === 2 ? ' selected' : ''}>🎬 VNL Cinema 2 (Phòng 2)</option>
@@ -574,6 +580,7 @@ function cinemaShowRow(show = {}) {
     </select></label></div>
     <div class="field"><label>Tên phim<input data-show="title" maxlength="120" value="${h(show.title || '')}" required></label></div>
     <div class="field"><label>URL video hợp pháp<input data-show="source" type="url" maxlength="2048" placeholder="https://kho-video.example/phim.mp4" value="${h(show.source || '')}" required></label></div>
+    <div class="field cinema-poster-field"><label>Ảnh thông báo riêng của phim<input data-show="imageUrl" type="url" maxlength="2048" placeholder="https://kho-anh.example/poster.jpg" value="${h(show.imageUrl || '')}"></label><small>Ảnh xuất hiện dưới tên phim, trên giờ chiếu trong thông báo Discord.</small><img class="cinema-poster-preview" data-poster-preview alt="Ảnh thông báo phim" loading="lazy" referrerpolicy="no-referrer" ${cinemaPosterUrl(show.imageUrl) ? `src="${h(cinemaPosterUrl(show.imageUrl))}"` : 'hidden'}><label>Tải ảnh lên kho phim<input data-cinema-poster type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label><small data-poster-status>PNG, JPG, WebP hoặc GIF; tối đa 2 MB.</small></div>
     <div class="field"><label>Bắt đầu<input data-show="startsAt" type="datetime-local" value="${h(cinemaLocalTime(startsAt))}" required></label></div>
     <div class="field"><label>Kết thúc<input data-show="endsAt" type="datetime-local" value="${h(cinemaLocalTime(endsAt))}" required></label></div>
     </div><div style="margin-top:14px;"><button type="button" class="text-button" data-cinema-remove-direct data-starts-at="${h(show.startsAt || '')}" data-title="${h(show.title || '')}" data-room-id="${roomNum}" data-saved="${isSaved ? '1' : '0'}" style="color:#ff6b6b;font-weight:600;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:rgba(255,107,107,0.12);border:1px solid rgba(255,107,107,0.3);border-radius:6px;cursor:pointer;">🗑️ Xóa suất chiếu${isRunning ? ' (Dừng chiếu ngay)' : ''}</button></div></fieldset>`;
@@ -617,7 +624,7 @@ function cinemaPage() {
               <td style="padding:10px 8px;color:#a0a0b0;">${h(timeLabel)}</td>
               <td style="padding:10px 8px;">${statusBadge}</td>
               <td style="padding:10px 8px;text-align:right;">
-                <button type="button" class="secondary" data-cinema-rebook data-title="${h(item.title)}" data-source="${h(item.source || '')}" data-room-id="${rNum}" style="padding:4px 10px;font-size:12px;cursor:pointer;">🔄 Chiếu lại</button>
+                <button type="button" class="secondary" data-cinema-rebook data-title="${h(item.title)}" data-source="${h(item.source || '')}" data-image-url="${h(item.imageUrl || '')}" data-room-id="${rNum}" style="padding:4px 10px;font-size:12px;cursor:pointer;">🔄 Chiếu lại</button>
               </td>
             </tr>`;
           }).join('')}
@@ -672,6 +679,25 @@ function bindCinema() {
   const form = document.querySelector('#cinema-form');
   if (!form) return;
   form.oninput = () => { state.dirty = true; document.querySelector('#cinema-save-status').textContent = ' Có thay đổi chưa lưu.'; };
+  form.addEventListener('input', event => { if (event.target.matches('[data-show="imageUrl"]')) updateCinemaPoster(event.target.closest('.cinema-show')); });
+  form.addEventListener('change', async event => {
+    const input = event.target.closest('[data-cinema-poster]');
+    if (!input || !input.files?.length) return;
+    const file = input.files[0], row = input.closest('.cinema-show'), status = row.querySelector('[data-poster-status]');
+    const id = state.guild.id, requestId = state.requestId;
+    if (file.size > 2 * 1024 * 1024) { input.value = ''; return notify('Ảnh tối đa 2 MB.'); }
+    form.dataset.uploads = String(Number(form.dataset.uploads || 0) + 1);
+    status.textContent = 'Đang tải ảnh…'; input.disabled = true;
+    try {
+      const encoded = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1]); reader.onerror = () => reject(new Error('Không đọc được ảnh.')); reader.readAsDataURL(file); });
+      const result = await api(`/api/guilds/${id}/premium/cinema/poster`, { data: encoded });
+      if (state.requestId !== requestId) return;
+      row.querySelector('[data-show="imageUrl"]').value = result.imageUrl;
+      updateCinemaPoster(row);
+      state.dirty = true; status.textContent = 'Đã tải ảnh. Bấm Lưu cấu hình Cinema để áp dụng.';
+    } catch (error) { status.textContent = error.message; notify(error.message); }
+    finally { form.dataset.uploads = String(Math.max(0, Number(form.dataset.uploads || 1) - 1)); input.disabled = false; input.value = ''; }
+  });
   form.addEventListener('change', event => {
     if (event.target && event.target.matches('[data-show="startsAt"]')) {
       const fieldset = event.target.closest('.cinema-show');
@@ -778,7 +804,7 @@ function bindCinema() {
       const startsAt = now.toISOString();
       const endsAt = new Date(now.getTime() + 2.5 * 3600000).toISOString();
 
-      shows.insertAdjacentHTML('beforeend', cinemaShowRow({ title, source, startsAt, endsAt, roomId }));
+      shows.insertAdjacentHTML('beforeend', cinemaShowRow({ title, source, startsAt, endsAt, roomId, imageUrl: rebookBtn.dataset.imageUrl || '' }));
       state.dirty = true;
       notify(`Đã nạp "${title}" vào lịch chiếu (Cinema ${roomId}). Hãy kiểm tra lại thời gian và bấm "Lưu cấu hình Cinema"!`);
       const newFieldset = shows.lastElementChild;
@@ -791,6 +817,7 @@ function bindCinema() {
   form.onsubmit = async event => {
     event.preventDefault();
     const id = state.guild.id, requestId = state.requestId, button = document.querySelector('#cinema-save');
+    if (Number(form.dataset.uploads || 0)) return notify('Hãy chờ ảnh tải xong trước khi lưu.');
     const data = new FormData(form);
     const showsPayload = [...form.querySelectorAll('.cinema-show')].map(row => {
       const item = Object.fromEntries([...row.querySelectorAll('[data-show]')].map(input => [input.dataset.show, input.value]));
@@ -800,6 +827,8 @@ function bindCinema() {
         eTime = sTime + 2.5 * 3600000;
       }
       return {
+        id: row.dataset.showId || undefined,
+        imageUrl: item.imageUrl || '',
         title: item.title,
         source: item.source,
         roomId: [1, 2, 3].includes(Number(item.roomId)) ? Number(item.roomId) : 1,
@@ -826,19 +855,7 @@ function bindCinema() {
     };
     if (button) button.disabled = true;
     try {
-      let result;
-      try {
-        result = await api(`/api/guilds/${id}/premium/cinema`, payload);
-      } catch (firstErr) {
-        if (firstErr.message && (firstErr.message.includes('admin khác sửa') || firstErr.message.includes('tải lại'))) {
-          const fresh = await api(`/api/guilds/${id}/premium/cinema`);
-          payload.revision = fresh.config.revision;
-          state.data.cinema.config = fresh.config;
-          result = await api(`/api/guilds/${id}/premium/cinema`, payload);
-        } else {
-          throw firstErr;
-        }
-      }
+      const result = await api(`/api/guilds/${id}/premium/cinema`, payload);
       if (state.requestId !== requestId) return;
       state.data.cinema.config = result.config;
       state.dirty = false;

@@ -47,7 +47,7 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
     if (req.method === 'POST' && route === '/cinema-api/session') {
       if (!env.CLIENT_ID || !env.DISCORD_CLIENT_SECRET) fail(503, 'Cinema chưa được cấu hình OAuth.');
       const origin = (req.headers.origin || '').replace(/\/$/, '');
-      if (origin !== appOrigin && !origin.endsWith('.discordsays.com')) fail(403, 'Hãy mở Cinema từ Discord Activity.');
+      if (origin !== appOrigin) fail(403, 'Hãy mở Cinema từ Discord Activity.');
       // Do not trust X-Forwarded-For without a configured trusted reverse proxy.
       rateLimit(`cinema-login:${req.socket.remoteAddress}`, 30);
       if (sessions.size >= 5000) fail(503, 'Cinema đang đầy. Hãy thử lại.');
@@ -80,20 +80,19 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
       rateLimit(`cinema-seek:${value.userId}`, 60);
       const guild = client.guilds.cache.get(seekMatch[1]);
       if (!guild) fail(403, 'Bot chưa có trong server này.');
-      let member;
-      try { member = await guild.members.fetch({ user: value.userId, force: true }); }
-      catch { fail(403, 'Không tìm thấy thành viên trong server.'); }
-      if (!cinema.isStaffMember(member)) fail(403, 'Chỉ đội ngũ Staff mới có quyền tua video.');
+      const access = await cinema.viewerState(guild, value.userId, env);
+      if (!access.canSeek) fail(403, 'Chỉ Administrator mới có quyền tua video.');
       const input = await body(req);
       if (typeof input?.position !== 'number' || !Number.isFinite(input.position) || input.position < 0) {
         fail(400, 'Vị trí tua không hợp lệ.');
       }
-      let roomNumber = input?.roomId ? Number(input.roomId) : null;
+      let roomNumber = input?.roomId !== undefined ? Number(input.roomId) : null;
+      if (roomNumber !== null && ![1, 2, 3].includes(roomNumber)) fail(400, 'Phòng chiếu không hợp lệ.');
       if (!roomNumber && input?.channelId) {
         const ch = guild.channels?.cache?.get(input.channelId);
         if (ch) roomNumber = cinema.getRoomNumberFromChannel(ch);
       }
-      const result = cinema.seekShow(guild.id, input.position, Date.now(), roomNumber);
+      const result = cinema.seekShow(guild.id, input.position, Date.now(), roomNumber || access.roomId, input.showId);
       json(res, 200, { ok: true, ...result });
       return true;
     }
@@ -102,14 +101,23 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
       const token = (req.headers.authorization || '').match(/^Bearer ([a-f0-9]{64})$/)?.[1];
       const value = token && sessions.get(hash(token));
       if (!value || !value.userId) fail(401, 'Phiên xem đã hết hạn.');
-      const input = await body(req).catch(() => ({}));
-      let roomNumber = input?.roomId ? Number(input.roomId) : null;
+      rateLimit(`cinema-ended:${value.userId}`, 10);
+      const input = await body(req);
+      if (!input || typeof input !== 'object') fail(400, 'Dữ liệu kết thúc suất chiếu không hợp lệ.');
+      let roomNumber = input.roomId !== undefined ? Number(input.roomId) : null;
       const guild = client.guilds.cache.get(endMatch[1]);
+      if (!guild) fail(403, 'Bot chưa có trong server này.');
+      const access = await cinema.viewerState(guild, value.userId, env, Date.now(), input?.channelId);
+      if (!access.canSeek) fail(403, 'Chỉ Administrator mới có quyền kết thúc suất chiếu.');
+      if (roomNumber !== null && ![1, 2, 3].includes(roomNumber)) fail(400, 'Phòng chiếu không hợp lệ.');
       if (!roomNumber && input?.channelId && guild) {
         const ch = guild.channels?.cache?.get(input.channelId);
         if (ch) roomNumber = cinema.getRoomNumberFromChannel(ch);
       }
       if (guild) {
+        roomNumber ||= access.roomId;
+        const show = cinema.getActiveShow(cinema.getConfig(guild.id), Date.now(), roomNumber);
+        if (!show || !input.showId || input.showId !== show.id) fail(409, 'Suất chiếu đã thay đổi. Hãy tải lại.');
         cinema.markShowEnded(guild.id, Date.now(), roomNumber);
         const scheduler = require('../utils/cinemaScheduler');
         if (typeof scheduler.cleanupSession === 'function') {

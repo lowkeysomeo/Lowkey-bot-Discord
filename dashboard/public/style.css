@@ -1,4 +1,5 @@
 /* Giao diện dashboard VietNam Legacy. */
+.cinema-poster-field{grid-column:1 / -1}.cinema-poster-preview{max-width:180px;max-height:240px;object-fit:contain;border-radius:10px;margin:12px 0;display:block}.cinema-poster-preview[hidden]{display:none}
 
 :root {
   color-scheme: dark;

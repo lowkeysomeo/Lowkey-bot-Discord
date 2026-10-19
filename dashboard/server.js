@@ -16,6 +16,7 @@ const giveaway = require('../utils/giveawaySystem');
 const giveawayStore = require('../utils/giveawayStore');
 const cinema = require('../utils/cinema');
 const { createCinemaActivity } = require('./cinemaActivity');
+const { uploadPoster } = require('./cinemaPoster');
 
 const fields = [
   ['LEVEL_CHANNEL_ID', 'Kênh thông báo lên level', 'channel'],
@@ -32,13 +33,13 @@ function fail(status, message) { const error = new Error(message); error.status 
 function cookie(req, name) {
   return (req.headers.cookie || '').split(';').map(item => item.trim()).find(item => item.startsWith(`${name}=`))?.slice(name.length + 1) || '';
 }
-async function body(req) {
+async function body(req, maxBytes = 16384) {
   if (!String(req.headers['content-type']).startsWith('application/json')) fail(415, 'Dữ liệu gửi lên không hợp lệ.');
   const chunks = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 16384) fail(413, 'Dữ liệu quá lớn.');
+    if (size > maxBytes) fail(413, 'Dữ liệu quá lớn.');
     chunks.push(chunk);
   }
   const text = Buffer.concat(chunks).toString('utf8');
@@ -111,7 +112,7 @@ function createDashboard(client, options = {}) {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https://cdn.discordapp.com https://media.discordapp.net; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     if (secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     try {
       prune();
@@ -495,6 +496,13 @@ function createDashboard(client, options = {}) {
           return json(res, 200, (await userGuilds(value.token)).map(guild => ({ id: guild.id, name: guild.name,
             icon: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128` : null,
             installed: client.guilds.cache.has(guild.id), invite: invite(guild.id) })));
+        }
+        const posterUpload = /^\/api\/guilds\/(\d+)\/premium\/cinema\/poster$/.exec(route);
+        if (posterUpload) {
+          const guild = await managedGuild(posterUpload[1], value);
+          if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
+          rateLimit(`cinema-poster:${guild.id}:${value.user.id}`, 6);
+          return json(res, 200, await uploadPoster(guild.id, await body(req, 2800100), env, options.putCinemaPoster));
         }
         const premium = /^\/api\/guilds\/(\d+)\/premium\/cinema$/.exec(route);
         if (premium) {

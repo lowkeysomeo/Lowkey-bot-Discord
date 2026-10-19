@@ -12,6 +12,9 @@ const {
 const voice = require('@discordjs/voice');
 const cinema = require('../../utils/cinema');
 const { setGuildSetting } = require('../../utils/guildSettings');
+const { createHash, randomUUID } = require('node:crypto');
+const { withPoster } = require('../../utils/cinemaPresentation');
+const movieKey = movie => createHash('sha256').update(movie.source).digest('hex').slice(0, 32);
 
 const data = new SlashCommandBuilder()
   .setName('cinema')
@@ -180,12 +183,13 @@ async function executeCinemaRoom(interaction, requestedRoom = null) {
     );
 
     return interaction.reply({
-      embeds: [embed],
+      embeds: withPoster(embed, currentShow),
       components: [row],
     });
   }
 
   // TRƯỜNG HỢP 2: Chưa có phim nào đang chiếu trong phòng này -> Cho phép chọn phim phát ngay
+  if (!isAdmin) return interaction.reply({ content: 'Chỉ Administrator mới được bắt đầu suất chiếu. Thành viên có thể tham gia các suất đã lên lịch.', flags: 64 });
   if (hasCategory) {
     if (!userVoice) {
       const allowedNames = cinemaVoices.map(c => `**${c.name}**`).join(', ');
@@ -272,7 +276,7 @@ async function executeCinemaRoom(interaction, requestedRoom = null) {
     return {
       label: movie.title.slice(0, 100),
       description: desc.slice(0, 100),
-      value: String(idx),
+      value: movieKey(movie),
       emoji: '🎬',
     };
   });
@@ -343,7 +347,11 @@ async function handleSelect(interaction) {
 
   await interaction.deferUpdate();
 
+  const freshMember = await interaction.guild.members.fetch({ user: interaction.user.id, force: true }).catch(() => null);
+  if (!cinema.isStaffMember(freshMember)) return interaction.editReply({ content: 'Chỉ Administrator mới được bắt đầu suất chiếu.', embeds: [], components: [] });
+
   const config = cinema.getConfig(interaction.guildId);
+  if (process.env.CINEMA_ENABLED !== 'true' || !config.enabled || !config.rightsConfirmed) return interaction.editReply({ content: 'Cinema đang tắt hoặc chưa xác nhận quyền trình chiếu.', embeds: [], components: [] });
   const selectedIndex = parseInt(interaction.values[0], 10);
 
   // Lấy toàn bộ danh sách phim từ kho (R2 + config)
@@ -378,14 +386,14 @@ async function handleSelect(interaction) {
   allMovies.sort((a, b) => a.title.localeCompare(b.title, 'vi'));
 
   let selectedMovie = null;
-  if (Number.isInteger(selectedIndex) && allMovies[selectedIndex]) {
+  if (parts.length === 3 && Number.isInteger(selectedIndex) && allMovies[selectedIndex]) {
     selectedMovie = allMovies[selectedIndex];
   } else {
-    selectedMovie = allMovies.find(m => m.key === interaction.values[0] || m.source === interaction.values[0] || m.title === interaction.values[0]);
+    selectedMovie = allMovies.find(m => movieKey(m) === interaction.values[0]);
   }
 
   // Fallback trường hợp config.shows có sẵn (như trong các mock test)
-  if (!selectedMovie && config.shows && config.shows[selectedIndex]) {
+  if (!selectedMovie && parts.length === 3 && config.shows && config.shows[selectedIndex]) {
     selectedMovie = config.shows[selectedIndex];
   }
 
@@ -445,11 +453,13 @@ async function handleSelect(interaction) {
   if (futureShowsSameRoom.length > 0) {
     const nextStart = Date.parse(futureShowsSameRoom[0].startsAt);
     if (finalEndsAt > nextStart) {
-      finalEndsAt = Math.max(now + 60000, nextStart);
+      finalEndsAt = nextStart;
     }
   }
 
   const immediateShow = {
+    id: randomUUID(),
+    imageUrl: selectedMovie.imageUrl || selectedMovie.scheduleShow?.imageUrl || '',
     title: selectedMovie.title,
     source: selectedMovie.source,
     roomId: roomNumber,
@@ -457,23 +467,23 @@ async function handleSelect(interaction) {
     endsAt: new Date(finalEndsAt).toISOString(),
   };
 
-  // Ghép suất chiếu mới phát ngay cùng với các suất chiếu đã đặt sẵn (tối đa 30 suất)
+  if (safeExistingShows.length >= 20) return interaction.editReply({ content: 'Lịch đã có tối đa 20 suất chiếu. Hãy xóa bớt trước khi thêm.', embeds: [], components: [] });
+  if (cinema.getConfig(interaction.guildId).revision !== config.revision) return interaction.editReply({ content: 'Lịch chiếu đã thay đổi. Hãy mở lại lệnh Cinema.', embeds: [], components: [] });
+  cinema.sourceUrl(immediateShow.source, process.env);
   config.shows = [...safeExistingShows, immediateShow]
-    .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
-    .slice(-30);
+    .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
   config.revision = (config.revision || 0) + 1;
 
   // Lưu cấu hình vào database
   setGuildSetting(interaction.guildId, 'CINEMA_CONFIG', JSON.stringify(config));
 
   // Đánh dấu suất chiếu đã được thông báo
-  const showKey = `${immediateShow.startsAt}_${immediateShow.title}`;
-  cinema.markShowAnnounced(interaction.guildId, immediateShow);
+  const showKey = cinema.showIdentity(immediateShow);
 
   // 1. Bot tham gia kênh voice nếu có thể
   let voiceConn = null;
   try {
-    voiceConn = voice.joinVoiceChannel({
+    if (!voice.getVoiceConnection(interaction.guildId)) voiceConn = voice.joinVoiceChannel({
       channelId: targetChannel.id,
       guildId: interaction.guildId,
       adapterCreator: interaction.guild.voiceAdapterCreator,
@@ -496,7 +506,7 @@ async function handleSelect(interaction) {
         show: immediateShow,
         roomId: roomNumber,
         joined: Boolean(voiceConn),
-        announced: true,
+        announced: false,
         connection: voiceConn || null,
         voiceChannelId: targetChannel.id,
         voiceStatusSet: immediateShow.title,
@@ -564,9 +574,15 @@ async function handleSelect(interaction) {
 
   // Cập nhật tin nhắn phản hồi
   const replyMsg = await interaction.editReply({
-    embeds: [playingEmbed],
+    embeds: withPoster(playingEmbed, immediateShow),
     components,
   });
+
+  if (config.notifyChannelId === interaction.channelId) {
+    cinema.markShowAnnounced(interaction.guildId, immediateShow);
+    const ownSession = require('../../utils/cinemaScheduler').activeSessions.get(`${interaction.guildId}_room${roomNumber}`);
+    if (ownSession) ownSession.announced = true;
+  }
 
   try {
     const scheduler = require('../../utils/cinemaScheduler');
@@ -577,39 +593,8 @@ async function handleSelect(interaction) {
     }
   } catch {}
 
-  // Thông báo tới kênh thông báo chung nếu có
-  if (config.notifyChannelId && config.notifyChannelId !== interaction.channelId) {
-    const notifyCh = interaction.guild.channels.cache.get(config.notifyChannelId);
-    if (notifyCh && typeof notifyCh.send === 'function') {
-      let content = undefined;
-      let allowedMentions = undefined;
-      if (config.notifyRoleId === 'everyone') {
-        content = '@everyone';
-        allowedMentions = { parse: ['everyone'] };
-      } else if (config.notifyRoleId === 'here') {
-        content = '@here';
-        allowedMentions = { parse: ['everyone'] };
-      } else if (config.notifyRoleId && /^\d+$/.test(config.notifyRoleId)) {
-        content = `<@&${config.notifyRoleId}>`;
-        allowedMentions = { roles: [config.notifyRoleId] };
-      }
-      notifyCh.send({
-        content,
-        embeds: [playingEmbed],
-        components,
-        ...(allowedMentions ? { allowedMentions } : {})
-      }).then(msg => {
-        try {
-          const scheduler = require('../../utils/cinemaScheduler');
-          const sess = scheduler.activeSessions?.get(`${interaction.guildId}_room${roomNumber}`) || scheduler.activeSessions?.get(interaction.guildId);
-          if (sess && msg) {
-            if (!Array.isArray(sess.messages)) sess.messages = [];
-            sess.messages.push(msg);
-          }
-        } catch {}
-      }).catch(() => {});
-    }
-  }
+  // Scheduler owns notifications and persists dedup only after a successful send.
+  require('../../utils/cinemaScheduler').checkShows(interaction.client);
 }
 
 module.exports = {

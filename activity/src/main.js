@@ -27,6 +27,8 @@ let discordSdk = null;
 let currentClientId = null;
 let consecutivePollErrors = 0;
 let isReauthing = false;
+let endedShowId = null;
+let lastStateAt = 0;
 
 function showToast(msg) {
   if (!toast) return;
@@ -59,20 +61,11 @@ function hideEndedScreen() {
 
 async function handleMovieEnded() {
   const finishedTitle = current?.title;
+  endedShowId = current?.id || current?.startsAt;
   clearVideo();
   showEndedScreen(finishedTitle);
-  if (!hasEndedNotified && guildId) {
-    hasEndedNotified = true;
-    try {
-      await request(`/guilds/${guildId}/ended`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ channelId }),
-      });
-    } catch (err) {
-      console.warn('Không thể gửi thông báo kết thúc suất chiếu lên server:', err.message);
-    }
-  }
+  // The local file duration is not authority to stop a screening for the guild.
+  hasEndedNotified = true;
 }
 
 function formatTime(seconds) {
@@ -115,7 +108,6 @@ async function request(route, options = {}) {
 }
 
 function hideJoinOverlay() {
-  hasStarted = true;
   if (joinOverlay) {
     joinOverlay.hidden = true;
     joinOverlay.classList.add('hidden');
@@ -159,6 +151,7 @@ function sync() {
 }
 
 async function play() {
+  hasStarted = true;
   hideJoinOverlay();
   try {
     await video.play();
@@ -179,11 +172,12 @@ async function play() {
 
 // Staff Seeking
 async function sendStaffSeek(targetSeconds) {
-  if (!isStaff) {
-    showToast('⚠️ Chỉ đội ngũ Staff mới có quyền tua video.');
+  if (!isStaff || !current) {
+    showToast('⚠️ Chỉ Administrator mới có quyền tua video.');
     return;
   }
-  const max = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 86400;
+  const scheduleDuration = (Date.parse(current.endsAt) - Date.parse(current.startsAt)) / 1000;
+  const max = Math.max(0, Math.min(Number.isFinite(video.duration) && video.duration > 0 ? video.duration - 0.1 : 86400, scheduleDuration - 0.1));
   const clamped = Math.max(0, Math.min(max, targetSeconds));
   isSyncingFromServer = true;
   video.currentTime = clamped;
@@ -191,7 +185,7 @@ async function sendStaffSeek(targetSeconds) {
     const res = await request(`/guilds/${guildId}/seek`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ position: clamped, channelId }),
+      body: JSON.stringify({ position: clamped, channelId, roomId: current.roomId, showId: current.id }),
     });
     if (current) {
       current.position = res.position;
@@ -275,7 +269,7 @@ video.addEventListener('seeking', () => {
     if (Math.abs(video.currentTime - target) > 1.5) {
       isSyncingFromServer = true;
       video.currentTime = target;
-      showToast('⚠️ Chỉ đội ngũ Staff mới có quyền tua video.');
+      showToast('⚠️ Chỉ Administrator mới có quyền tua video.');
       setTimeout(() => { isSyncingFromServer = false; }, 400);
     }
   }
@@ -332,7 +326,9 @@ async function poll() {
     const sent = performance.now();
     const query = channelId ? `?channelId=${encodeURIComponent(channelId)}` : '';
     const data = await request(`/guilds/${guildId}/state${query}`);
+    if (stopped) return;
     consecutivePollErrors = 0;
+    lastStateAt = performance.now();
 
     // Staff Permissions
     isStaff = Boolean(data.canSeek);
@@ -341,12 +337,12 @@ async function poll() {
     if (roleBadge) {
       if (isStaff) {
         roleBadge.className = 'badge-sync staff';
-        roleBadge.textContent = '👑 STAFF CONTROL';
+        roleBadge.textContent = '👑 ADMIN CONTROL';
         roleBadge.title = 'Bạn có quyền tua video cho toàn bộ phòng chiếu';
       } else {
         roleBadge.className = 'badge-sync';
         roleBadge.textContent = '🔴 ĐỒNG BỘ TRỰC TIẾP';
-        roleBadge.title = 'Phim phát đồng bộ. Chỉ Staff mới có quyền tua.';
+        roleBadge.title = 'Phim phát đồng bộ. Chỉ Administrator mới có quyền tua.';
       }
     }
 
@@ -429,6 +425,10 @@ async function poll() {
       upcoming.append(row);
     }
 
+    if (data.show && endedShowId === (data.show.id || data.show.startsAt)) {
+      showEndedScreen(data.show.title);
+      return;
+    }
     if (!data.show) {
       clearVideo();
       const pastShows = allShows.filter(s => Number.isFinite(Date.parse(s.endsAt)) && Date.parse(s.endsAt) <= nowMs);
@@ -443,8 +443,9 @@ async function poll() {
       }
     } else {
       hideEndedScreen();
+      endedShowId = null;
       hasEndedNotified = false;
-      const changed = !current || current.mediaPath !== data.show.mediaPath || current.startsAt !== data.show.startsAt;
+      const changed = !current || current.mediaPath !== data.show.mediaPath || current.id !== data.show.id || current.startsAt !== data.show.startsAt;
       current = {
         ...data.show,
         position: data.show.position + (performance.now() - sent) / 2000,
@@ -470,8 +471,10 @@ async function poll() {
     consecutivePollErrors++;
     console.warn(`[CINEMA POLL] Thử lại (${consecutivePollErrors}):`, error.message);
 
-    // NẾU VIDEO ĐANG PHÁT HOẶC ĐÃ NẠP: TUYỆT ĐỐI KHÔNG GỠ / KHÔNG DỪNG VIDEO!
-    // Giữ nguyên nguồn video để người dùng xem liên tục, không bị ngắt quãng khi mạng lag hoặc server khởi động lại.
+    if ([401, 403, 404].includes(error.status) || (lastStateAt && performance.now() - lastStateAt > 30000)) {
+      clearVideo();
+      status.textContent = error.message;
+    }
     if (!current || !hasStarted) {
       if (consecutivePollErrors >= 3) {
         status.textContent = `${error.message}. Đang thử kết nối lại...`;

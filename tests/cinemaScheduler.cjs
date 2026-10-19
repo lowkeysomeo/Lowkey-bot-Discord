@@ -350,6 +350,63 @@ async function testScheduler() {
   const lastCall = voiceStatusCalls[voiceStatusCalls.length - 1];
   assert.equal(lastCall?.body?.status, '', 'Voice status must be cleared when movie finishes');
 
+  // Failed notifications must retry; the poster belongs above schedule details.
+  scheduler.activeSessions.clear();
+  const posterShow = { ...finishingShow, title: 'Poster retry', startsAt: new Date(Date.now() - 10000).toISOString(), endsAt: new Date(Date.now() + 3600000).toISOString(), imageUrl: 'https://media.example.com/poster.png' };
+  config.shows = [posterShow];
+  setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+  let attempts = 0;
+  const originalSend = textChannel.send;
+  textChannel.send = async msg => { if (++attempts === 1) throw new Error('Test send failure'); sentMessages.push({ target: 'text', msg }); return { id: 'sent' }; };
+  scheduler.checkShows(client);
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(cinema.isShowAnnounced(guildId, cinema.getConfig(guildId).shows[0]), false, 'Failure must not mark announced');
+  scheduler.checkShows(client);
+  scheduler.checkShows(client);
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(attempts, 2, 'Retry once, suppress concurrent ticks');
+  const posterNotice = sentMessages.at(-1).msg;
+  assert.equal(posterNotice.embeds.length, 2);
+  assert.equal(posterNotice.embeds[0].data.image.url, posterShow.imageUrl);
+  assert.equal(posterNotice.embeds[0].data.description, undefined, 'Time text follows the image, in the second embed');
+  assert.match(posterNotice.embeds[1].data.description, /Poster retry/);
+  textChannel.send = originalSend;
+
+  scheduler.activeSessions.clear();
+  config.shows = [{ ...posterShow, title: 'Reminder retry', startsAt: new Date(Date.now() + 5 * 60000).toISOString(), endsAt: new Date(Date.now() + 7200000).toISOString() }];
+  setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+  let reminderAttempts = 0;
+  textChannel.send = async msg => { if (++reminderAttempts === 1) throw new Error('Test reminder failure'); sentMessages.push({ target: 'text', msg }); };
+  scheduler.checkShows(client);
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(cinema.isReminderAnnounced(guildId, cinema.getConfig(guildId).shows[0], '10m'), false);
+  scheduler.checkShows(client);
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(reminderAttempts, 2, 'Failed reminders retry too');
+  assert.equal(sentMessages.at(-1).msg.embeds[0].data.image.url, posterShow.imageUrl);
+  textChannel.send = originalSend;
+
+  // Cleaning an idle cinema must not destroy music's existing voice connection.
+  scheduler.activeSessions.clear();
+  let unrelatedDestroyed = false;
+  voiceMock.getVoiceConnection = () => ({ destroy: () => { unrelatedDestroyed = true; } });
+  scheduler.cleanupSession(guild);
+  assert.equal(unrelatedDestroyed, false);
+
+  // The same film in two rooms is two independent announcements, also after restart.
+  voiceChannel.name = 'Cinema 1'; voiceChannel.type = 2;
+  channels.set('voice-2', { ...voiceChannel, id: 'voice-2', name: 'Cinema 2' });
+  config.shows = [1, 2].map(roomId => ({ ...posterShow, title: 'Same film', roomId, imageUrl: '' }));
+  setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+  const beforeRoomNotices = sentMessages.length;
+  scheduler.checkShows(client);
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(sentMessages.length - beforeRoomNotices, 2, 'Room announcements must not deduplicate across rooms');
+  scheduler.activeSessions.clear();
+  scheduler.checkShows(client);
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(sentMessages.length - beforeRoomNotices, 2, 'Each room remains deduplicated after restart');
+
   console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave, /cinema preserves scheduled shows, category restriction, active show direct watch routing, 2 advance reminders, deleting ongoing show cleanup, & movie end bot-out and button disabling.');
 }
 
