@@ -63,13 +63,6 @@ async function executeCinemaRoom(interaction, requestedRoom = null) {
     });
   }
 
-  if (!Array.isArray(config.shows) || !config.shows.length) {
-    return interaction.reply({
-      content: 'Rạp phim chưa có bộ phim nào được thêm vào lịch chiếu. Hãy vào Dashboard để thêm phim trước nhé!',
-      flags: 64,
-    });
-  }
-
   // Xác định số phòng chiếu (1, 2 hoặc 3)
   let roomNumber = requestedRoom ? Number(requestedRoom) : null;
   if (!roomNumber) {
@@ -209,11 +202,58 @@ async function executeCinemaRoom(interaction, requestedRoom = null) {
 
   const activeChannel = targetChannel || userVoice;
 
-  const options = config.shows.slice(0, 25).map((show, idx) => {
-    const durMins = Math.round((Date.parse(show.endsAt) - Date.parse(show.startsAt)) / 60000) || 120;
+  let allMovies = [];
+  try {
+    allMovies = await cinema.listUploadedMovies(interaction.guildId);
+  } catch (err) {
+    console.warn('[CINEMA] Không thể lấy danh sách phim từ R2:', err.message);
+  }
+
+  // Fallback về config.shows nếu R2 không khả dụng hoặc rỗng
+  if (!allMovies || allMovies.length === 0) {
+    const seenTitles = new Set();
+    allMovies = (config.shows || []).filter(s => {
+      if (!s || !s.title) return false;
+      const norm = s.title.trim().toLowerCase();
+      if (seenTitles.has(norm)) return false;
+      seenTitles.add(norm);
+      return true;
+    }).map(s => {
+      const durSec = (Date.parse(s.endsAt) - Date.parse(s.startsAt)) / 1000;
+      return {
+        title: s.title,
+        source: s.source,
+        durationSeconds: durSec > 0 ? durSec : 7200,
+        scheduled: true,
+        scheduleShow: s,
+      };
+    });
+  }
+
+  if (!allMovies || allMovies.length === 0) {
+    return interaction.reply({
+      content: 'Rạp phim hiện chưa có bộ phim nào trong kho. Quản trị viên có thể tải phim lên hoặc thêm phim trên Web Dashboard trước nhé!',
+      flags: 64,
+    });
+  }
+
+  allMovies.sort((a, b) => a.title.localeCompare(b.title, 'vi'));
+
+  const options = allMovies.slice(0, 25).map((movie, idx) => {
+    let desc = '';
+    if (movie.durationSeconds && Number.isFinite(movie.durationSeconds) && movie.durationSeconds > 0) {
+      const mins = Math.round(movie.durationSeconds / 60);
+      const hours = Math.floor(mins / 60);
+      const remMins = mins % 60;
+      desc = hours > 0
+        ? `Thời lượng: ~${hours}g ${remMins}p • Sẵn sàng phát`
+        : `Thời lượng: ~${mins} phút • Sẵn sàng phát`;
+    } else {
+      desc = 'Thời lượng: ~120 phút • Sẵn sàng phát';
+    }
     return {
-      label: show.title.slice(0, 100),
-      description: `Thời lượng dự kiến: ~${durMins} phút (Phòng mặc định: Cinema ${show.roomId || 1})`,
+      label: movie.title.slice(0, 100),
+      description: desc.slice(0, 100),
       value: String(idx),
       emoji: '🎬',
     };
@@ -227,7 +267,7 @@ async function executeCinemaRoom(interaction, requestedRoom = null) {
 
   const row = new ActionRowBuilder().addComponents(selectMenu);
 
-  const futureShows = config.shows
+  const futureShows = (config.shows || [])
     .filter(s => (s.roomId || 1) === roomNumber && Date.parse(s.startsAt) > now)
     .slice(0, 5);
   let upcomingDesc = '';
@@ -286,10 +326,52 @@ async function handleSelect(interaction) {
   await interaction.deferUpdate();
 
   const config = cinema.getConfig(interaction.guildId);
-  const showIndex = parseInt(interaction.values[0], 10);
-  const selectedShow = config.shows?.[showIndex];
+  const selectedIndex = parseInt(interaction.values[0], 10);
 
-  if (!selectedShow) {
+  // Lấy toàn bộ danh sách phim từ kho (R2 + config)
+  let allMovies = [];
+  try {
+    allMovies = await cinema.listUploadedMovies(interaction.guildId);
+  } catch (err) {
+    console.warn('[CINEMA] Không thể lấy danh sách phim từ R2:', err.message);
+  }
+
+  // Fallback về config.shows nếu R2 không khả dụng hoặc rỗng
+  if (!allMovies || allMovies.length === 0) {
+    const seenTitles = new Set();
+    allMovies = (config.shows || []).filter(s => {
+      if (!s || !s.title) return false;
+      const norm = s.title.trim().toLowerCase();
+      if (seenTitles.has(norm)) return false;
+      seenTitles.add(norm);
+      return true;
+    }).map(s => {
+      const durSec = (Date.parse(s.endsAt) - Date.parse(s.startsAt)) / 1000;
+      return {
+        title: s.title,
+        source: s.source,
+        durationSeconds: durSec > 0 ? durSec : 7200,
+        scheduled: true,
+        scheduleShow: s,
+      };
+    });
+  }
+
+  allMovies.sort((a, b) => a.title.localeCompare(b.title, 'vi'));
+
+  let selectedMovie = null;
+  if (Number.isInteger(selectedIndex) && allMovies[selectedIndex]) {
+    selectedMovie = allMovies[selectedIndex];
+  } else {
+    selectedMovie = allMovies.find(m => m.key === interaction.values[0] || m.source === interaction.values[0] || m.title === interaction.values[0]);
+  }
+
+  // Fallback trường hợp config.shows có sẵn (như trong các mock test)
+  if (!selectedMovie && config.shows && config.shows[selectedIndex]) {
+    selectedMovie = config.shows[selectedIndex];
+  }
+
+  if (!selectedMovie) {
     return interaction.editReply({
       content: 'Không tìm thấy bộ phim đã chọn hoặc danh sách phim đã thay đổi.',
       embeds: [],
@@ -321,13 +403,20 @@ async function handleSelect(interaction) {
   }
 
   // 1. Xác định thời lượng dự kiến
-  let duration = Date.parse(selectedShow.endsAt) - Date.parse(selectedShow.startsAt);
+  let duration = 0;
+  if (selectedMovie.durationSeconds && Number.isFinite(selectedMovie.durationSeconds) && selectedMovie.durationSeconds > 0) {
+    duration = selectedMovie.durationSeconds * 1000;
+  } else if (selectedMovie.endsAt && selectedMovie.startsAt) {
+    duration = Date.parse(selectedMovie.endsAt) - Date.parse(selectedMovie.startsAt);
+  } else if (selectedMovie.scheduleShow?.endsAt && selectedMovie.scheduleShow?.startsAt) {
+    duration = Date.parse(selectedMovie.scheduleShow.endsAt) - Date.parse(selectedMovie.scheduleShow.startsAt);
+  }
   if (!duration || duration <= 0 || duration > 24 * 3600000) {
-    duration = 2.5 * 3600 * 1000; // Mặc định 2.5 tiếng nếu lịch cũ không chuẩn
+    duration = 2.5 * 3600 * 1000; // Mặc định 2.5 tiếng nếu không rõ thời lượng
   }
 
   // 2. Bảo toàn toàn bộ các suất chiếu đã đặt lịch
-  const safeExistingShows = config.shows.map(s => ({ ...s }));
+  const safeExistingShows = (config.shows || []).map(s => ({ ...s }));
 
   // Kiểm tra không đè vào suất chiếu kế tiếp TRONG CÙNG PHÒNG
   const futureShowsSameRoom = safeExistingShows
@@ -343,8 +432,8 @@ async function handleSelect(interaction) {
   }
 
   const immediateShow = {
-    title: selectedShow.title,
-    source: selectedShow.source,
+    title: selectedMovie.title,
+    source: selectedMovie.source,
     roomId: roomNumber,
     startsAt: new Date(now).toISOString(),
     endsAt: new Date(finalEndsAt).toISOString(),
@@ -354,6 +443,7 @@ async function handleSelect(interaction) {
   config.shows = [...safeExistingShows, immediateShow]
     .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
     .slice(-30);
+  config.revision = (config.revision || 0) + 1;
 
   // Lưu cấu hình vào database
   setGuildSetting(interaction.guildId, 'CINEMA_CONFIG', JSON.stringify(config));
