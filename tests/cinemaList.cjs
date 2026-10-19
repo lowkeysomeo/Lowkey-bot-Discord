@@ -11,6 +11,8 @@ assert.equal(movieDetails('thanh-xuan-18-2.mp4', 1045179373).title, 'Thanh Xuân
 assert.equal(movieDetails('Bẫy Tiền Vietsub - Motchill.mp4', 99).durationSeconds, null);
 assert.equal(movieDetails('rừng-thiêng-vietsub.mp4').title, 'Rừng Thiêng');
 assert.equal(formatDuration(6530), '1 giờ 48 phút 50 giây');
+assert.equal(formatDuration(7241), '2 giờ 00 phút 41 giây');
+assert.equal(formatDuration(7442), '2 giờ 04 phút 02 giây');
 assert.equal(formatDuration(null), 'Chưa cập nhật');
 const sample = { key: 'secret-file.mp4', title: 'Bẫy Tiền', source: 'https://private.example/secret-file.mp4', size: 1027658862, durationSeconds: 6530, lastModified: new Date('2026-10-19T10:00:00Z') };
 async function run(movies) {

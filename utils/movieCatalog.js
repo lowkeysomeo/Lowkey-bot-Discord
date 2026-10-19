@@ -26,7 +26,11 @@ function formatDuration(seconds) {
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor(total % 3600 / 60);
   const remainder = total % 60;
-  return [hours ? `${hours} giờ` : '', `${minutes} phút`, `${remainder} giây`].filter(Boolean).join(' ');
+  const pad = n => String(n).padStart(2, '0');
+  if (hours > 0) {
+    return `${hours} giờ ${pad(minutes)} phút ${pad(remainder)} giây`;
+  }
+  return [minutes ? `${minutes} phút` : '', `${remainder} giây`].filter(Boolean).join(' ') || '0 giây';
 }
 
 module.exports = { movieDetails, formatDuration };
