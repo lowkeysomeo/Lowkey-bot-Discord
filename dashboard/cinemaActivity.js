@@ -69,6 +69,26 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
       json(res, 200, { session, access_token: token.access_token });
       return true;
     }
+    const seekMatch = /^\/cinema-api\/guilds\/(\d+)\/seek$/.exec(route);
+    if (seekMatch && req.method === 'POST') {
+      const token = (req.headers.authorization || '').match(/^Bearer ([a-f0-9]{64})$/)?.[1];
+      const value = token && sessions.get(hash(token));
+      if (!value || !value.userId) fail(401, 'Phiên xem đã hết hạn. Hãy mở lại Activity.');
+      rateLimit(`cinema-seek:${value.userId}`, 60);
+      const guild = client.guilds.cache.get(seekMatch[1]);
+      if (!guild) fail(403, 'Bot chưa có trong server này.');
+      let member;
+      try { member = await guild.members.fetch({ user: value.userId, force: true }); }
+      catch { fail(403, 'Không tìm thấy thành viên trong server.'); }
+      if (!cinema.isStaffMember(member)) fail(403, 'Chỉ đội ngũ Staff mới có quyền tua video.');
+      const input = await body(req);
+      if (typeof input?.position !== 'number' || !Number.isFinite(input.position) || input.position < 0) {
+        fail(400, 'Vị trí tua không hợp lệ.');
+      }
+      const result = cinema.seekShow(guild.id, input.position);
+      json(res, 200, { ok: true, ...result });
+      return true;
+    }
     const match = /^\/cinema-api\/guilds\/(\d+)\/state$/.exec(route);
     if (!match || req.method !== 'GET') fail(404, 'Không tìm thấy API Cinema.');
     const token = (req.headers.authorization || '').match(/^Bearer ([a-f0-9]{64})$/)?.[1];

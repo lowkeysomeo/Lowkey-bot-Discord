@@ -61,6 +61,49 @@ function saveConfig(guildId, input, roles, env, channels) {
   setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(next));
   return next;
 }
+function isStaffMember(member) {
+  if (!member) return false;
+  const memberId = member.id || member.user?.id;
+  if (memberId && member.guild?.ownerId && memberId === member.guild.ownerId) return true;
+  const admin = member.permissions?.has?.(PermissionFlagsBits.Administrator) ||
+                member.permissions?.has?.(PermissionFlagsBits.ManageGuild);
+  if (admin) return true;
+  const roles = member.roles?.cache;
+  if (!roles) return false;
+  const checkRole = role => {
+    if (!role || typeof role === 'string') return false;
+    if (role.permissions?.any?.([
+      PermissionFlagsBits.Administrator,
+      PermissionFlagsBits.ManageGuild,
+      PermissionFlagsBits.ManageRoles,
+      PermissionFlagsBits.BanMembers,
+      PermissionFlagsBits.KickMembers,
+      PermissionFlagsBits.ModerateMembers,
+    ])) return true;
+    return /(staff|admin|mod|quản\s*trị|bảo\s*vệ|partner\s*management|hỗ\s*trợ|supporter|kiểm\s*duyệt)/i.test(role.name || '');
+  };
+  if (typeof roles.some === 'function') return roles.some(checkRole);
+  if (typeof roles.values === 'function') {
+    for (const role of roles.values()) if (checkRole(role)) return true;
+  }
+  return false;
+}
+
+function seekShow(guildId, targetSeconds, now = Date.now()) {
+  const config = getConfig(guildId);
+  const show = config.shows.find(s => Date.parse(s.startsAt) <= now && now < Date.parse(s.endsAt));
+  if (!show) fail(404, 'Hiện không có suất chiếu nào đang phát.');
+  const oldDuration = Date.parse(show.endsAt) - Date.parse(show.startsAt);
+  const target = Math.max(0, Number(targetSeconds) || 0);
+  const newStartsAt = new Date(now - target * 1000).toISOString();
+  const newEndsAt = new Date(Date.parse(newStartsAt) + oldDuration).toISOString();
+  show.startsAt = newStartsAt;
+  show.endsAt = newEndsAt;
+  config.revision += 1;
+  setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+  return { position: target, startsAt: newStartsAt, endsAt: newEndsAt };
+}
+
 async function viewerState(guild, userId, env, now = Date.now()) {
   const config = getConfig(guild.id);
   if (!config.enabled) fail(403, 'Cinema đang tắt tại server này.');
@@ -71,10 +114,11 @@ async function viewerState(guild, userId, env, now = Date.now()) {
   const admin = member.permissions.has(PermissionFlagsBits.Administrator);
   if (config.audience === 'admins' && !admin) fail(403, 'Suất chiếu chỉ dành cho Administrator.');
   if (config.audience === 'roles' && !admin && !config.roleIds.some(id => member.roles.cache.has(id))) fail(403, 'Bạn chưa có role được phép xem Cinema.');
+  const canSeek = isStaffMember(member);
   const show = config.shows.find(s => Date.parse(s.startsAt) <= now && now < Date.parse(s.endsAt));
-  return { title: config.title, description: config.description, serverTime: now,
+  return { title: config.title, description: config.description, serverTime: now, canSeek,
     upcoming: config.shows.filter(s => Date.parse(s.startsAt) > now).map(({ title, startsAt, endsAt }) => ({ title, startsAt, endsAt })),
     show: show ? { title: show.title, startsAt: show.startsAt, endsAt: show.endsAt,
       mediaPath: '/.proxy/media' + new URL(sourceUrl(show.source, env)).pathname, position: (now - Date.parse(show.startsAt)) / 1000 } : null };
 }
-module.exports = { getConfig, saveConfig, validate, viewerState, mediaOrigin };
+module.exports = { getConfig, saveConfig, validate, viewerState, mediaOrigin, isStaffMember, seekShow };

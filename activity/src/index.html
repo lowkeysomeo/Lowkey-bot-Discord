@@ -1,3 +1,62 @@
 <!doctype html>
-<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VNL Cinema</title><link rel="stylesheet" href="style.css"><script type="module" src="main.js"></script></head>
-<body><main><header><span class="badge">VIETNAM LEGACY · CINEMA</span><h1 id="title">Rạp phim của cộng đồng</h1><p id="description">Cùng xem, cùng một khoảnh khắc.</p></header><section class="screen"><video id="video" playsinline muted controls preload="metadata"></video><p id="status" role="status">Đang kết nối Discord…</p><button id="join" hidden>Bắt đầu xem</button></section><section><h2>Lịch chiếu tiếp theo</h2><ul id="upcoming"></ul><p class="note">Phim được đồng bộ theo lịch của server. Bật âm thanh bằng điều khiển video. Giờ hiển thị theo thiết bị của bạn.</p></section></main></body></html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VNL Cinema · VietNam Legacy</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="main.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <span class="badge">🇻🇳 VIETNAM LEGACY · CINEMA</span>
+      <h1 id="title">Rạp phim của cộng đồng</h1>
+      <p id="description">Cùng xem, cùng một khoảnh khắc.</p>
+    </header>
+    <section class="screen" id="screen">
+      <div class="video-container" id="video-container">
+        <video id="video" playsinline preload="metadata"></video>
+        <button id="theater-exit" class="theater-exit-btn" title="Thu nhỏ (Esc)" hidden>✕ Thu nhỏ</button>
+        <div id="toast" class="toast" hidden></div>
+        <div id="join-overlay" class="join-overlay" hidden>
+          <button id="join" class="btn-primary">▶ Bắt đầu xem</button>
+        </div>
+        <div id="controls" class="controls-bar">
+          <div class="timeline-container" id="timeline-container">
+            <div class="timeline-track">
+              <div class="timeline-progress" id="timeline-progress"></div>
+            </div>
+          </div>
+          <div class="controls-row">
+            <div class="controls-left">
+              <button id="btn-play" class="ctrl-btn" title="Phát / Tạm dừng">▶</button>
+              <button id="btn-seek-back" class="ctrl-btn staff-only" title="Tua lại 10 giây (Staff)" hidden>-10s</button>
+              <button id="btn-seek-fwd" class="ctrl-btn staff-only" title="Tua tới 10 giây (Staff)" hidden>+10s</button>
+              <div class="volume-box">
+                <button id="btn-mute" class="ctrl-btn" title="Bật / Tắt tiếng">🔊</button>
+                <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="1" class="volume-slider" title="Âm lượng">
+              </div>
+              <div class="time-display">
+                <span id="time-current">0:00</span> / <span id="time-duration">0:00</span>
+              </div>
+            </div>
+            <div class="controls-right">
+              <span id="role-badge" class="badge-sync">🔴 ĐỒNG BỘ TRỰC TIẾP</span>
+              <button id="btn-zoom" class="ctrl-btn btn-zoom" title="Phóng to màn hình để xem nét hơn (F)">🗖 Phóng to</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="screen-info">
+        <p id="status" role="status">Đang kết nối Discord…</p>
+      </div>
+    </section>
+    <section>
+      <h2>Lịch chiếu tiếp theo</h2>
+      <ul id="upcoming"></ul>
+      <p class="note">Phim được phát đồng bộ theo lịch của server. Chỉ đội ngũ Staff mới có quyền tua video. Bấm Phóng to để thưởng thức trọn vẹn màn hình rạp chiếu.</p>
+    </section>
+  </main>
+</body>
+</html>

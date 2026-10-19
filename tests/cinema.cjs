@@ -112,9 +112,15 @@ async function main() {
   assert.equal((await request('/cinema-api/guilds/111/state', { headers: { cookie } })).status, 401, 'Dashboard cookie is not a viewer token');
   assert.equal((await request('/cinema-api/guilds/111/state', { headers: viewerHeaders })).status, 403);
   viewerRoles.add('777');
-  assert.equal((await request('/cinema-api/guilds/111/state', { headers: viewerHeaders })).status, 200);
-  assert.equal((await request('/cinema-api/guilds/222/state', { headers: viewerHeaders })).status, 403);
-  assert.equal((await post({ ...sample(), enabled: false, revision: 2 })).status, 200);
+  const activeShowConfig = { ...sample(), audience: 'roles', roleIds: ['777'], revision: cinema.getConfig('111').revision, shows: [{ title: 'Đang chiếu', source: 'https://media.example.com/film.mp4', startsAt: new Date(Date.now() - 60000).toISOString(), endsAt: new Date(Date.now() + 3600000).toISOString() }] };
+  assert.equal((await post(activeShowConfig)).status, 200);
+  assert.equal((await request('/cinema-api/guilds/111/seek', { method: 'POST', headers: { ...viewerHeaders, 'content-type': 'application/json' }, body: JSON.stringify({ position: 600 }) })).status, 403, 'Non-staff cannot seek');
+  viewerAdmin = true;
+  const seekRes = await request('/cinema-api/guilds/111/seek', { method: 'POST', headers: { ...viewerHeaders, 'content-type': 'application/json' }, body: JSON.stringify({ position: 600 }) });
+  assert.equal(seekRes.status, 200, 'Staff can seek');
+  assert.equal(seekRes.json().position, 600);
+  viewerAdmin = false;
+  assert.equal((await post({ ...activeShowConfig, enabled: false, revision: cinema.getConfig('111').revision })).status, 200);
   assert.equal((await request('/cinema-api/guilds/111/state', { headers: viewerHeaders })).status, 403);
   const disabled = transport(createDashboard(client, { env: { ...env, CINEMA_ENABLED: 'false' }, fetch: fetchApi }));
   assert.equal((await disabled('/activity/')).status, 503);
