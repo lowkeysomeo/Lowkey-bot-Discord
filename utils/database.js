@@ -130,6 +130,13 @@ function initializeDatabase() {
       completed_at INTEGER,
       error_message TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS quest_notified_completions (
+      user_id TEXT NOT NULL,
+      quest_id TEXT NOT NULL,
+      notified_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, quest_id)
+    );
   `);
 
   try { db.prepare("ALTER TABLE quest_subscribers ADD COLUMN package_type TEXT NOT NULL DEFAULT 'monthly'").run(); } catch {}

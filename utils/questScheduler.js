@@ -40,6 +40,27 @@ function getIntervalMs() {
   return minutes * 60 * 1000;
 }
 
+function isQuestNotified(userId, questId) {
+  try {
+    const row = getDb()
+      .prepare('SELECT 1 FROM quest_notified_completions WHERE user_id = ? AND quest_id = ?')
+      .get(String(userId), String(questId));
+    return !!row;
+  } catch {
+    return false;
+  }
+}
+
+function markQuestNotified(userId, questId) {
+  try {
+    getDb()
+      .prepare('INSERT OR REPLACE INTO quest_notified_completions (user_id, quest_id, notified_at) VALUES (?, ?, ?)')
+      .run(String(userId), String(questId), Date.now());
+  } catch (e) {
+    console.warn('[QUEST SCHEDULER] markQuestNotified error:', e.message);
+  }
+}
+
 function getUserIdFromToken(token) {
   try {
     const part = (token || '').trim().split('.')[0];
@@ -217,6 +238,20 @@ async function scanUserQuests(subscriber, client, options = {}) {
   const now = Date.now();
   const activeQuests = allQuests.filter(isQuestActive);
 
+  // Ghi nhận các quest đã đạt 100% (completed_at) hoặc đã nhận thưởng (claimed_at) từ trước lần quét này
+  const alreadyCompletedIds = new Set(
+    activeQuests
+      .filter((q) => q.user_status?.completed_at || q.user_status?.claimed_at)
+      .map((q) => q.id)
+  );
+
+  // Tự động ghi nhớ vào DB các quest đã hoàn thành từ trước để vĩnh viễn không bao giờ thông báo lặp
+  for (const qId of alreadyCompletedIds) {
+    if (!isQuestNotified(userId, qId)) {
+      markQuestNotified(userId, qId);
+    }
+  }
+
   // Một nhiệm vụ cần làm hoặc cần nhận thưởng (chưa claim):
   const pendingQuests = activeQuests.filter((q) => !q.user_status?.claimed_at);
 
@@ -291,6 +326,7 @@ async function scanUserQuests(subscriber, client, options = {}) {
         const res = resItem.value;
         const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
         actions.push({
+          questId: quest.id,
           questName,
           type: res.type || (isVid ? 'video' : 'game'),
           completed: !!res.completed,
@@ -300,6 +336,7 @@ async function scanUserQuests(subscriber, client, options = {}) {
         });
       } else {
         actions.push({
+          questId: quest.id,
           questName,
           type: isVid ? 'video' : 'game',
           completed: false,
@@ -317,37 +354,39 @@ async function scanUserQuests(subscriber, client, options = {}) {
     .prepare('UPDATE quest_subscribers SET last_checked_at = ?, last_quests_json = ? WHERE user_id = ?')
     .run(Date.now(), JSON.stringify(actions), userId);
 
-  // Gửi thông báo Direct Message nếu có kết quả
-  if (subscriber.notify_dm && actions.length > 0 && client) {
+  // Lọc các nhiệm vụ MỚI hoàn thành trong chu kỳ quét này mà CHƯA TỪNG gửi thông báo
+  const newlyCompletedList = actions.filter((a) => {
+    if (!a.completed) return false;
+    if (alreadyCompletedIds.has(a.questId) || isQuestNotified(userId, a.questId)) {
+      return false;
+    }
+    return true;
+  });
+
+  // CHỈ gửi thông báo DM nếu thực sự có nhiệm vụ MỚI hoàn thành trong lần quét này (tránh gửi lặp lại sau 20 phút)
+  if (subscriber.notify_dm && newlyCompletedList.length > 0 && client) {
     const user = await client.users.fetch(userId).catch(() => null);
     if (user) {
-      const completedList = actions.filter((a) => a.completed);
-
       const embed = new EmbedBuilder()
-        .setColor(completedList.length > 0 ? 0x57f287 : 0x5865f2)
+        .setColor(0x57f287)
         .setTitle('🔔 [LOWKEY QUEST] BÁO CÁO TỰ ĐỘNG HOÀN THÀNH DISCORD QUESTS')
         .setDescription(
-          `Hệ thống vừa tự động cày hoàn thành 100% thời gian cho **${actions.length}** nhiệm vụ (Video & Game):\n\n` +
-            actions
+          `Hệ thống vừa tự động cày hoàn thành 100% thời gian cho **${newlyCompletedList.length}** nhiệm vụ (Video & Game):\n\n` +
+            newlyCompletedList
               .map((a, i) => {
                 const pctText = typeof a.progressPercent === 'number' ? ` (${a.progressPercent}%)` : '';
                 const typeBadge = a.type === 'video' ? '🎬 [Video]' : '🎮 [Game]';
-                if (a.completed) {
-                  return `**${i + 1}.** ${typeBadge} **${a.questName}**${pctText}\n↪ ✅ **${a.message}**!`;
-                }
-                return `**${i + 1}.** ${typeBadge} **${a.questName}**${pctText}\n↪ ⚠️ ${a.error || a.message}`;
+                return `**${i + 1}.** ${typeBadge} **${a.questName}**${pctText}\n↪ ✅ **${a.message}**!`;
               })
               .join('\n\n')
         )
         .setFooter({ text: 'Lowkey Auto Quest Scheduler • Tự động 100% không cần mở game' })
         .setTimestamp();
 
-      if (completedList.length > 0) {
-        embed.addFields({
-          name: '🎁 Nhận phần thưởng (Claim ORB)',
-          value: 'Nhiệm vụ đã hoàn thành 100%! Vui lòng mở **Cài đặt -> Quests** trên Discord để tự bấm **Claim** nhận quà (Discord yêu cầu xác thực con người khi nhận quà).',
-        });
-      }
+      embed.addFields({
+        name: '🎁 Nhận phần thưởng (Claim ORB)',
+        value: 'Nhiệm vụ đã hoàn thành 100%! Vui lòng mở **Cài đặt -> Quests** trên Discord để tự bấm **Claim** nhận quà (Discord yêu cầu xác thực con người khi nhận quà).',
+      });
 
       const pendingQuestsList = actions.filter((a) => !a.completed);
       if (pendingQuestsList.length > 0) {
@@ -358,6 +397,11 @@ async function scanUserQuests(subscriber, client, options = {}) {
       }
 
       user.send({ embeds: [embed] }).catch(() => {});
+
+      // Đánh dấu đã gửi thông báo thành công cho các nhiệm vụ này để không bao giờ gửi lặp lại
+      for (const a of newlyCompletedList) {
+        markQuestNotified(userId, a.questId);
+      }
     }
   }
 

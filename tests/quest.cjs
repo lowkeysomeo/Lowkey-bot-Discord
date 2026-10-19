@@ -728,6 +728,21 @@ setWebSocketImplementation(MockWebSocket);
     const schedulerScanRes = await scanUserQuests('user-scan-btn', { heartbeatDelayMs: 10 });
     assert.equal(schedulerScanRes.success, true);
     assert(schedulerScanRes.totalQuests >= 1);
+
+    // 9.13 Kiểm tra chống gửi thông báo lặp lại khi quest đã hoàn thành rồi (20 phút sau không lặp lại)
+    const sentDMs = [];
+    const mockDiscordClient = {
+      users: {
+        fetch: async () => ({
+          send: async (payload) => { sentDMs.push(payload); },
+        }),
+      },
+    };
+    await scanUserQuests('user-scan-btn', { heartbeatDelayMs: 10 }, mockDiscordClient);
+    const dmsAfterFirst = sentDMs.length;
+    // Lần quét tiếp theo (mô phỏng 20 phút sau): quest đã được ghi nhớ -> KHÔNG gửi thêm DM
+    await scanUserQuests('user-scan-btn', { heartbeatDelayMs: 10 }, mockDiscordClient);
+    assert.equal(sentDMs.length, dmsAfterFirst, 'Không được gửi thông báo lặp lại sau 20 phút');
   } finally {
     setFetchImplementation(null);
   }
