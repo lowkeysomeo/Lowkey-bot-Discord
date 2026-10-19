@@ -682,7 +682,7 @@ async function listUploadedMovies(guildId, env = process.env) {
 
       const res = await s3.send(new ListObjectsV2Command({ Bucket: bucketName }));
       if (Array.isArray(res.Contents)) {
-        r2Objects = res.Contents.filter(o => o.Key && /\.(mp4|webm|mkv|mov)$/i.test(o.Key));
+        r2Objects = res.Contents.filter(o => o.Key && /\.(mp4|webm)$/i.test(o.Key));
       }
     } catch (err) {
       console.warn('[CINEMA] Không thể lấy danh sách phim từ R2:', err.message);

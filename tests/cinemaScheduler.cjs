@@ -390,8 +390,10 @@ async function testScheduler() {
   scheduler.activeSessions.clear();
   let unrelatedDestroyed = false;
   voiceMock.getVoiceConnection = () => ({ destroy: () => { unrelatedDestroyed = true; } });
-  scheduler.cleanupSession(guild);
+  const previousVoiceStatusCalls = voiceStatusCalls.length;
+  scheduler.cleanupSession(guild, true);
   assert.equal(unrelatedDestroyed, false);
+  assert.equal(voiceStatusCalls.length, previousVoiceStatusCalls, 'Idle cinema must not clear unrelated channel statuses');
 
   // The same film in two rooms is two independent announcements, also after restart.
   voiceChannel.name = 'Cinema 1'; voiceChannel.type = 2;

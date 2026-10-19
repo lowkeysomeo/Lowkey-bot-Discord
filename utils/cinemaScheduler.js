@@ -342,7 +342,7 @@ function cleanupSession(guild, notifyEnd = false, roomNumber = null) {
       const targetChannel = (session && session.voiceChannelId)
         ? guild.channels?.cache?.get(session.voiceChannelId)
         : cinema.getCinemaRoomChannel(guild, config, rId);
-      if (targetChannel && targetChannel.id && (session?.voiceStatusSet || notifyEnd)) {
+      if (session && targetChannel && targetChannel.id && (session.voiceStatusSet || notifyEnd)) {
         cinema.updateVoiceChannelStatus(guild.client, targetChannel.id, '').catch(() => {});
       }
     } catch (err) {
