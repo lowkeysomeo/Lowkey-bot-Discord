@@ -555,6 +555,7 @@ function cinemaPage() {
   if (!data) return '<div class="card empty"><h2>Không tải được Cinema</h2><p>Quyền Administrator có thể đã thay đổi. Chọn lại server để kiểm tra.</p></div>';
   const c = data.config;
   const channels = data.channels || [];
+  const categories = channels.filter(ch => ch.type === 4);
   const voiceChannels = channels.filter(ch => ch.type === 2 || ch.type === 13);
   const textChannels = channels.filter(ch => ch.type === 0 || ch.type === 5);
   return heading('PREMIUM · RẠP PHIM CỘNG ĐỒNG', 'VNL Cinema', 'Quản lý lịch chiếu và quyền tham gia. Chỉ Administrator của server được sửa cấu hình.') +
@@ -564,8 +565,15 @@ function cinemaPage() {
     <div class="field"><label>Giới thiệu<textarea name="description" maxlength="1500" rows="3">${h(c.description)}</textarea></label></div></div>
     <label class="cinema-check"><input type="checkbox" name="enabled" ${c.enabled ? 'checked' : ''}> Mở Cinema cho server này</label></section>
     <section class="card cinema-card"><h2>Tự động vào phòng & Thông báo</h2><p>Khi đến đúng giờ chiếu, bot sẽ tự động vào kênh thoại đã chọn và đăng thẻ mời xem phim (Activity Invite) để mọi người bấm vào cùng xem. Hệ thống chỉ gửi thông báo 1 lần duy nhất cho mỗi suất chiếu.</p><div class="form-grid">
-    <div class="field"><label>Kênh Voice chiếu phim (Bot tự vào khi đến giờ)<select name="voiceChannelId"><option value="">Không tự động vào (Chỉ mở Activity khi có lệnh)</option>${voiceChannels.map(ch => `<option value="${h(ch.id)}" ${c.voiceChannelId === ch.id ? 'selected' : ''}>🔊 ${h(ch.name)}</option>`).join('')}</select></label></div>
-    <div class="field"><label>Kênh gửi thông báo khi phim bắt đầu (Tùy chọn)<select name="notifyChannelId"><option value="">Không gửi kênh riêng (chỉ gửi vào Voice)</option>${textChannels.map(ch => `<option value="${h(ch.id)}" ${c.notifyChannelId === ch.id ? 'selected' : ''}>💬 #${h(ch.name)}</option>`).join('')}</select></label></div>
+    <div class="field" style="grid-column: 1 / -1;"><label>Danh mục Rạp Phim (Giới hạn danh mục chiếu phim)<select name="categoryId"><option value="">-- Tự động nhận diện (danh mục chứa chữ 'Cinema' hoặc không giới hạn) --</option>${categories.map(cat => `<option value="${h(cat.id)}" ${c.categoryId === cat.id ? 'selected' : ''}>📁 ${h(cat.name)}</option>`).join('')}</select><small class="subtle">Khi chọn, chỉ các kênh thoại trong danh mục này mới được phép chiếu phim. Người dùng ở kênh khác gõ <code>/cinema</code> sẽ được yêu cầu vào đúng phòng chiếu.</small></label></div>
+    <div class="field"><label>Kênh Voice chiếu phim (Bot tự vào khi đến giờ)<select name="voiceChannelId"><option value="">Tự động theo phòng người gọi lệnh (hoặc phòng đầu tiên trong danh mục)</option>${voiceChannels.map(ch => {
+      const inCat = c.categoryId && ch.parentId === c.categoryId;
+      return `<option value="${h(ch.id)}" ${c.voiceChannelId === ch.id ? 'selected' : ''}>🔊 ${h(ch.name)}${inCat ? ' ★' : ''}</option>`;
+    }).join('')}</select></label></div>
+    <div class="field"><label>Kênh gửi thông báo khi phim bắt đầu (Tùy chọn)<select name="notifyChannelId"><option value="">Tự động tìm trong danh mục Cinema (hoặc chỉ gửi vào Voice)</option>${textChannels.map(ch => {
+      const inCat = c.categoryId && ch.parentId === c.categoryId;
+      return `<option value="${h(ch.id)}" ${c.notifyChannelId === ch.id ? 'selected' : ''}>💬 #${h(ch.name)}${inCat ? ' ★' : ''}</option>`;
+    }).join('')}</select></label></div>
     <div class="field"><label>Role được tag khi có suất chiếu<select name="notifyRoleId"><option value="">Không tag role nào</option><option value="everyone" ${c.notifyRoleId === 'everyone' ? 'selected' : ''}>@everyone</option><option value="here" ${c.notifyRoleId === 'here' ? 'selected' : ''}>@here</option>${(data.roles || []).map(r => `<option value="${h(r.id)}" ${c.notifyRoleId === r.id ? 'selected' : ''}>@ ${h(r.name)}</option>`).join('')}</select></label></div>
     <div class="field" style="grid-column: 1 / -1;"><label>Nội dung thông báo tùy chỉnh (Để trống để dùng mẫu mặc định)<textarea name="notifyMessage" maxlength="1500" rows="3" placeholder="Ví dụ: 🍿 Bộ phim {phim} đang được chiếu tại {kenh_voice}! Suất chiếu từ {gio_chieu} đến {gio_ket_thuc}. Mọi người vào xem cùng nhé!">${h(c.notifyMessage || '')}</textarea><small class="subtle">Biến có sẵn: <code>{phim}</code>, <code>{kenh_voice}</code>, <code>{gio_chieu}</code>, <code>{gio_ket_thuc}</code>, <code>{link_xem}</code>, <code>{role}</code></small></label></div></div></section>
     <section class="card cinema-card"><h2>Ai được vào xem?</h2><p>Quyền xem không cấp quyền quản lý Premium.</p>
@@ -592,6 +600,7 @@ function bindCinema() {
     const id = state.guild.id, requestId = state.requestId, button = document.querySelector('#cinema-save');
     const data = new FormData(form);
     const payload = { title: data.get('title'), description: data.get('description'), enabled: data.has('enabled'), audience: data.get('audience'),
+      categoryId: data.get('categoryId') || null,
       voiceChannelId: data.get('voiceChannelId') || null, notifyChannelId: data.get('notifyChannelId') || null,
       notifyRoleId: data.get('notifyRoleId') || null, notifyMessage: (data.get('notifyMessage') || '').trim(),
       roleIds: data.getAll('roleIds'), rightsConfirmed: data.has('rightsConfirmed'), revision: state.data.cinema.config.revision,

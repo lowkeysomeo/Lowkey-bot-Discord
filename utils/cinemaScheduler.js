@@ -53,23 +53,34 @@ function checkShows(client) {
         }
 
         // 1. Tự động vào kênh Voice
-        if (config.voiceChannelId && !session.joined) {
-          const voiceChannel = guild.channels.cache.get(config.voiceChannelId);
-          if (voiceChannel && voiceChannel.isVoiceBased()) {
-            try {
-              const { joinVoiceChannel } = require('@discordjs/voice');
-              session.connection = joinVoiceChannel({
-                channelId: voiceChannel.id,
-                guildId: guild.id,
-                adapterCreator: guild.voiceAdapterCreator,
-                selfDeaf: true,
-                selfMute: true,
-              });
-              session.joined = true;
-              console.log(`[CINEMA SCHEDULER] ✅ Bot đã tự động vào kênh thoại #${voiceChannel.name} để phát "${currentShow.title}" (${guild.name})`);
-            } catch (err) {
-              console.error(`[CINEMA SCHEDULER] Không thể vào voice channel:`, err.message);
-            }
+        const cinemaCategory = cinema.getCinemaCategory(guild, config);
+        let voiceChannel = null;
+        if (config.voiceChannelId) {
+          voiceChannel = guild.channels.cache.get(config.voiceChannelId);
+        }
+
+        // Nếu có danh mục Cinema, đảm bảo kênh voice phải thuộc danh mục này
+        if (cinemaCategory) {
+          if (!voiceChannel || voiceChannel.parentId !== cinemaCategory.id) {
+            const cinemaVoices = cinema.getCinemaVoiceChannels(guild, config);
+            voiceChannel = (cinemaVoices && typeof cinemaVoices.first === 'function' ? cinemaVoices.first() : null) || null;
+          }
+        }
+
+        if (voiceChannel && voiceChannel.isVoiceBased() && !session.joined) {
+          try {
+            const { joinVoiceChannel } = require('@discordjs/voice');
+            session.connection = joinVoiceChannel({
+              channelId: voiceChannel.id,
+              guildId: guild.id,
+              adapterCreator: guild.voiceAdapterCreator,
+              selfDeaf: true,
+              selfMute: true,
+            });
+            session.joined = true;
+            console.log(`[CINEMA SCHEDULER] ✅ Bot đã tự động vào kênh thoại #${voiceChannel.name} để phát "${currentShow.title}" (${guild.name})`);
+          } catch (err) {
+            console.error(`[CINEMA SCHEDULER] Không thể vào voice channel:`, err.message);
           }
         }
 
@@ -83,7 +94,12 @@ function checkShows(client) {
 
           (async () => {
             try {
-              const voiceChannel = config.voiceChannelId ? guild.channels.cache.get(config.voiceChannelId) : null;
+              let voiceChannel = config.voiceChannelId ? guild.channels.cache.get(config.voiceChannelId) : null;
+              if (cinemaCategory && (!voiceChannel || voiceChannel.parentId !== cinemaCategory.id)) {
+                const cinemaVoices = cinema.getCinemaVoiceChannels(guild, config);
+                voiceChannel = (cinemaVoices && typeof cinemaVoices.first === 'function' ? cinemaVoices.first() : null) || null;
+              }
+
               let inviteUrl = null;
               if (voiceChannel && typeof voiceChannel.createInvite === 'function') {
                 try {
@@ -147,9 +163,18 @@ function checkShows(client) {
                 )
               ];
 
-              // Chỉ gửi 1 lần duy nhất tới kênh chỉ định (hoặc fallback kênh voice nếu chưa chọn kênh thông báo)
-              const targetChannel = (config.notifyChannelId ? guild.channels.cache.get(config.notifyChannelId) : null)
-                || (voiceChannel && typeof voiceChannel.send === 'function' ? voiceChannel : null);
+              // Chỉ gửi 1 lần duy nhất tới kênh chỉ định (hoặc ưu tiên kênh thông báo thuộc danh mục Cinema)
+              let targetChannel = config.notifyChannelId ? guild.channels.cache.get(config.notifyChannelId) : null;
+              if (!targetChannel && cinemaCategory) {
+                targetChannel = guild.channels.cache.find(c =>
+                  c.parentId === cinemaCategory.id && (c.type === 0 || c.type === 5) && /thông[- ]?báo/i.test(c.name || '')
+                ) || guild.channels.cache.find(c =>
+                  c.parentId === cinemaCategory.id && (c.type === 0 || c.type === 5)
+                );
+              }
+              if (!targetChannel && voiceChannel && typeof voiceChannel.send === 'function') {
+                targetChannel = voiceChannel;
+              }
 
               if (targetChannel && typeof targetChannel.send === 'function') {
                 await targetChannel.send({

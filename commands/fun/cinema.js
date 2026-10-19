@@ -60,20 +60,46 @@ async function execute(interaction) {
     });
   }
 
-  // Xác định kênh voice chiếu phim
-  let targetChannel = null;
-  if (config.voiceChannelId) {
-    targetChannel = interaction.guild.channels.cache.get(config.voiceChannelId);
-  }
-  if (!targetChannel) {
-    targetChannel = member.voice?.channel;
-  }
+  // Xác định kênh voice chiếu phim (chỉ cho phép các kênh thuộc danh mục Cinema nếu có)
+  const cinemaCategory = cinema.getCinemaCategory(interaction.guild, config);
+  const cinemaVoices = cinema.getCinemaVoiceChannels(interaction.guild, config);
+  const hasCategory = cinemaCategory && cinemaVoices && cinemaVoices.size > 0;
 
-  if (!targetChannel) {
-    return interaction.reply({
-      content: 'Bạn cần tham gia vào một kênh thoại (hoặc Admin cần cài đặt Kênh Voice chiếu phim trên Dashboard) trước khi phát phim!',
-      flags: 64,
-    });
+  let targetChannel = null;
+  const userVoice = member.voice?.channel;
+
+  if (hasCategory) {
+    if (!userVoice) {
+      const allowedNames = cinemaVoices.map(c => `**${c.name}**`).join(', ');
+      return interaction.reply({
+        content: `⚠️ Bạn cần tham gia vào một trong các phòng chiếu thuộc danh mục **${cinemaCategory.name}** (${allowedNames}) trước khi dùng lệnh!`,
+        flags: 64,
+      });
+    }
+
+    if (userVoice.parentId !== cinemaCategory.id) {
+      const allowedNames = cinemaVoices.map(c => `**${c.name}**`).join(', ');
+      return interaction.reply({
+        content: `⚠️ Kênh thoại **${userVoice.name}** không thuộc danh mục rạp phim!\n🎬 Phim chỉ được phép chiếu tại các kênh thoại thuộc danh mục **${cinemaCategory.name}** (${allowedNames}). Vui lòng vào đúng phòng chiếu để bắt đầu.`,
+        flags: 64,
+      });
+    }
+
+    targetChannel = userVoice;
+  } else {
+    if (config.voiceChannelId) {
+      targetChannel = interaction.guild.channels.cache.get(config.voiceChannelId);
+    }
+    if (!targetChannel) {
+      targetChannel = userVoice;
+    }
+
+    if (!targetChannel) {
+      return interaction.reply({
+        content: 'Bạn cần tham gia vào một kênh thoại (hoặc Admin cần cài đặt Kênh Voice chiếu phim trên Dashboard) trước khi phát phim!',
+        flags: 64,
+      });
+    }
   }
 
   const options = config.shows.slice(0, 25).map((show, idx) => {
@@ -86,8 +112,9 @@ async function execute(interaction) {
     };
   });
 
+  const userId = interaction.user?.id || interaction.member?.user?.id || interaction.member?.id || 'unknown';
   const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId(`cinema:select_movie:${interaction.user.id}`)
+    .setCustomId(`cinema:select_movie:${userId}`)
     .setPlaceholder('🍿 Chọn bộ phim bạn muốn phát ngay...')
     .addOptions(options);
 
@@ -134,20 +161,46 @@ async function handleSelect(interaction) {
   }
 
   // Xác định kênh voice chiếu
-  let targetChannel = null;
-  if (config.voiceChannelId) {
-    targetChannel = interaction.guild.channels.cache.get(config.voiceChannelId);
-  }
-  if (!targetChannel) {
-    targetChannel = interaction.member.voice?.channel;
-  }
+  const cinemaCategory = cinema.getCinemaCategory(interaction.guild, config);
+  const cinemaVoices = cinema.getCinemaVoiceChannels(interaction.guild, config);
+  const hasCategory = cinemaCategory && cinemaVoices && cinemaVoices.size > 0;
 
-  if (!targetChannel) {
-    return interaction.editReply({
-      content: 'Không tìm thấy phòng thoại để phát phim. Hãy đảm bảo bạn đang ở trong phòng thoại hoặc kênh voice trên Dashboard hợp lệ.',
-      embeds: [],
-      components: [],
-    });
+  let targetChannel = null;
+  const userVoice = interaction.member.voice?.channel;
+
+  if (hasCategory) {
+    if (userVoice && userVoice.parentId === cinemaCategory.id) {
+      targetChannel = userVoice;
+    } else if (config.voiceChannelId) {
+      const cfgVoice = interaction.guild.channels.cache.get(config.voiceChannelId);
+      if (cfgVoice && cfgVoice.parentId === cinemaCategory.id) {
+        targetChannel = cfgVoice;
+      }
+    }
+
+    if (!targetChannel) {
+      const allowedNames = cinemaVoices.map(c => `**${c.name}**`).join(', ');
+      return interaction.editReply({
+        content: `⚠️ Không tìm thấy phòng chiếu hợp lệ. Phim chỉ được phép chiếu tại các kênh thoại thuộc danh mục **${cinemaCategory.name}** (${allowedNames}).`,
+        embeds: [],
+        components: [],
+      });
+    }
+  } else {
+    if (config.voiceChannelId) {
+      targetChannel = interaction.guild.channels.cache.get(config.voiceChannelId);
+    }
+    if (!targetChannel) {
+      targetChannel = userVoice;
+    }
+
+    if (!targetChannel) {
+      return interaction.editReply({
+        content: 'Không tìm thấy phòng thoại để phát phim. Hãy đảm bảo bạn đang ở trong phòng thoại hoặc kênh voice trên Dashboard hợp lệ.',
+        embeds: [],
+        components: [],
+      });
+    }
   }
 
   // 1. Xác định thời lượng dự kiến

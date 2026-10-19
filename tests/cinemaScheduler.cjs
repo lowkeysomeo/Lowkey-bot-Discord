@@ -177,7 +177,41 @@ async function testScheduler() {
   assert(foundImmediate, 'Immediate show must be created and added to schedule');
   assert(Date.parse(foundImmediate.startsAt) <= Date.now(), 'Immediate show starts now');
 
-  console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave, /cinema preserves scheduled shows.');
+  // Test 6: Category restriction on /cinema command
+  const categoryChannel = { id: 'cat-cinema', name: '╭─ VNL Cinema ─╮', type: 4, isCategory: () => true };
+  voiceChannel.parentId = 'cat-cinema';
+  const outsideVoice = { id: 'voice-outside', name: 'Phòng ngoài', isVoiceBased: () => true, parentId: 'cat-other' };
+  channels.set('cat-cinema', categoryChannel);
+  channels.set('voice-outside', outsideVoice);
+
+  let replyPayload = null;
+  const outsideInteraction = {
+    inGuild: () => true,
+    guildId,
+    guild,
+    user: { id: 'u123' },
+    member: {
+      voice: { channel: outsideVoice },
+      roles: { cache: new Collection() },
+      permissions: { has: () => true },
+    },
+    reply: async (payload) => { replyPayload = payload; },
+  };
+
+  await cinemaCommand.execute(outsideInteraction);
+  assert(replyPayload && replyPayload.content.includes('không thuộc danh mục rạp phim'), 'Must reject voice channels outside cinema category');
+
+  // When not in any voice channel
+  outsideInteraction.member.voice = { channel: null };
+  await cinemaCommand.execute(outsideInteraction);
+  assert(replyPayload && replyPayload.content.includes('cần tham gia vào một trong các phòng chiếu'), 'Must prompt user to join cinema category voice channel');
+
+  // When in cinema voice channel
+  outsideInteraction.member.voice = { channel: voiceChannel };
+  await cinemaCommand.execute(outsideInteraction);
+  assert(replyPayload && replyPayload.embeds && replyPayload.embeds.length > 0, 'Must allow /cinema when in cinema category channel');
+
+  console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave, /cinema preserves scheduled shows, category restriction enforced.');
 }
 
 testScheduler().catch(err => {

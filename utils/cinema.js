@@ -22,7 +22,7 @@ function sourceUrl(value, env) {
 }
 function getConfig(guildId) {
   const raw = getGuildSetting(guildId, 'CINEMA_CONFIG');
-  const d = { enabled: false, title: 'VNL Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, voiceChannelId: null, notifyChannelId: null, notifyRoleId: null, notifyMessage: '', shows: [], revision: 0 };
+  const d = { enabled: false, title: 'VNL Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, categoryId: null, voiceChannelId: null, notifyChannelId: null, notifyRoleId: null, notifyMessage: '', shows: [], revision: 0 };
   return raw ? { ...d, ...JSON.parse(raw) } : d;
 }
 function text(value, max, required = false) {
@@ -34,6 +34,7 @@ function validate(input, roles, env, channels) {
   if (!['members', 'roles', 'admins'].includes(input.audience)) fail(400, 'Quyền tham gia không hợp lệ.');
   if (!Array.isArray(input.roleIds) || input.roleIds.length > 25 || input.roleIds.some(id => typeof id !== 'string' || !roles.has(id))) fail(400, 'Role phải thuộc server đang quản lý.');
   if (input.audience === 'roles' && !input.roleIds.length) fail(400, 'Hãy chọn ít nhất một role được xem.');
+  const categoryId = typeof input.categoryId === 'string' && /^\d+$/.test(input.categoryId) ? input.categoryId : null;
   const voiceChannelId = typeof input.voiceChannelId === 'string' && /^\d+$/.test(input.voiceChannelId) ? input.voiceChannelId : null;
   const notifyChannelId = typeof input.notifyChannelId === 'string' && /^\d+$/.test(input.notifyChannelId) ? input.notifyChannelId : null;
   let notifyRoleId = null;
@@ -45,6 +46,7 @@ function validate(input, roles, env, channels) {
   }
   const notifyMessage = typeof input.notifyMessage === 'string' ? text(input.notifyMessage, 1500) : '';
   if (channels) {
+    if (categoryId && !channels.has(categoryId)) fail(400, 'Danh mục Cinema phải thuộc server này.');
     if (voiceChannelId && !channels.has(voiceChannelId)) fail(400, 'Kênh voice rạp phim phải thuộc server này.');
     if (notifyChannelId && !channels.has(notifyChannelId)) fail(400, 'Kênh thông báo phải thuộc server này.');
   }
@@ -59,7 +61,7 @@ function validate(input, roles, env, channels) {
   for (let i = 1; i < shows.length; i++) if (shows[i].startsAt < shows[i - 1].endsAt) fail(400, 'Các suất chiếu không được trùng giờ.');
   if (input.enabled && (!input.rightsConfirmed || !shows.length)) fail(400, 'Cần ít nhất một suất chiếu và xác nhận quyền sử dụng video để bật Cinema.');
   return { enabled: input.enabled, title: text(input.title, 80, true), description: text(input.description, 1500), audience: input.audience,
-    roleIds: [...new Set(input.roleIds)], rightsConfirmed: input.rightsConfirmed, voiceChannelId, notifyChannelId, notifyRoleId, notifyMessage, shows };
+    roleIds: [...new Set(input.roleIds)], rightsConfirmed: input.rightsConfirmed, categoryId, voiceChannelId, notifyChannelId, notifyRoleId, notifyMessage, shows };
 }
 function saveConfig(guildId, input, roles, env, channels) {
   const next = validate(input, roles, env, channels);
@@ -223,6 +225,41 @@ function markShowAnnounced(guildId, showOrKey) {
   }
 }
 
+function getCinemaCategory(guild, config) {
+  if (!guild || !guild.channels?.cache) return null;
+  const channels = guild.channels.cache;
+
+  // 1. Kiểm tra nếu có categoryId được cấu hình và hợp lệ trong guild
+  if (config && config.categoryId) {
+    const cat = channels.get(config.categoryId);
+    if (cat && (cat.type === 4 || cat.type === 'GUILD_CATEGORY' || (typeof cat.isCategory === 'function' && cat.isCategory()))) {
+      return cat;
+    }
+  }
+
+  // 2. Tự động nhận diện danh mục có chứa chữ "cinema" hoặc "rạp phim"
+  return channels.find(c => {
+    const isCat = c.type === 4 || c.type === 'GUILD_CATEGORY' || (typeof c.isCategory === 'function' && c.isCategory());
+    return isCat && /(?:cinema|rạp\s*phim)/i.test(c.name || '');
+  }) || null;
+}
+
+function getCinemaVoiceChannels(guild, config) {
+  if (!guild || !guild.channels?.cache) return null;
+  const category = getCinemaCategory(guild, config);
+  if (!category) return null;
+  return guild.channels.cache.filter(c =>
+    c.parentId === category.id && (c.type === 2 || c.type === 13 || (typeof c.isVoiceBased === 'function' && c.isVoiceBased()))
+  );
+}
+
+function isAllowedCinemaVoiceChannel(channel, guild, config) {
+  if (!channel) return false;
+  const category = getCinemaCategory(guild, config);
+  if (!category) return true; // Nếu server chưa có danh mục Cinema riêng thì không giới hạn
+  return channel.parentId === category.id;
+}
+
 module.exports = {
   getConfig,
   saveConfig,
@@ -234,4 +271,7 @@ module.exports = {
   getAnnouncedShows,
   isShowAnnounced,
   markShowAnnounced,
+  getCinemaCategory,
+  getCinemaVoiceChannels,
+  isAllowedCinemaVoiceChannel,
 };

@@ -51,11 +51,31 @@ async function main() {
   assert.throws(() => cinema.validate(overlap, roles, env), /trùng giờ/);
   assert.throws(() => cinema.validate({ ...sample(), rightsConfirmed: false }, roles, env));
   assert.throws(() => cinema.validate({ ...sample(), audience: 'roles' }, roles, env));
+  assert.equal(cinema.validate({ ...sample(), categoryId: '888' }, roles, env).categoryId, '888');
+  assert.throws(() => cinema.validate({ ...sample(), categoryId: '999999' }, roles, env, new Map([['888', {}]])), /Danh mục Cinema/);
   assert.equal(cinema.validate({ ...sample(), notifyRoleId: '777' }, roles, env).notifyRoleId, '777');
   assert.equal(cinema.validate({ ...sample(), notifyRoleId: 'everyone' }, roles, env).notifyRoleId, 'everyone');
   assert.equal(cinema.validate({ ...sample(), notifyRoleId: 'here' }, roles, env).notifyRoleId, 'here');
   assert.throws(() => cinema.validate({ ...sample(), notifyRoleId: '999999' }, roles, env), /Role thông báo/);
   assert.equal(cinema.validate({ ...sample(), notifyMessage: 'Thông báo: {phim}' }, roles, env).notifyMessage, 'Thông báo: {phim}');
+
+  const mockGuild = {
+    channels: {
+      cache: new Collection([
+        ['cat-1', { id: 'cat-1', name: '╭─ VNL Cinema ─╮', type: 4, isCategory: () => true }],
+        ['voice-1', { id: 'voice-1', name: '🎬 ・。-:*・。VNL Cinema 1', parentId: 'cat-1', type: 2, isVoiceBased: () => true }],
+        ['voice-2', { id: 'voice-2', name: '🎬 ・。-:*・。VNL Cinema 2', parentId: 'cat-1', type: 2, isVoiceBased: () => true }],
+        ['voice-outside', { id: 'voice-outside', name: 'Phòng tán gẫu', parentId: 'cat-other', type: 2, isVoiceBased: () => true }],
+        ['text-1', { id: 'text-1', name: '📢 ・。-・。thông-báo-cinema', parentId: 'cat-1', type: 0, isVoiceBased: () => false }],
+      ])
+    }
+  };
+  assert.equal(cinema.getCinemaCategory(mockGuild, {}).id, 'cat-1');
+  assert.equal(cinema.isAllowedCinemaVoiceChannel(mockGuild.channels.cache.get('voice-1'), mockGuild, {}), true);
+  assert.equal(cinema.isAllowedCinemaVoiceChannel(mockGuild.channels.cache.get('voice-outside'), mockGuild, {}), false);
+  const cinemaVoices = cinema.getCinemaVoiceChannels(mockGuild, {});
+  assert.equal(cinemaVoices.size, 2);
+
   assert.equal(cinema.isShowAnnounced('111', 'show-key-test'), false);
   cinema.markShowAnnounced('111', 'show-key-test');
   assert.equal(cinema.isShowAnnounced('111', 'show-key-test'), true);

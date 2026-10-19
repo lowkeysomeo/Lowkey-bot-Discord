@@ -504,7 +504,7 @@ function createDashboard(client, options = {}) {
           if (req.method === 'GET') return json(res, 200, {
             config: cinema.getConfig(guild.id), available: env.CINEMA_ENABLED === 'true', mediaOrigin: cinema.mediaOrigin(env),
             roles: [...roles.values()].filter(role => role && role.id !== guild.id).map(role => ({ id: role.id, name: role.name })),
-            channels: [...allChannels.values()].filter(Boolean).map(c => ({ id: c.id, name: c.name, type: c.type })),
+            channels: [...allChannels.values()].filter(Boolean).map(c => ({ id: c.id, name: c.name, type: c.type, parentId: c.parentId || null })),
           });
           if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
           rateLimit(`cinema-save:${guild.id}:${value.user.id}`, 10);
