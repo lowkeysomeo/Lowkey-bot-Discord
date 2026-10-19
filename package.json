@@ -11,6 +11,8 @@
     "quest:token": "node scripts/autoQuestToken.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1152.0",
+    "@aws-sdk/lib-storage": "^3.1152.0",
     "@discordjs/voice": "0.19.2",
     "@napi-rs/canvas": "^1.0.10",
     "@stablelib/xchacha20poly1305": "^2.0.1",
@@ -27,8 +29,6 @@
     "better-sqlite3@13.0.3": true
   },
   "devDependencies": {
-    "@aws-sdk/client-s3": "^3.1152.0",
-    "@aws-sdk/lib-storage": "^3.1152.0",
     "@discord/embedded-app-sdk": "2.5.0",
     "esbuild": "0.28.2"
   }
