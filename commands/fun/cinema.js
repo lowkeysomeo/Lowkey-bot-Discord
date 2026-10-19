@@ -194,6 +194,7 @@ async function handleSelect(interaction) {
 
   const startUnix = Math.floor(now / 1000);
   const endUnix = Math.floor((now + duration) / 1000);
+  const activityWebUrl = (process.env.DASHBOARD_URL || 'https://vietnamlegacy.up.railway.app').replace(/\/$/, '') + '/activity';
 
   const playingEmbed = new EmbedBuilder()
     .setColor(0xE50914)
@@ -201,21 +202,21 @@ async function handleSelect(interaction) {
     .setDescription(
       `🍿 Bộ phim **${selectedShow.title}** đã được khởi chiếu tại **<#${targetChannel.id}>** theo yêu cầu của <@${interaction.user.id}>!\n\n` +
       `⏰ **Thời gian:** <t:${startUnix}:t> - <t:${endUnix}:t> (Kết thúc <t:${endUnix}:R>)\n\n` +
-      `👇 **Mọi người hãy bấm vào nút bên dưới để mở màn hình rạp phim cùng xem nhé:**`
+      `👇 **Cách xem:**\n` +
+      `1. Bấm nút **"Vào rạp xem phim"** bên dưới (hoặc bấm biểu tượng **Tên Lửa / Hoạt Động (Activities)** ở thanh điều khiển cuộc gọi).\n` +
+      `2. Màn hình rạp chiếu sẽ tự động mở lên đồng bộ cho tất cả mọi người cùng xem!`
     )
     .setFooter({ text: 'VNL Cinema • Phát phim đồng bộ thời gian thực' })
     .setTimestamp();
 
-  const components = [];
-  if (inviteUrl) {
-    const btnRow = new ActionRowBuilder().addComponents(
+  const components = [
+    new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setLabel('🍿 Vào rạp xem phim ngay')
         .setStyle(ButtonStyle.Link)
-        .setURL(inviteUrl)
-    );
-    components.push(btnRow);
-  }
+        .setURL(inviteUrl || activityWebUrl)
+    )
+  ];
 
   // Cập nhật tin nhắn phản hồi
   await interaction.editReply({

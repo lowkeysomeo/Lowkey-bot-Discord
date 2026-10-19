@@ -91,16 +91,15 @@ function checkShows(client) {
                 .setFooter({ text: 'VNL Cinema • Tự động phát theo lịch' })
                 .setTimestamp();
 
-              const components = [];
-              if (inviteUrl) {
-                const row = new ActionRowBuilder().addComponents(
+              const activityWebUrl = (process.env.DASHBOARD_URL || 'https://vietnamlegacy.up.railway.app').replace(/\/$/, '') + '/activity';
+              const components = [
+                new ActionRowBuilder().addComponents(
                   new ButtonBuilder()
                     .setLabel('🍿 Vào rạp xem phim ngay')
                     .setStyle(ButtonStyle.Link)
-                    .setURL(inviteUrl)
-                );
-                components.push(row);
-              }
+                    .setURL(inviteUrl || activityWebUrl)
+                )
+              ];
 
               if (config.notifyChannelId) {
                 const notifyCh = guild.channels.cache.get(config.notifyChannelId);
