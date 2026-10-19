@@ -1,33 +1,22 @@
 import { DiscordSDK } from '@discord/embedded-app-sdk';
 
-const screen = document.querySelector('#screen');
 const video = document.querySelector('#video');
-const videoContainer = document.querySelector('#video-container');
 const status = document.querySelector('#status');
 const join = document.querySelector('#join');
 const joinOverlay = document.querySelector('#join-overlay');
 const theaterExit = document.querySelector('#theater-exit');
 const toast = document.querySelector('#toast');
-const controls = document.querySelector('#controls');
-const timelineContainer = document.querySelector('#timeline-container');
-const timelineProgress = document.querySelector('#timeline-progress');
-const btnPlay = document.querySelector('#btn-play');
-const btnSeekBack = document.querySelector('#btn-seek-back');
-const btnSeekFwd = document.querySelector('#btn-seek-fwd');
-const btnMute = document.querySelector('#btn-mute');
-const volumeSlider = document.querySelector('#volume-slider');
-const timeCurrent = document.querySelector('#time-current');
-const timeDuration = document.querySelector('#time-duration');
 const roleBadge = document.querySelector('#role-badge');
 const btnZoom = document.querySelector('#btn-zoom');
+const btnSeekBack = document.querySelector('#btn-seek-back');
+const btnSeekFwd = document.querySelector('#btn-seek-fwd');
 
 let session = null;
 let guildId = null;
 let current = null;
 let stopped = false;
 let isStaff = false;
-let isSeekingLocally = false;
-let controlsTimeout = null;
+let isSyncingFromServer = false;
 let toastTimeout = null;
 
 function showToast(msg) {
@@ -69,7 +58,6 @@ function clearVideo() {
   video.removeAttribute('src');
   video.load();
   if (joinOverlay) joinOverlay.hidden = true;
-  updatePlayButton();
 }
 
 function getSyncedPosition() {
@@ -78,7 +66,7 @@ function getSyncedPosition() {
 }
 
 function sync() {
-  if (!current || !video.readyState || isSeekingLocally) return;
+  if (!current || !video.readyState) return;
   const position = getSyncedPosition();
   if (Number.isFinite(video.duration) && position >= video.duration) {
     video.pause();
@@ -98,37 +86,18 @@ async function play() {
   } catch {
     if (joinOverlay) joinOverlay.hidden = false;
   }
-  updatePlayButton();
 }
 
-function updatePlayButton() {
-  if (!btnPlay) return;
-  btnPlay.textContent = video.paused ? '▶' : '⏸';
-  btnPlay.title = video.paused ? 'Phát video' : 'Tạm dừng';
-}
-
-function updateTimeline() {
-  const cur = video.currentTime || 0;
-  const dur = video.duration || 0;
-  if (timeCurrent) timeCurrent.textContent = formatTime(cur);
-  if (timeDuration) timeDuration.textContent = formatTime(dur);
-  if (timelineProgress && dur > 0) {
-    const pct = Math.min(100, Math.max(0, (cur / dur) * 100));
-    timelineProgress.style.width = `${pct}%`;
-  }
-}
-
-// Staff-only seek handler
-async function handleStaffSeek(targetSeconds) {
+// Staff Seeking
+async function sendStaffSeek(targetSeconds) {
   if (!isStaff) {
     showToast('⚠️ Chỉ đội ngũ Staff mới có quyền tua video.');
     return;
   }
   const max = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 86400;
   const clamped = Math.max(0, Math.min(max, targetSeconds));
-  isSeekingLocally = true;
+  isSyncingFromServer = true;
   video.currentTime = clamped;
-  updateTimeline();
   try {
     const res = await request(`/guilds/${guildId}/seek`, {
       method: 'POST',
@@ -144,26 +113,26 @@ async function handleStaffSeek(targetSeconds) {
     showToast(`❌ ${err.message}`);
     sync();
   } finally {
-    setTimeout(() => { isSeekingLocally = false; }, 800);
+    setTimeout(() => { isSyncingFromServer = false; }, 800);
   }
 }
 
-// Theater / Zoom Mode
+// Theater Mode (Phóng to màn hình)
 function toggleTheater(force) {
-  const isTheater = typeof force === 'boolean' ? force : !screen.classList.contains('theater-mode');
+  const isTheater = typeof force === 'boolean' ? force : !document.body.classList.contains('theater-mode');
   if (isTheater) {
-    screen.classList.add('theater-mode');
+    document.body.classList.add('theater-mode');
     if (theaterExit) theaterExit.hidden = false;
     if (btnZoom) btnZoom.textContent = '🗗 Thu nhỏ';
     try {
-      if (!document.fullscreenElement && screen.requestFullscreen) {
-        screen.requestFullscreen().catch(() => {});
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
       }
     } catch {}
   } else {
-    screen.classList.remove('theater-mode');
+    document.body.classList.remove('theater-mode');
     if (theaterExit) theaterExit.hidden = true;
-    if (btnZoom) btnZoom.textContent = '🗖 Phóng to';
+    if (btnZoom) btnZoom.textContent = '🗖 Phóng to màn hình';
     try {
       if (document.fullscreenElement && document.exitFullscreen) {
         document.exitFullscreen().catch(() => {});
@@ -172,192 +141,96 @@ function toggleTheater(force) {
   }
 }
 
-// Controls Auto-hide
-function wakeControls() {
-  if (!controls) return;
-  controls.classList.remove('autohide');
-  clearTimeout(controlsTimeout);
-  if (!video.paused) {
-    controlsTimeout = setTimeout(() => {
-      controls.classList.add('autohide');
-    }, 3200);
-  }
-}
-
-// Volume & Mute
-function initAudio() {
-  try {
-    const savedVol = localStorage.getItem('vnl_cinema_volume');
-    const savedMuted = localStorage.getItem('vnl_cinema_muted');
-    if (savedVol !== null) {
-      video.volume = parseFloat(savedVol);
-      if (volumeSlider) volumeSlider.value = savedVol;
-    }
-    if (savedMuted === 'true') {
-      video.muted = true;
-    }
-  } catch {}
-  updateVolumeUI();
-}
-
-function updateVolumeUI() {
-  if (video.muted || video.volume === 0) {
-    if (btnMute) btnMute.textContent = '🔇';
-  } else if (video.volume < 0.5) {
-    if (btnMute) btnMute.textContent = '🔉';
-  } else {
-    if (btnMute) btnMute.textContent = '🔊';
-  }
-}
-
-// Attach Video Events
-video.addEventListener('play', () => { updatePlayButton(); wakeControls(); });
-video.addEventListener('pause', () => { updatePlayButton(); wakeControls(); });
-video.addEventListener('timeupdate', () => { updateTimeline(); });
-video.addEventListener('loadedmetadata', () => { updateTimeline(); play(); });
+// Attach Video Event Listeners
+if (join) join.onclick = play;
+video.addEventListener('loadedmetadata', play);
 video.addEventListener('error', () => {
   status.textContent = 'Không tải được video. Admin cần kiểm tra URL mapping /media và định dạng tệp.';
 });
 
-// Guard against non-staff seeking on native events
+// Guard non-staff seeking on native controls
 video.addEventListener('seeking', () => {
-  if (!isStaff && current && !isSeekingLocally) {
+  if (!isStaff && current && !isSyncingFromServer) {
     const target = getSyncedPosition();
     if (Math.abs(video.currentTime - target) > 1.5) {
+      isSyncingFromServer = true;
       video.currentTime = target;
       showToast('⚠️ Chỉ đội ngũ Staff mới có quyền tua video.');
+      setTimeout(() => { isSyncingFromServer = false; }, 400);
     }
   }
 });
 
-// User Interactions
-if (join) join.onclick = play;
-if (btnPlay) {
-  btnPlay.onclick = () => {
-    if (video.paused) play();
-    else video.pause();
-  };
-}
-
-if (btnSeekBack) {
-  btnSeekBack.onclick = () => handleStaffSeek(video.currentTime - 10);
-}
-if (btnSeekFwd) {
-  btnSeekFwd.onclick = () => handleStaffSeek(video.currentTime + 10);
-}
-
-if (volumeSlider) {
-  volumeSlider.oninput = () => {
-    video.volume = parseFloat(volumeSlider.value);
-    video.muted = video.volume === 0;
-    updateVolumeUI();
-    try {
-      localStorage.setItem('vnl_cinema_volume', video.volume);
-      localStorage.setItem('vnl_cinema_muted', video.muted);
-    } catch {}
-  };
-}
-
-if (btnMute) {
-  btnMute.onclick = () => {
-    video.muted = !video.muted;
-    if (!video.muted && video.volume === 0) {
-      video.volume = 0.5;
-      if (volumeSlider) volumeSlider.value = 0.5;
+// Allow staff seeking on native controls
+video.addEventListener('seeked', () => {
+  if (isStaff && current && !isSyncingFromServer) {
+    const target = video.currentTime;
+    const synced = getSyncedPosition();
+    if (Math.abs(target - synced) > 2) {
+      sendStaffSeek(target);
     }
-    updateVolumeUI();
-    try {
-      localStorage.setItem('vnl_cinema_muted', video.muted);
-    } catch {}
-  };
-}
+  }
+});
 
+// Double click video to toggle theater
+video.addEventListener('dblclick', () => toggleTheater());
+
+// Button listeners
 if (btnZoom) btnZoom.onclick = () => toggleTheater();
 if (theaterExit) theaterExit.onclick = () => toggleTheater(false);
 
-// Timeline Scrubbing for Staff
-if (timelineContainer) {
-  timelineContainer.onclick = e => {
-    if (!isStaff) {
-      showToast('⚠️ Chỉ đội ngũ Staff mới có quyền tua video.');
-      return;
-    }
-    const rect = timelineContainer.getBoundingClientRect();
-    const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    if (Number.isFinite(video.duration) && video.duration > 0) {
-      handleStaffSeek(pos * video.duration);
-    }
-  };
+if (btnSeekBack) {
+  btnSeekBack.onclick = () => sendStaffSeek(video.currentTime - 10);
 }
-
-// Mouse movement inside video container
-if (videoContainer) {
-  videoContainer.addEventListener('mousemove', wakeControls);
-  videoContainer.addEventListener('mouseenter', wakeControls);
-  videoContainer.addEventListener('touchstart', wakeControls, { passive: true });
-  videoContainer.addEventListener('dblclick', e => {
-    if (e.target !== controls && !controls.contains(e.target)) {
-      toggleTheater();
-    }
-  });
+if (btnSeekFwd) {
+  btnSeekFwd.onclick = () => sendStaffSeek(video.currentTime + 10);
 }
 
 // Keyboard shortcuts
 window.addEventListener('keydown', e => {
   if (e.target && ['input', 'textarea'].includes(e.target.tagName?.toLowerCase())) return;
-  if (e.code === 'Space') {
-    e.preventDefault();
-    if (video.paused) play();
-    else video.pause();
-  } else if (e.code === 'KeyF') {
+  if (e.code === 'KeyF') {
     e.preventDefault();
     toggleTheater();
   } else if (e.code === 'Escape') {
-    if (screen.classList.contains('theater-mode')) {
+    if (document.body.classList.contains('theater-mode')) {
       e.preventDefault();
       toggleTheater(false);
     }
   } else if (e.code === 'ArrowLeft' && isStaff) {
     e.preventDefault();
-    handleStaffSeek(video.currentTime - 10);
+    sendStaffSeek(video.currentTime - 10);
   } else if (e.code === 'ArrowRight' && isStaff) {
     e.preventDefault();
-    handleStaffSeek(video.currentTime + 10);
-  } else if (e.code === 'KeyM') {
-    e.preventDefault();
-    if (btnMute) btnMute.click();
+    sendStaffSeek(video.currentTime + 10);
   }
 });
 
-// Periodic Polling
+// Periodic State Polling
 async function poll() {
   try {
     const sent = performance.now();
     const data = await request(`/guilds/${guildId}/state`);
-    
-    // Update Role & Permissions
+
+    // Staff Permissions
     isStaff = Boolean(data.canSeek);
     if (btnSeekBack) btnSeekBack.hidden = !isStaff;
     if (btnSeekFwd) btnSeekFwd.hidden = !isStaff;
-    if (timelineContainer) {
-      if (isStaff) timelineContainer.classList.remove('disabled');
-      else timelineContainer.classList.add('disabled');
-    }
     if (roleBadge) {
       if (isStaff) {
         roleBadge.className = 'badge-sync staff';
         roleBadge.textContent = '👑 STAFF CONTROL';
-        roleBadge.title = 'Bạn có quyền tua phim cho toàn bộ phòng chiếu';
+        roleBadge.title = 'Bạn có quyền tua video cho toàn bộ phòng chiếu';
       } else {
         roleBadge.className = 'badge-sync';
         roleBadge.textContent = '🔴 ĐỒNG BỘ TRỰC TIẾP';
-        roleBadge.title = 'Phim được phát đồng bộ. Chỉ Staff mới có quyền tua.';
+        roleBadge.title = 'Phim phát đồng bộ. Chỉ Staff mới có quyền tua.';
       }
     }
 
     document.querySelector('#title').textContent = data.title;
     document.querySelector('#description').textContent = data.description;
-    
+
     const upcoming = document.querySelector('#upcoming');
     upcoming.replaceChildren();
     for (const show of data.upcoming) {
@@ -386,7 +259,9 @@ async function poll() {
         video.src = current.mediaPath;
         video.load();
       } else {
+        isSyncingFromServer = true;
         sync();
+        setTimeout(() => { isSyncingFromServer = false; }, 300);
         if (video.paused && !video.ended && joinOverlay) {
           joinOverlay.hidden = false;
         }
@@ -402,7 +277,6 @@ async function poll() {
 
 // SDK Initialization
 async function start() {
-  initAudio();
   try {
     const { clientId } = await request('/config');
     if (!clientId) throw new Error('Chủ bot chưa cấu hình Client ID.');

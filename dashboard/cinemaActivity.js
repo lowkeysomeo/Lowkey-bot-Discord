@@ -35,6 +35,9 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
       const target = path.join(__dirname, '../activity/dist', file);
       if (!fs.existsSync(target)) fail(503, 'Activity chưa được build.');
       res.removeHeader('X-Frame-Options');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; media-src 'self' https: blob:; connect-src 'self' https:; img-src 'self' https: data:; frame-ancestors https://discord.com https://*.discord.com https://*.discordsays.com; base-uri 'none'; form-action 'none'");
       res.writeHead(200, { 'Content-Type': `${mime}; charset=utf-8` });
       res.end(fs.readFileSync(target));
