@@ -123,7 +123,6 @@ function seekShow(guildId, targetSeconds, now = Date.now()) {
   const newEndsAt = new Date(Date.parse(newStartsAt) + oldDuration).toISOString();
   show.startsAt = newStartsAt;
   show.endsAt = newEndsAt;
-  config.revision += 1;
   setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
   return { position: target, startsAt: newStartsAt, endsAt: newEndsAt };
 }

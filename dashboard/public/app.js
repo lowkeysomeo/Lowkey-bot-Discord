@@ -654,6 +654,12 @@ function bindCinema() {
         if (shows && !shows.querySelector('.cinema-show')) {
           shows.innerHTML = '<p class="subtle" id="cinema-no-shows">Chưa có suất chiếu nào được lên lịch. Hãy bấm nút bên dưới để thêm suất chiếu mới.</p>';
         }
+        // Tự động lưu cấu hình ngay khi xóa suất chiếu để thay đổi có hiệu lực tức thì
+        if (typeof form.requestSubmit === 'function') {
+          form.requestSubmit();
+        } else {
+          form.dispatchEvent(new Event('submit', { cancelable: true }));
+        }
       }
     }
   };
@@ -675,21 +681,47 @@ function bindCinema() {
         endsAt: Number.isFinite(eTime) ? new Date(eTime).toISOString() : item.endsAt,
       };
     });
-    const payload = { title: data.get('title'), description: data.get('description'), enabled: data.has('enabled'), audience: data.get('audience'),
+    const payload = {
+      title: data.get('title') || 'VNL Cinema',
+      description: data.get('description') || '',
+      enabled: data.has('enabled'),
+      audience: data.get('audience') || 'members',
       categoryId: data.get('categoryId') || null,
-      voiceChannelId: data.get('voiceChannelId') || null, notifyChannelId: data.get('notifyChannelId') || null,
-      notifyRoleId: data.get('notifyRoleId') || null, notifyMessage: (data.get('notifyMessage') || '').trim(),
+      voiceChannelId: data.get('voiceChannelId') || null,
+      notifyChannelId: data.get('notifyChannelId') || null,
+      notifyRoleId: data.get('notifyRoleId') || null,
+      notifyMessage: (data.get('notifyMessage') || '').trim(),
       preReminderHours: Number(data.get('preReminderHours') !== null ? data.get('preReminderHours') : 3),
       remind10m: data.has('remind10m'),
-      roleIds: data.getAll('roleIds'), rightsConfirmed: data.has('rightsConfirmed'), revision: state.data.cinema.config.revision,
-      shows: showsPayload };
-    button.disabled = true;
+      roleIds: data.getAll('roleIds'),
+      rightsConfirmed: data.has('rightsConfirmed') || (showsPayload.length === 0),
+      revision: state.data.cinema?.config?.revision ?? 0,
+      shows: showsPayload,
+    };
+    if (button) button.disabled = true;
     try {
-      const result = await api(`/api/guilds/${id}/premium/cinema`, payload);
+      let result;
+      try {
+        result = await api(`/api/guilds/${id}/premium/cinema`, payload);
+      } catch (firstErr) {
+        if (firstErr.message && (firstErr.message.includes('admin khác sửa') || firstErr.message.includes('tải lại'))) {
+          const fresh = await api(`/api/guilds/${id}/premium/cinema`);
+          payload.revision = fresh.config.revision;
+          state.data.cinema.config = fresh.config;
+          result = await api(`/api/guilds/${id}/premium/cinema`, payload);
+        } else {
+          throw firstErr;
+        }
+      }
       if (state.requestId !== requestId) return;
-      state.data.cinema.config = result.config; state.dirty = false;
-      notify('Đã lưu Cinema. Lịch và quyền xem sẽ cập nhật trong vài giây.'); render();
-    } catch (error) { notify(error.message); button.disabled = false; }
+      state.data.cinema.config = result.config;
+      state.dirty = false;
+      notify('Đã lưu Cinema. Lịch và quyền xem sẽ cập nhật trong vài giây.');
+      render();
+    } catch (error) {
+      notify(error.message);
+      if (button) button.disabled = false;
+    }
   };
 }
 
