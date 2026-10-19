@@ -687,7 +687,7 @@ h3 {
   color: #d1d5e6;
 }
 
-input[type="text"], input[type="number"], select, textarea {
+input[type="text"], input[type="number"], .cinema-card input:not([type="checkbox"]), select, textarea {
   width: 100%;
   padding: 11px 14px;
   color: var(--text);
@@ -1339,3 +1339,5 @@ td:last-child {
     padding: 30px 24px;
   }
 }
+/* Premium Cinema */
+.cinema-card{padding:24px;margin-bottom:20px}.cinema-check{display:flex;align-items:center;gap:10px;margin:14px 0}.cinema-check input{width:auto;flex:none}.cinema-roles{display:flex;flex-wrap:wrap;gap:0 22px}.cinema-show{border:1px solid #504761;border-radius:12px;padding:18px;margin:18px 0}.cinema-show legend{padding:0 8px}.cinema-card label>input:not([type=checkbox]),.cinema-card label>select,.cinema-card label>textarea{display:block;width:100%;margin-top:8px}

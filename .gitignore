@@ -67,6 +67,7 @@ vcpkg_installed/
 Testing/
 .cache/
 node_modules
+activity/dist/
 .env
 *.env
 data/*.sqlite*

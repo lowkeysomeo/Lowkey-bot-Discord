@@ -35,6 +35,7 @@ const loadFiles = [...listJs('utils'), ...listJs('commands')];
 const syntaxFiles = [
   ...fs.readdirSync(root).filter(name => /\.(?:js|cjs)$/.test(name)).map(name => path.join(root, name)),
   ...listJs('dashboard'), ...listJs('tests'), ...loadFiles,
+  ...listJs('activity/src'), path.join(root, 'activity/build.cjs'),
 ];
 // 1. Cú pháp
 for (const file of syntaxFiles) {

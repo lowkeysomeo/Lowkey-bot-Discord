@@ -36,6 +36,7 @@ const icons = {
 };
 
 const labels = {
+  cinema: 'VNL Cinema',
   overview: 'Tổng quan',
   leaderboard: 'Bảng xếp hạng',
   receptionist: 'Lễ tân chào mừng',
@@ -82,6 +83,7 @@ function render() {
     return;
   }
   const displayNavGroups = [...navGroups];
+  if (state.guild && state.data) displayNavGroups.push({ title: 'PREMIUM', items: ['cinema'] });
   if (state.session?.isOwner) {
     displayNavGroups.push({
       title: '👑 CHỦ SỞ HỮU BOT',
@@ -91,6 +93,7 @@ function render() {
   app.innerHTML = `${state.session.preview ? '<div class="preview-banner">BẢN XEM TRƯỚC · Dữ liệu minh họa, không thay đổi server Discord thật.</div>' : ''}<div class="layout"><aside class="sidebar"><div class="side-top">${brand}<div class="picker-wrap"><p class="nav-label">MÁY CHỦ QUẢN LÝ</p><select class="server-picker" id="server-select" aria-label="Chọn server"><option value="">Chọn server…</option>${state.guilds.filter(guild => guild.installed).map(guild => `<option value="${h(guild.id)}" ${state.guild?.id === guild.id ? 'selected' : ''}>${h(guild.name)}</option>`).join('')}</select></div></div><div class="side-nav-scroll">${displayNavGroups.map(group => `<div class="nav-section"><p class="nav-label">${group.title}</p><nav class="nav">${group.items.map(key => `<button data-page="${key}" class="${state.page === key && (state.guild || key === 'questshop') ? 'active' : ''}" ${!state.guild && key !== 'questshop' ? 'disabled' : ''}><span class="icon">${icons[key] || ''}</span><span class="label-text">${labels[key]}</span></button>`).join('')}</nav></div>`).join('')}</div><div class="side-bottom"><div class="bot-status"><span class="dot"></span><span>${state.session.ready ? 'Bot đã kết nối' : 'Bot đang kết nối'}</span></div><p class="subtle">VietNam Legacy Dashboard • v1.0</p></div></aside><div class="workspace"><header class="topbar"><div class="crumb"><span class="crumb-root">Dashboard</span><span class="crumb-sep">/</span><b class="crumb-current">${state.page === 'questshop' ? 'Auto Quest Shop (Chủ Bot)' : state.guild ? h(labels[state.page] || state.page) : 'Chọn server'}</b></div><div class="account"><span class="avatar">${h(state.session.user.name.slice(0, 1))}</span><span class="account-name">${h(state.session.user.name)}</span><button class="text-button" id="logout">Đăng xuất</button></div></header><main class="content" id="content">${state.loading ? '<div class="loading" role="status">Đang tải dữ liệu…</div>' : content()}</main></div></div>`;
   document.querySelector('#server-select').onchange = event => selectGuild(event.target.value);
   document.querySelectorAll('[data-page]').forEach(button => { button.onclick = () => changePage(button.dataset.page); });
+  bindCinema();
   document.querySelectorAll('[data-guild]').forEach(button => { button.onclick = () => selectGuild(button.dataset.guild); });
   document.querySelector('#logout').onclick = async () => { if (!canLeave()) return; try { await api('/api/logout', {}); location.href = '/'; } catch (error) { notify(error.message); } };
   const rrForm=document.querySelector('#rr-form');
@@ -225,6 +228,7 @@ function render() {
 }
 function heading(eyebrow, title, subtitle, right = '') { return `<div class="heading"><div><span class="eyebrow">${eyebrow}</span><h1>${title}</h1><p>${subtitle}</p></div>${right}</div>`; }
 function content() {
+  if (state.page === 'cinema' && state.guild && state.data) return cinemaPage();
   if (state.page === 'questshop') {
     if (!state.session?.isOwner) return '<div class="card empty"><h2>Quyền truy cập bị từ chối</h2><p>Chỉ người sở hữu bot mới có quyền truy cập trang này.</p></div>';
     return questShopPage();
@@ -405,7 +409,18 @@ async function selectGuild(id) {
 }
 async function changePage(page) {
   if (!canLeave()) return;
-  state.dirty = false; state.page = page; state.loading = ['giveaway','reactionroles','ticket','questshop'].includes(page); render();
+  state.dirty = false; state.page = page; state.loading = ['cinema','giveaway','reactionroles','ticket','questshop'].includes(page); render();
+  if (page === 'cinema') {
+    if (!state.guild || !state.data) { state.loading = false; return render(); }
+    const id = state.guild.id, requestId = ++state.requestId;
+    delete state.data.cinema;
+    try {
+      const data = await api(`/api/guilds/${id}/premium/cinema`);
+      if (state.requestId === requestId) state.data.cinema = data;
+    } catch (error) { notify(error.message); }
+    finally { if (state.requestId === requestId) { state.loading = false; render(); } }
+    return;
+  }
   if (page === 'questshop') {
     if (!state.session?.isOwner) {
       state.loading = false;
@@ -509,12 +524,77 @@ async function boot() {
   try {
     state.session = await api('/api/session');
     if (state.session.user) state.guilds = await api('/api/guilds');
+    const cinemaLink = /^\/premium\/guilds\/(\d+)\/cinema$/.exec(location.pathname);
+    if (cinemaLink && state.session.user) {
+      await selectGuild(cinemaLink[1]);
+      if (state.data) await changePage('cinema');
+      return;
+    }
     render();
   } catch (error) {
     app.innerHTML = `<main class="initial"><div class="error">${h(error.message)}<br><a class="secondary" href="/">Thử lại</a></div></main>`;
   }
 }
 boot();
+
+function cinemaLocalTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+function cinemaShowRow(show = {}) {
+  return `<fieldset class="cinema-show"><legend>Suất chiếu</legend><div class="form-grid">
+    <div class="field"><label>Tên phim<input data-show="title" maxlength="120" value="${h(show.title)}" required></label></div>
+    <div class="field"><label>URL video hợp pháp<input data-show="source" type="url" maxlength="2048" placeholder="https://kho-video.example/phim.mp4" value="${h(show.source)}" required></label></div>
+    <div class="field"><label>Bắt đầu<input data-show="startsAt" type="datetime-local" value="${h(cinemaLocalTime(show.startsAt))}" required></label></div>
+    <div class="field"><label>Kết thúc<input data-show="endsAt" type="datetime-local" value="${h(cinemaLocalTime(show.endsAt))}" required></label></div>
+    </div><button type="button" class="text-button" data-cinema-remove>Xóa suất chiếu</button></fieldset>`;
+}
+function cinemaPage() {
+  const data = state.data.cinema;
+  if (!data) return '<div class="card empty"><h2>Không tải được Cinema</h2><p>Quyền Administrator có thể đã thay đổi. Chọn lại server để kiểm tra.</p></div>';
+  const c = data.config;
+  return heading('PREMIUM · RẠP PHIM CỘNG ĐỒNG', 'VNL Cinema', 'Quản lý lịch chiếu và quyền tham gia. Chỉ Administrator của server được sửa cấu hình.') +
+    (!data.available || !data.mediaOrigin ? '<div class="error">Chủ bot cần hoàn tất cấu hình Activity và kho video trước khi thành viên có thể xem.</div>' : '') +
+    `<form id="cinema-form"><section class="card cinema-card"><h2>Không gian của bạn</h2><div class="form-grid">
+    <div class="field"><label>Tên rạp<input name="title" maxlength="80" value="${h(c.title)}" required></label></div>
+    <div class="field"><label>Giới thiệu<textarea name="description" maxlength="1500" rows="3">${h(c.description)}</textarea></label></div></div>
+    <label class="cinema-check"><input type="checkbox" name="enabled" ${c.enabled ? 'checked' : ''}> Mở Cinema cho server này</label></section>
+    <section class="card cinema-card"><h2>Ai được vào xem?</h2><p>Quyền xem không cấp quyền quản lý Premium.</p>
+    <div class="field"><label>Đối tượng<select name="audience">${[['members','Tất cả thành viên server'],['roles','Thành viên có role được chọn'],['admins','Chỉ Administrator']].map(([key, label]) => `<option value="${key}" ${c.audience === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div>
+    <div class="cinema-roles">${data.roles.map(role => `<label class="cinema-check"><input type="checkbox" name="roleIds" value="${h(role.id)}" ${c.roleIds.includes(role.id) ? 'checked' : ''}> ${h(role.name)}</label>`).join('')}</div><p class="subtle">Danh sách role chỉ áp dụng khi chọn “Thành viên có role”. Administrator vẫn được xem.</p></section>
+    <section class="card cinema-card"><h2>Lịch chiếu</h2><p>Giờ trên thiết bị: ${h(Intl.DateTimeFormat().resolvedOptions().timeZone)}. Mỗi suất tối đa 24 giờ; các suất không trùng giờ. Thành viên vào muộn tự đồng bộ theo lịch.</p><p>Kho video: <strong>${h(data.mediaOrigin || 'Chưa cấu hình')}</strong> · MP4 hoặc WebM.</p>
+    <div id="cinema-shows">${c.shows.map(cinemaShowRow).join('')}</div><button type="button" class="secondary" id="cinema-add">+ Thêm suất chiếu</button></section>
+    <section class="card cinema-card"><label class="cinema-check"><input name="rightsConfirmed" type="checkbox" ${c.rightsConfirmed ? 'checked' : ''}> Tôi có quyền trình chiếu các video này cho cộng đồng.</label>
+    <p class="subtle">Dùng video tự sở hữu hoặc được cấp phép. Không nhập liên kết Netflix, YouTube, trang xem phim hay nguồn có DRM.</p>
+    <button type="submit" class="primary" id="cinema-save">Lưu cấu hình Cinema</button><span id="cinema-save-status" role="status"></span></section></form>`;
+}
+function bindCinema() {
+  const form = document.querySelector('#cinema-form');
+  if (!form) return;
+  form.oninput = () => { state.dirty = true; document.querySelector('#cinema-save-status').textContent = ' Có thay đổi chưa lưu.'; };
+  document.querySelector('#cinema-add').onclick = () => {
+    const shows = document.querySelector('#cinema-shows');
+    if (shows.children.length >= 20) return notify('Tối đa 20 suất chiếu.');
+    shows.insertAdjacentHTML('beforeend', cinemaShowRow()); state.dirty = true;
+  };
+  form.onclick = event => { const button = event.target.closest('[data-cinema-remove]'); if (button) { button.closest('.cinema-show').remove(); state.dirty = true; } };
+  form.onsubmit = async event => {
+    event.preventDefault();
+    const id = state.guild.id, requestId = state.requestId, button = document.querySelector('#cinema-save');
+    const data = new FormData(form);
+    const payload = { title: data.get('title'), description: data.get('description'), enabled: data.has('enabled'), audience: data.get('audience'),
+      roleIds: data.getAll('roleIds'), rightsConfirmed: data.has('rightsConfirmed'), revision: state.data.cinema.config.revision,
+      shows: [...form.querySelectorAll('.cinema-show')].map(row => Object.fromEntries([...row.querySelectorAll('[data-show]')].map(input => [input.dataset.show, input.type === 'datetime-local' ? new Date(input.value).toISOString() : input.value]))) };
+    button.disabled = true;
+    try {
+      const result = await api(`/api/guilds/${id}/premium/cinema`, payload);
+      if (state.requestId !== requestId) return;
+      state.data.cinema.config = result.config; state.dirty = false;
+      notify('Đã lưu Cinema. Lịch và quyền xem sẽ cập nhật trong vài giây.'); render();
+    } catch (error) { notify(error.message); button.disabled = false; }
+  };
+}
 
 function giveawayPage() {
   const rows=state.data.giveaways;

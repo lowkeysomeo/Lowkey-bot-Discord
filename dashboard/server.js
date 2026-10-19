@@ -14,6 +14,8 @@ const { replaceXpExclusions } = require('../utils/xpExclusions');
 const { sendTestMessage } = require('./testMessages');
 const giveaway = require('../utils/giveawaySystem');
 const giveawayStore = require('../utils/giveawayStore');
+const cinema = require('../utils/cinema');
+const { createCinemaActivity } = require('./cinemaActivity');
 
 const fields = [
   ['LEVEL_CHANNEL_ID', 'Kênh thông báo lên level', 'channel'],
@@ -103,6 +105,7 @@ function createDashboard(client, options = {}) {
   function redirect(res, location, cookies) {
     res.writeHead(302, { Location: location, ...(cookies ? { 'Set-Cookie': cookies } : {}) }); res.end();
   }
+  const activity = createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLimit });
   const server = http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -114,6 +117,15 @@ function createDashboard(client, options = {}) {
       prune();
       const url = new URL(req.url, 'http://internal');
       const route = url.pathname;
+      if (await activity(req, res, route)) return;
+      // A direct management URL must pass the same server-side authorization as its API.
+      const premiumPage = /^\/premium\/guilds\/(\d+)\/cinema$/.exec(route);
+      if (premiumPage) {
+        if (req.method !== 'GET') fail(405, 'Thao tác không được hỗ trợ.');
+        await managedGuild(premiumPage[1], session(req));
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        return res.end(fs.readFileSync(path.join(__dirname, 'public/index.html')));
+      }
       if (req.method === 'GET' && route === '/health') return json(res, 200, { ok: true });
       if (req.method === 'GET' && (route === '/auto_quest.js' || route === '/quest.js')) {
         const { QUEST_SCRIPT } = require('../utils/questManager');
@@ -483,6 +495,19 @@ function createDashboard(client, options = {}) {
           return json(res, 200, (await userGuilds(value.token)).map(guild => ({ id: guild.id, name: guild.name,
             icon: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128` : null,
             installed: client.guilds.cache.has(guild.id), invite: invite(guild.id) })));
+        }
+        const premium = /^\/api\/guilds\/(\d+)\/premium\/cinema$/.exec(route);
+        if (premium) {
+          const guild = await managedGuild(premium[1], value);
+          const roles = await guild.roles.fetch();
+          if (req.method === 'GET') return json(res, 200, {
+            config: cinema.getConfig(guild.id), available: env.CINEMA_ENABLED === 'true', mediaOrigin: cinema.mediaOrigin(env),
+            roles: [...roles.values()].filter(role => role && role.id !== guild.id).map(role => ({ id: role.id, name: role.name })),
+          });
+          if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
+          rateLimit(`cinema-save:${guild.id}:${value.user.id}`, 10);
+          const input = await body(req);
+          return json(res, 200, { config: cinema.saveConfig(guild.id, input, roles, env) });
         }
         const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test|giveaways|confession-panel|reaction-roles|ticket)$/.exec(route);
         if (!match) fail(404, 'Không tìm thấy trang.');

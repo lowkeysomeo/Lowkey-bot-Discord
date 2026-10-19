@@ -4,6 +4,7 @@
   "description": "VietNam Legacy Discord Bot",
   "main": "index.js",
   "scripts": {
+    "build": "npm --prefix activity run build",
     "start": "node index.js",
     "test": "node check.js --tests",
     "check": "node check.js",

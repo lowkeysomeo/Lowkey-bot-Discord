@@ -1,0 +1,8 @@
+{
+  "name": "vnl-cinema-activity",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": { "build": "node build.cjs" },
+  "dependencies": { "@discord/embedded-app-sdk": "2.5.0" },
+  "devDependencies": { "esbuild": "0.28.2" }
+}

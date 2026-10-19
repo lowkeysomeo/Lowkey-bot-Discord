@@ -4,5 +4,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY . .
+RUN npm --prefix activity ci --include=dev && npm run build
 ENV NODE_ENV=production
 CMD ["node", "index.js"]

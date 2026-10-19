@@ -9,6 +9,10 @@ async function deployCommands(commands, restClient) {
     // Các lệnh hiện tại đều dùng dữ liệu và thành viên trong server.
     return { ...data, contexts: [0], integration_types: [0], dm_permission: false };
   });
+  if (process.env.CINEMA_ENABLED === 'true') body.push({
+    name: 'cinema', description: 'Mở rạp phim VNL Cinema', type: 4, handler: 2,
+    contexts: [0], integration_types: [0],
+  });
   await rest.put(Routes.applicationCommands(CLIENT_ID), { body });
   console.log(`[DEPLOY] Registered ${body.length} global commands for all servers.`);
   // Chỉ xóa bản lệnh riêng của server sau khi đăng ký lệnh chung thành công.

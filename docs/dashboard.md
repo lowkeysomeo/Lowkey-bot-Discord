@@ -6,6 +6,8 @@ Booster, role top tháng và xem bảng tổng XP. Cấu hình được áp dụ
 
 ## Các mục có thể chỉnh trên dashboard
 
+- **Premium → VNL Cinema**: tên rạp, giới thiệu, quyền tham gia theo thành viên/role/Administrator và lịch chiếu MP4/WebM từ kho video được duyệt. Trang/API quản lý kiểm tra quyền Administrator tại backend. Xem [cấu hình Cinema](cinema.md) trước khi bật Activity.
+
 - **Mốc level & Role**: thêm mốc Chat/Voice bất kỳ (tối đa 50 mốc), chọn giữ role cao nhất hoặc giữ tất cả role đã đạt.
 - **XP & Kênh bỏ qua**: bật/tắt XP Chat/Voice, đặt XP tối thiểu/tối đa, cooldown Chat, XP Voice, Booster và kênh/danh mục không tính XP.
 - **Thông báo lên cấp**: chọn kênh chung hoặc riêng cho Chat/Voice, kiểu thẻ ảnh/embed/văn bản, màu, tiêu đề, nội dung và việc nhắc tên thành viên.
