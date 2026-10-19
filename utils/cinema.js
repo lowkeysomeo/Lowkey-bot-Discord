@@ -139,6 +139,7 @@ async function viewerState(guild, userId, env, now = Date.now()) {
   const canSeek = isStaffMember(member);
   const show = config.shows.find(s => Date.parse(s.startsAt) <= now && now < Date.parse(s.endsAt));
   return { title: config.title, description: config.description, serverTime: now, canSeek,
+    shows: (config.shows || []).map(({ title, startsAt, endsAt }) => ({ title, startsAt, endsAt })),
     upcoming: config.shows.filter(s => Date.parse(s.startsAt) > now).map(({ title, startsAt, endsAt }) => ({ title, startsAt, endsAt })),
     show: show ? { title: show.title, startsAt: show.startsAt, endsAt: show.endsAt,
       mediaPath: '/.proxy/media' + new URL(sourceUrl(show.source, env)).pathname, position: (now - Date.parse(show.startsAt)) / 1000 } : null };

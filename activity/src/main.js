@@ -298,42 +298,50 @@ async function poll() {
       }
     };
 
-    let hasAnyShow = false;
+    const allShows = Array.isArray(data.shows) && data.shows.length > 0
+      ? data.shows
+      : [
+          ...(data.show ? [data.show] : []),
+          ...(Array.isArray(data.upcoming) ? data.upcoming : [])
+        ];
 
-    if (data.show) {
+    let hasAnyShow = false;
+    const nowMs = Date.now();
+
+    for (const item of allShows) {
       hasAnyShow = true;
       const row = document.createElement('li');
-      row.className = 'show-item live';
-
       const badge = document.createElement('span');
-      badge.className = 'badge-show badge-live';
-      badge.textContent = '🔴 Đang chiếu';
+      badge.className = 'badge-show';
+
+      const sStart = Date.parse(item.startsAt);
+      const sEnd = Date.parse(item.endsAt);
+      const isCurrent = data.show && item.title === data.show.title &&
+        (Math.abs(Date.parse(data.show.startsAt) - sStart) < 60000 || (Number.isFinite(sStart) && Number.isFinite(sEnd) && sStart <= nowMs && nowMs < sEnd));
+      const isUpcoming = Number.isFinite(sStart) && sStart > nowMs;
+
+      if (isCurrent) {
+        row.className = 'show-item live';
+        badge.className = 'badge-show badge-live';
+        badge.textContent = '🔴 Đang chiếu';
+      } else if (isUpcoming) {
+        row.className = 'show-item upcoming';
+        badge.className = 'badge-show badge-upcoming';
+        badge.textContent = '⏳ Sắp chiếu';
+      } else {
+        row.className = 'show-item past';
+        badge.className = 'badge-show';
+        badge.style.background = 'rgba(255, 255, 255, 0.12)';
+        badge.style.color = '#bbb';
+        badge.textContent = '🎬 Suất chiếu';
+      }
 
       const info = document.createElement('span');
       info.className = 'show-info';
-      info.textContent = `${data.show.title} (${formatTimeRange(data.show.startsAt, data.show.endsAt)})`;
+      info.textContent = `${item.title} (${formatTimeRange(item.startsAt, item.endsAt)})`;
 
       row.append(badge, info);
       upcoming.append(row);
-    }
-
-    if (Array.isArray(data.upcoming)) {
-      for (const show of data.upcoming) {
-        hasAnyShow = true;
-        const row = document.createElement('li');
-        row.className = 'show-item upcoming';
-
-        const badge = document.createElement('span');
-        badge.className = 'badge-show badge-upcoming';
-        badge.textContent = '⏳ Sắp chiếu';
-
-        const info = document.createElement('span');
-        info.className = 'show-info';
-        info.textContent = `${show.title} (${formatTimeRange(show.startsAt, show.endsAt)})`;
-
-        row.append(badge, info);
-        upcoming.append(row);
-      }
     }
 
     if (!hasAnyShow) {

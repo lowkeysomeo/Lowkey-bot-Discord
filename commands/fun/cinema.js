@@ -335,16 +335,8 @@ async function handleSelect(interaction) {
     duration = 2.5 * 3600 * 1000; // Mặc định 2.5 tiếng nếu lịch cũ không chuẩn
   }
 
-  // 2. Bảo toàn toàn bộ các suất chiếu đã đặt lịch (không ghi đè hay xóa các suất đã lên lịch)
-  const safeExistingShows = config.shows.map(s => {
-    const sStart = Date.parse(s.startsAt);
-    const sEnd = Date.parse(s.endsAt);
-    // Nếu có suất chiếu cũ đang diễn ra tại thời điểm này thì kết thúc nó tại 'now' để phát phim mới được chọn
-    if (sStart < now && sEnd > now) {
-      return { ...s, endsAt: new Date(now).toISOString() };
-    }
-    return { ...s };
-  }).filter(s => Date.parse(s.endsAt) > Date.parse(s.startsAt));
+  // 2. Bảo toàn toàn bộ các suất chiếu đã đặt lịch (tuyệt đối không cắt ngắn hay xóa các suất đã lên lịch)
+  const safeExistingShows = config.shows.map(s => ({ ...s }));
 
   // Kiểm tra không đè vào suất chiếu kế tiếp trong tương lai
   const futureShows = safeExistingShows
@@ -426,7 +418,7 @@ async function handleSelect(interaction) {
   const endUnix = Math.floor(finalEndsAt / 1000);
   const activityWebUrl = (process.env.DASHBOARD_URL || 'https://vietnamlegacy.up.railway.app').replace(/\/$/, '') + '/activity';
 
-  const upcomingList = config.shows.filter(s => Date.parse(s.startsAt) > now && s.title !== immediateShow.title).slice(0, 5);
+  const upcomingList = config.shows.filter(s => Date.parse(s.startsAt) > now && s.startsAt !== immediateShow.startsAt).slice(0, 5);
   let upcomingText = '';
   if (upcomingList.length) {
     upcomingText = '\n\n**📅 Lịch chiếu tiếp theo:**\n' + upcomingList.map(s => {
