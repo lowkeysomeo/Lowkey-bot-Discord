@@ -130,6 +130,15 @@ async function viewerState(guild, userId, env, now = Date.now()) {
       mediaPath: '/.proxy/media' + new URL(sourceUrl(show.source, env)).pathname, position: (now - Date.parse(show.startsAt)) / 1000 } : null };
 }
 
+function getLastAnnouncedShow(guildId) {
+  try {
+    const raw = getGuildSetting(guildId, 'CINEMA_LAST_ANNOUNCED');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 function getAnnouncedShows(guildId) {
   try {
     const raw = getGuildSetting(guildId, 'CINEMA_ANNOUNCED_SHOWS');
@@ -139,19 +148,76 @@ function getAnnouncedShows(guildId) {
   }
 }
 
-function isShowAnnounced(guildId, showKey) {
+function isShowAnnounced(guildId, showOrKey, now = Date.now()) {
+  const last = getLastAnnouncedShow(guildId);
+  if (last && typeof showOrKey === 'object' && showOrKey !== null) {
+    const show = showOrKey;
+    const sameTitle = last.title && show.title && last.title.trim().toLowerCase() === show.title.trim().toLowerCase();
+    const showStart = Date.parse(show.startsAt);
+    const showEnd = Date.parse(show.endsAt);
+    const lastStart = Date.parse(last.startsAt);
+    const lastEnd = Date.parse(last.endsAt);
+
+    if (sameTitle && Number.isFinite(showEnd) && Number.isFinite(lastEnd)) {
+      const isCurrentlyRunning = now >= (showStart - 60000) && now < showEnd;
+      const isWithinLastRuntime = now < lastEnd;
+      const startTimesClose = Math.abs(showStart - lastStart) < 30 * 60 * 1000;
+      if (isCurrentlyRunning && isWithinLastRuntime && startTimesClose) {
+        return true;
+      }
+    }
+  }
+
   const list = getAnnouncedShows(guildId);
-  return Array.isArray(list) && list.includes(showKey);
+  if (typeof showOrKey === 'string') {
+    return Array.isArray(list) && list.includes(showOrKey);
+  }
+  if (typeof showOrKey === 'object' && showOrKey !== null) {
+    const rawKey = `${showOrKey.startsAt}_${showOrKey.title}`;
+    const minute = Math.floor(Date.parse(showOrKey.startsAt) / 60000);
+    const minuteKey = `${minute}_${showOrKey.title}`;
+    return Array.isArray(list) && (list.includes(rawKey) || list.includes(minuteKey));
+  }
+  return false;
 }
 
-function markShowAnnounced(guildId, showKey) {
+function markShowAnnounced(guildId, showOrKey) {
   try {
-    const list = getAnnouncedShows(guildId);
-    if (!list.includes(showKey)) {
-      list.push(showKey);
-      const trimmed = list.slice(-100);
-      setGuildSetting(guildId, 'CINEMA_ANNOUNCED_SHOWS', JSON.stringify(trimmed));
+    const now = Date.now();
+    let title = '';
+    let startsAt = '';
+    let endsAt = '';
+    let rawKey = '';
+    let minuteKey = '';
+
+    if (typeof showOrKey === 'object' && showOrKey !== null) {
+      title = showOrKey.title || '';
+      startsAt = showOrKey.startsAt || new Date(now).toISOString();
+      endsAt = showOrKey.endsAt || new Date(now + 2.5 * 3600000).toISOString();
+      rawKey = `${startsAt}_${title}`;
+      const minute = Math.floor(Date.parse(startsAt) / 60000);
+      minuteKey = `${minute}_${title}`;
+    } else if (typeof showOrKey === 'string') {
+      rawKey = showOrKey;
+      title = showOrKey;
+      startsAt = new Date(now).toISOString();
+      endsAt = new Date(now + 2.5 * 3600000).toISOString();
     }
+
+    if (title) {
+      setGuildSetting(guildId, 'CINEMA_LAST_ANNOUNCED', JSON.stringify({
+        title,
+        startsAt,
+        endsAt,
+        announcedAt: now,
+      }));
+    }
+
+    const list = getAnnouncedShows(guildId);
+    if (rawKey && !list.includes(rawKey)) list.push(rawKey);
+    if (minuteKey && !list.includes(minuteKey)) list.push(minuteKey);
+    const trimmed = list.slice(-100);
+    setGuildSetting(guildId, 'CINEMA_ANNOUNCED_SHOWS', JSON.stringify(trimmed));
   } catch (err) {
     console.error('[CINEMA] Lỗi lưu danh sách suất chiếu đã thông báo:', err.message);
   }

@@ -28,14 +28,27 @@ function checkShows(client) {
         const showKey = `${currentShow.startsAt}_${currentShow.title}`;
         let session = activeCinemaSessions.get(guild.id);
 
-        if (session && session.showKey !== showKey) {
-          // Suất cũ vừa hết, suất mới bắt đầu ngay
+        const isSameShow = session && (
+          session.showKey === showKey ||
+          (session.show && session.show.title === currentShow.title &&
+           Math.abs(Date.parse(session.show.startsAt) - Date.parse(currentShow.startsAt)) < 30 * 60 * 1000)
+        );
+
+        if (session && !isSameShow) {
+          // Suất cũ vừa hết, một bộ phim khác bắt đầu ngay
           cleanupSession(guild, false);
           session = null;
         }
 
+        if (session && isSameShow) {
+          // Cập nhật lại show mới nhất nhưng bảo toàn trạng thái đã thông báo và connection
+          session.show = currentShow;
+          session.showKey = showKey;
+        }
+
         if (!session) {
-          session = { showKey, show: currentShow, joined: false, announced: false };
+          const isAnnounced = cinema.isShowAnnounced(guild.id, currentShow, now);
+          session = { showKey, show: currentShow, joined: false, announced: isAnnounced };
           activeCinemaSessions.set(guild.id, session);
         }
 
@@ -61,12 +74,12 @@ function checkShows(client) {
         }
 
         // 2. Tự động gửi thông báo & thẻ mời xem phim (Chỉ gửi 1 lần duy nhất / 1 suất chiếu)
-        const alreadyAnnounced = session.announced || cinema.isShowAnnounced(guild.id, showKey);
+        const alreadyAnnounced = session.announced || cinema.isShowAnnounced(guild.id, currentShow, now);
         if (alreadyAnnounced) {
           session.announced = true;
         } else {
           session.announced = true;
-          cinema.markShowAnnounced(guild.id, showKey);
+          cinema.markShowAnnounced(guild.id, currentShow);
 
           (async () => {
             try {
