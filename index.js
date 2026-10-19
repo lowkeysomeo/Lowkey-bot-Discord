@@ -363,6 +363,18 @@ client.on(
       return;
     }
 
+    if (interaction.isStringSelectMenu?.() && interaction.customId?.startsWith('cinema:')) {
+      try { await require('./commands/fun/cinema').handleSelect(interaction); }
+      catch (error) {
+        console.error('[CINEMA INTERACTION ERROR]', error);
+        const payload = { content: 'Có lỗi xảy ra khi phát phim. Vui lòng thử lại sau.', flags: 64 };
+        if (interaction.deferred) await interaction.editReply(payload).catch(() => {});
+        else if (interaction.replied) await interaction.followUp(payload).catch(() => {});
+        else await interaction.reply(payload).catch(() => {});
+      }
+      return;
+    }
+
     if (interaction.isAutocomplete?.()) {
       const command = client.commands.get(interaction.commandName);
       if (command?.autocomplete) {
