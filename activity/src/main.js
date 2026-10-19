@@ -23,6 +23,10 @@ let isSyncingFromServer = false;
 let hasStarted = false;
 let hasEndedNotified = false;
 let toastTimeout = null;
+let discordSdk = null;
+let currentClientId = null;
+let consecutivePollErrors = 0;
+let isReauthing = false;
 
 function showToast(msg) {
   if (!toast) return;
@@ -91,8 +95,22 @@ async function request(route, options = {}) {
       ...options.headers,
     },
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Không tải được Cinema.');
+  let data = null;
+  const rawText = await response.text();
+  if (rawText && rawText.trim()) {
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = { error: `Máy chủ phản hồi trạng thái ${response.status}` };
+    }
+  } else {
+    data = {};
+  }
+  if (!response.ok) {
+    const err = new Error(data.error || `Lỗi kết nối (${response.status})`);
+    err.status = response.status;
+    throw err;
+  }
   return data;
 }
 
@@ -314,6 +332,7 @@ async function poll() {
     const sent = performance.now();
     const query = channelId ? `?channelId=${encodeURIComponent(channelId)}` : '';
     const data = await request(`/guilds/${guildId}/state${query}`);
+    consecutivePollErrors = 0;
 
     // Staff Permissions
     isStaff = Boolean(data.canSeek);
@@ -448,10 +467,62 @@ async function poll() {
       }
     }
   } catch (error) {
-    clearVideo();
-    status.textContent = `${error.message} Nếu phiên hết hạn, hãy đóng và mở lại Activity.`;
+    consecutivePollErrors++;
+    console.warn(`[CINEMA POLL] Thử lại (${consecutivePollErrors}):`, error.message);
+
+    // NẾU VIDEO ĐANG PHÁT HOẶC ĐÃ NẠP: TUYỆT ĐỐI KHÔNG GỠ / KHÔNG DỪNG VIDEO!
+    // Giữ nguyên nguồn video để người dùng xem liên tục, không bị ngắt quãng khi mạng lag hoặc server khởi động lại.
+    if (!current || !hasStarted) {
+      if (consecutivePollErrors >= 3) {
+        status.textContent = `${error.message}. Đang thử kết nối lại...`;
+      }
+    } else {
+      if (consecutivePollErrors >= 5) {
+        showToast('⚠️ Mất kết nối tới máy chủ. Đang tự động kết nối lại...');
+      }
+    }
+
+    // Nếu lỗi 401 (phiên hết hạn), tự động gia hạn phiên trong nền mà không làm gián đoạn phim
+    if (error.status === 401 && discordSdk) {
+      tryReauth().catch(() => {});
+    }
   } finally {
     if (!stopped) setTimeout(poll, 4000);
+  }
+}
+
+// Background session re-authentication
+async function tryReauth() {
+  if (isReauthing || !discordSdk || !currentClientId) return;
+  isReauthing = true;
+  try {
+    const state = (window.crypto && typeof window.crypto.randomUUID === 'function')
+      ? window.crypto.randomUUID()
+      : Math.random().toString(36).slice(2);
+    const { code } = await discordSdk.commands.authorize({
+      client_id: currentClientId,
+      response_type: 'code',
+      state,
+      prompt: 'none',
+      scope: ['identify'],
+    });
+    const auth = await request('/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    if (auth.session) {
+      session = auth.session;
+      if (auth.access_token) {
+        try { await discordSdk.commands.authenticate({ access_token: auth.access_token }); } catch {}
+      }
+      consecutivePollErrors = 0;
+      console.log('[CINEMA] Đã tự động gia hạn phiên thành công.');
+    }
+  } catch (err) {
+    console.warn('[CINEMA] Không thể tự động gia hạn phiên:', err.message);
+  } finally {
+    isReauthing = false;
   }
 }
 
@@ -460,15 +531,16 @@ async function start() {
   try {
     const { clientId } = await request('/config');
     if (!clientId) throw new Error('Chủ bot chưa cấu hình Client ID.');
-    const sdk = new DiscordSDK(clientId);
-    await sdk.ready();
-    if (!sdk.guildId) throw new Error('Hãy mở Cinema trong một server Discord.');
-    guildId = sdk.guildId;
-    channelId = sdk.channelId || null;
+    currentClientId = clientId;
+    discordSdk = new DiscordSDK(clientId);
+    await discordSdk.ready();
+    if (!discordSdk.guildId) throw new Error('Hãy mở Cinema trong một server Discord.');
+    guildId = discordSdk.guildId;
+    channelId = discordSdk.channelId || null;
     const state = (window.crypto && typeof window.crypto.randomUUID === 'function')
       ? window.crypto.randomUUID()
       : Math.random().toString(36).slice(2);
-    const { code } = await sdk.commands.authorize({
+    const { code } = await discordSdk.commands.authorize({
       client_id: clientId,
       response_type: 'code',
       state,
@@ -482,7 +554,7 @@ async function start() {
     });
     if (auth.access_token) {
       try {
-        await sdk.commands.authenticate({ access_token: auth.access_token });
+        await discordSdk.commands.authenticate({ access_token: auth.access_token });
       } catch {}
     }
     session = auth.session;
