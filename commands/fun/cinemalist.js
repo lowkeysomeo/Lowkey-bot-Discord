@@ -55,7 +55,7 @@ function buildKhoEmbed(movies, page, totalPages, upcomingShows) {
   if (pageMovies.length === 0) {
     embed.addFields({
       name: 'Kho phim trống',
-      value: 'Chưa có phim nào trong kho. Quản trị viên có thể thêm phim trên Web Dashboard.',
+      value: 'Chưa có phim nào trong kho. Vui lòng quay lại sau.',
     });
     return embed;
   }

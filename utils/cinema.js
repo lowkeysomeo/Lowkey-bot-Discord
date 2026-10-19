@@ -1,6 +1,6 @@
 const { movieDetails } = require('./movieCatalog');
 const { getGuildSetting, setGuildSetting } = require('./guildSettings');
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, Routes } = require('discord.js');
 
 function fail(status, message) { throw Object.assign(new Error(message), { status }); }
 function mediaOrigin(env) {
@@ -427,6 +427,31 @@ async function ensureCinemaChannelPermissions(guild, config) {
   }
 }
 
+function formatCinemaVoiceStatus(title) {
+  if (!title) return '';
+  const trimmed = String(title).trim();
+  if (trimmed.startsWith('🎬')) {
+    return trimmed.slice(0, 500);
+  }
+  return `🎬 Đang chiếu: ${trimmed}`.slice(0, 500);
+}
+
+async function updateVoiceChannelStatus(client, channelId, status = '') {
+  if (!client?.rest || typeof client.rest.put !== 'function' || !channelId) return false;
+  try {
+    const route = typeof Routes?.channelVoiceStatus === 'function'
+      ? Routes.channelVoiceStatus(channelId)
+      : `/channels/${channelId}/voice-status`;
+    const cleanStatus = status ? String(status).slice(0, 500) : '';
+    await client.rest.put(route, { body: { status: cleanStatus } });
+    console.log(`[CINEMA] 📢 Đã cập nhật trạng thái phòng thoại #${channelId}: "${cleanStatus || '(trống)'}"`);
+    return true;
+  } catch (err) {
+    console.warn(`[CINEMA] Không thể cập nhật trạng thái phòng ${channelId}:`, err.message);
+    return false;
+  }
+}
+
 function getCinemaRoomChannel(guild, config, roomNumber = 1) {
   if (!guild || !guild.channels?.cache) return null;
   const targetRoom = Number(roomNumber) || 1;
@@ -723,4 +748,6 @@ module.exports = {
   getCinemaRoomChannel,
   ensureCinemaChannelPermissions,
   getActiveShow,
+  formatCinemaVoiceStatus,
+  updateVoiceChannelStatus,
 };

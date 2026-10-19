@@ -106,6 +106,21 @@ async function executeCinemaRoom(interaction, requestedRoom = null) {
       }
     }
 
+    if (playChannel) {
+      try {
+        const scheduler = require('../../utils/cinemaScheduler');
+        const sess = scheduler.activeSessions?.get(`${interaction.guildId}_room${roomNumber}`) || scheduler.activeSessions?.get(interaction.guildId);
+        if (!sess || sess.voiceStatusSet !== currentShow.title) {
+          if (sess) {
+            sess.voiceStatusSet = currentShow.title;
+            sess.voiceChannelId = playChannel.id;
+          }
+          const statusText = cinema.formatCinemaVoiceStatus(currentShow.title);
+          cinema.updateVoiceChannelStatus(interaction.client, playChannel.id, statusText).catch(() => {});
+        }
+      } catch {}
+    }
+
     const startUnix = Math.floor(Date.parse(currentShow.startsAt) / 1000);
     const endUnix = Math.floor(Date.parse(currentShow.endsAt) / 1000);
     let inviteUrl = null;
@@ -471,6 +486,9 @@ async function handleSelect(interaction) {
   }
 
   try {
+    const statusText = cinema.formatCinemaVoiceStatus(immediateShow.title);
+    cinema.updateVoiceChannelStatus(interaction.client, targetChannel.id, statusText).catch(() => {});
+
     const scheduler = require('../../utils/cinemaScheduler');
     if (scheduler.activeSessions) {
       const sess = {
@@ -480,6 +498,8 @@ async function handleSelect(interaction) {
         joined: Boolean(voiceConn),
         announced: true,
         connection: voiceConn || null,
+        voiceChannelId: targetChannel.id,
+        voiceStatusSet: immediateShow.title,
       };
       scheduler.activeSessions.set(`${interaction.guildId}_room${roomNumber}`, sess);
       if (roomNumber === 1 || !scheduler.activeSessions.has(interaction.guildId)) {

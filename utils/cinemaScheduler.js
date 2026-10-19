@@ -171,6 +171,13 @@ function checkShows(client) {
 
           const voiceChannel = cinema.getCinemaRoomChannel(guild, config, roomNum);
 
+          if (voiceChannel && session.voiceStatusSet !== currentShow.title) {
+            session.voiceStatusSet = currentShow.title;
+            session.voiceChannelId = voiceChannel.id;
+            const statusText = cinema.formatCinemaVoiceStatus(currentShow.title);
+            cinema.updateVoiceChannelStatus(client, voiceChannel.id, statusText).catch(() => {});
+          }
+
           if (voiceChannel && voiceChannel.isVoiceBased() && !session.joined) {
             try {
               const { joinVoiceChannel, getVoiceConnection } = require('@discordjs/voice');
@@ -317,6 +324,20 @@ function cleanupSession(guild, notifyEnd = false, roomNumber = null) {
   for (const rId of roomsToClean) {
     const sessionKey = `${guild.id}_room${rId}`;
     const session = activeCinemaSessions.get(sessionKey) || (rId === 1 ? activeCinemaSessions.get(guild.id) : null);
+
+    // Xóa tiêu đề/trạng thái phòng chiếu nếu có hoặc khi kết thúc phim
+    try {
+      const config = cinema.getConfig(guild.id);
+      const targetChannel = (session && session.voiceChannelId)
+        ? guild.channels?.cache?.get(session.voiceChannelId)
+        : cinema.getCinemaRoomChannel(guild, config, rId);
+      if (targetChannel && targetChannel.id && (session?.voiceStatusSet || notifyEnd)) {
+        cinema.updateVoiceChannelStatus(guild.client, targetChannel.id, '').catch(() => {});
+      }
+    } catch (err) {
+      console.warn(`[CINEMA SCHEDULER] Không thể xóa trạng thái voice channel phòng ${rId}:`, err.message);
+    }
+
     if (!session) continue;
 
     try {

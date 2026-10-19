@@ -58,11 +58,19 @@ async function testScheduler() {
     voiceAdapterCreator: {},
   };
 
+  const voiceStatusCalls = [];
   const client = {
     isReady: () => true,
     user: { id: 'bot-123' },
     guilds: { cache: new Collection([[guildId, guild]]) },
+    rest: {
+      put: async (route, data) => {
+        voiceStatusCalls.push({ route, body: data?.body });
+        return {};
+      },
+    },
   };
+  guild.client = client;
 
   // Mock @discordjs/voice in node require cache for testing joinVoiceChannel
   const voiceMock = {
@@ -334,6 +342,13 @@ async function testScheduler() {
   // Verify viewerState returns no current show
   const vState = await cinema.viewerState(guild, 'user-1', process.env);
   assert.equal(vState.show, null, 'viewerState must return show: null after show has ended');
+
+  // Verify voice status was updated to movie title and cleared on cleanup
+  const setCall = voiceStatusCalls.find(c => c.body?.status?.includes('Phim Sắp Hết Giờ'));
+  assert.ok(setCall, 'Voice status must be set with movie title when movie starts');
+  assert.equal(setCall.body.status, '🎬 Đang chiếu: Phim Sắp Hết Giờ');
+  const lastCall = voiceStatusCalls[voiceStatusCalls.length - 1];
+  assert.equal(lastCall?.body?.status, '', 'Voice status must be cleared when movie finishes');
 
   console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave, /cinema preserves scheduled shows, category restriction, active show direct watch routing, 2 advance reminders, deleting ongoing show cleanup, & movie end bot-out and button disabling.');
 }
