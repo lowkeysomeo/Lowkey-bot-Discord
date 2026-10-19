@@ -554,12 +554,20 @@ function cinemaShowRow(show = {}) {
   if (!endsAt || Date.parse(endsAt) <= Date.parse(startsAt)) {
     endsAt = new Date(Date.parse(startsAt) + 2.5 * 3600000).toISOString();
   }
-  return `<fieldset class="cinema-show"><legend>Suất chiếu</legend><div class="form-grid">
+  const now = Date.now();
+  const sTime = Date.parse(startsAt);
+  const eTime = Date.parse(endsAt);
+  const isRunning = Number.isFinite(sTime) && Number.isFinite(eTime) && sTime <= now && now < eTime;
+  const statusBadge = isRunning
+    ? ' <span class="badge" style="background:rgba(229,9,20,0.25);border:1px solid #e50914;color:#ff6b6b;font-size:11px;font-weight:700;padding:2px 8px;margin-left:8px;border-radius:999px;">🔴 Đang chiếu trực tiếp</span>'
+    : (Number.isFinite(sTime) && sTime > now ? ' <span class="badge" style="background:rgba(255,214,90,0.15);border:1px solid rgba(255,214,90,0.5);color:#ffd65a;font-size:11px;padding:2px 8px;margin-left:8px;border-radius:999px;">⏳ Sắp chiếu</span>' : '');
+
+  return `<fieldset class="cinema-show"><legend>Suất chiếu${statusBadge}</legend><div class="form-grid">
     <div class="field"><label>Tên phim<input data-show="title" maxlength="120" value="${h(show.title || '')}" required></label></div>
     <div class="field"><label>URL video hợp pháp<input data-show="source" type="url" maxlength="2048" placeholder="https://kho-video.example/phim.mp4" value="${h(show.source || '')}" required></label></div>
     <div class="field"><label>Bắt đầu<input data-show="startsAt" type="datetime-local" value="${h(cinemaLocalTime(startsAt))}" required></label></div>
     <div class="field"><label>Kết thúc<input data-show="endsAt" type="datetime-local" value="${h(cinemaLocalTime(endsAt))}" required></label></div>
-    </div><button type="button" class="text-button" data-cinema-remove>Xóa suất chiếu</button></fieldset>`;
+    </div><button type="button" class="text-button" data-cinema-remove style="color:#ff6b6b;">Xóa suất chiếu${isRunning ? ' (Dừng chiếu)' : ''}</button></fieldset>`;
 }
 function cinemaPage() {
   const data = state.data.cinema;
@@ -569,6 +577,7 @@ function cinemaPage() {
   const categories = channels.filter(ch => ch.type === 4);
   const voiceChannels = channels.filter(ch => ch.type === 2 || ch.type === 13);
   const textChannels = channels.filter(ch => ch.type === 0 || ch.type === 5);
+  const showsList = (c.shows && c.shows.length) ? c.shows.map(cinemaShowRow).join('') : '<p class="subtle" id="cinema-no-shows">Chưa có suất chiếu nào được lên lịch. Hãy bấm nút bên dưới để thêm suất chiếu mới.</p>';
   return heading('PREMIUM · RẠP PHIM CỘNG ĐỒNG', 'VNL Cinema', 'Quản lý lịch chiếu và quyền tham gia. Chỉ Administrator của server được sửa cấu hình.') +
     (!data.available || !data.mediaOrigin ? '<div class="error">Chủ bot cần hoàn tất cấu hình Activity và kho video trước khi thành viên có thể xem.</div>' : '') +
     `<form id="cinema-form"><section class="card cinema-card"><h2>Không gian của bạn</h2><div class="form-grid">
@@ -602,7 +611,7 @@ function cinemaPage() {
     <div class="field"><label>Đối tượng<select name="audience">${[['members','Tất cả thành viên server'],['roles','Thành viên có role được chọn'],['admins','Chỉ Administrator']].map(([key, label]) => `<option value="${key}" ${c.audience === key ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div>
     <div class="cinema-roles">${data.roles.map(role => `<label class="cinema-check"><input type="checkbox" name="roleIds" value="${h(role.id)}" ${c.roleIds.includes(role.id) ? 'checked' : ''}> ${h(role.name)}</label>`).join('')}</div><p class="subtle">Danh sách role chỉ áp dụng khi chọn “Thành viên có role”. Administrator vẫn được xem.</p></section>
     <section class="card cinema-card"><h2>Lịch chiếu</h2><p>Giờ trên thiết bị: ${h(Intl.DateTimeFormat().resolvedOptions().timeZone)}. Mỗi suất tối đa 24 giờ; các suất không trùng giờ. Thành viên vào muộn tự đồng bộ theo lịch.</p><p>Kho video: <strong>${h(data.mediaOrigin || 'Chưa cấu hình')}</strong> · MP4 hoặc WebM.</p>
-    <div id="cinema-shows">${c.shows.map(cinemaShowRow).join('')}</div><button type="button" class="secondary" id="cinema-add">+ Thêm suất chiếu</button></section>
+    <div id="cinema-shows">${showsList}</div><button type="button" class="secondary" id="cinema-add">+ Thêm suất chiếu</button></section>
     <section class="card cinema-card"><label class="cinema-check"><input name="rightsConfirmed" type="checkbox" ${c.rightsConfirmed ? 'checked' : ''}> Tôi có quyền trình chiếu các video này cho cộng đồng.</label>
     <p class="subtle">Dùng video tự sở hữu hoặc được cấp phép. Không nhập liên kết Netflix, YouTube, trang xem phim hay nguồn có DRM.</p>
     <button type="submit" class="primary" id="cinema-save">Lưu cấu hình Cinema</button><span id="cinema-save-status" role="status"></span></section></form>`;
@@ -629,10 +638,25 @@ function bindCinema() {
   });
   document.querySelector('#cinema-add').onclick = () => {
     const shows = document.querySelector('#cinema-shows');
-    if (shows.children.length >= 20) return notify('Tối đa 20 suất chiếu.');
+    const noShows = document.querySelector('#cinema-no-shows');
+    if (noShows) noShows.remove();
+    if (shows.querySelectorAll('.cinema-show').length >= 20) return notify('Tối đa 20 suất chiếu.');
     shows.insertAdjacentHTML('beforeend', cinemaShowRow()); state.dirty = true;
   };
-  form.onclick = event => { const button = event.target.closest('[data-cinema-remove]'); if (button) { button.closest('.cinema-show').remove(); state.dirty = true; } };
+  form.onclick = event => {
+    const button = event.target.closest('[data-cinema-remove]');
+    if (button) {
+      const fieldset = button.closest('.cinema-show');
+      if (fieldset) {
+        fieldset.remove();
+        state.dirty = true;
+        const shows = document.querySelector('#cinema-shows');
+        if (shows && !shows.querySelector('.cinema-show')) {
+          shows.innerHTML = '<p class="subtle" id="cinema-no-shows">Chưa có suất chiếu nào được lên lịch. Hãy bấm nút bên dưới để thêm suất chiếu mới.</p>';
+        }
+      }
+    }
+  };
   form.onsubmit = async event => {
     event.preventDefault();
     const id = state.guild.id, requestId = state.requestId, button = document.querySelector('#cinema-save');

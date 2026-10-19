@@ -507,9 +507,17 @@ function createDashboard(client, options = {}) {
             channels: [...allChannels.values()].filter(Boolean).map(c => ({ id: c.id, name: c.name, type: c.type, parentId: c.parentId || null })),
           });
           if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
-          rateLimit(`cinema-save:${guild.id}:${value.user.id}`, 10);
           const input = await body(req);
-          return json(res, 200, { config: cinema.saveConfig(guild.id, input, roles, env, allChannels) });
+          const savedConfig = cinema.saveConfig(guild.id, input, roles, env, allChannels);
+          try {
+            const scheduler = require('../utils/cinemaScheduler');
+            if (typeof scheduler.checkShows === 'function') {
+              scheduler.checkShows(client);
+            }
+          } catch (e) {
+            console.warn('[DASHBOARD] Lỗi cập nhật cinema scheduler:', e.message);
+          }
+          return json(res, 200, { config: savedConfig });
         }
         const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test|giveaways|confession-panel|reaction-roles|ticket)$/.exec(route);
         if (!match) fail(404, 'Không tìm thấy trang.');

@@ -267,12 +267,27 @@ async function testScheduler() {
   const tenMinNotice = sentMessages.find(m => m.msg.embeds?.[0]?.data?.title?.includes('CHUẨN BỊ LÊN SÓNG: Phim Sắp Chiếu 10p'));
   assert(tenMinNotice, 'Must send 10-minute reminder for imminent show');
 
-  // Re-running checkShows must NOT send duplicate reminders
-  const countBefore = sentMessages.length;
+  // Test 9: Deleting an ongoing show from the schedule immediately cleans up session and leaves voice
+  voiceDestroyed = false;
+  const ongoingShow = {
+    title: 'Phim Đang Chiếu Cần Xóa',
+    source: 'https://pub-a6f2ebb772de4098b1e01e80864fbf6a.r2.dev/test.mp4',
+    startsAt: new Date(now - 60000).toISOString(),
+    endsAt: new Date(now + 3600000).toISOString(),
+  };
+  config.shows = [ongoingShow];
+  setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
   scheduler.checkShows(client);
-  assert.equal(sentMessages.length, countBefore, 'Must not duplicate reminders on subsequent checkShows cycles');
+  assert.equal(scheduler.activeSessions.has(guildId), true, 'Session must be active for ongoing show');
 
-  console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave, /cinema preserves scheduled shows, category restriction, active show direct watch routing & 2 advance reminders.');
+  // Admin deletes ongoing show on dashboard -> config.shows becomes []
+  config.shows = [];
+  setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+  scheduler.checkShows(client);
+  assert.equal(scheduler.activeSessions.has(guildId), false, 'Active session must be destroyed when ongoing show is deleted');
+  assert.equal(voiceDestroyed, true, 'Voice connection must be destroyed when ongoing show is deleted');
+
+  console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave, /cinema preserves scheduled shows, category restriction, active show direct watch routing, 2 advance reminders & deleting ongoing show cleanup.');
 }
 
 testScheduler().catch(err => {

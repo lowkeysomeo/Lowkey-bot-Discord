@@ -58,6 +58,9 @@ async function main() {
   assert.equal(cinema.validate({ ...sample(), notifyRoleId: 'here' }, roles, env).notifyRoleId, 'here');
   assert.throws(() => cinema.validate({ ...sample(), notifyRoleId: '999999' }, roles, env), /Role thông báo/);
   assert.equal(cinema.validate({ ...sample(), notifyMessage: 'Thông báo: {phim}' }, roles, env).notifyMessage, 'Thông báo: {phim}');
+  // Test deleting all shows / ongoing shows while Cinema remains enabled
+  assert.deepEqual(cinema.validate({ ...sample(), shows: [] }, roles, env).shows, []);
+  assert.equal(cinema.validate({ ...sample(), shows: [] }, roles, env).enabled, true);
 
   const mockGuild = {
     channels: {
