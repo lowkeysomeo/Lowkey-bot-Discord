@@ -284,14 +284,62 @@ async function poll() {
 
     const upcoming = document.querySelector('#upcoming');
     upcoming.replaceChildren();
-    for (const show of data.upcoming) {
+
+    const formatTimeRange = (startsAt, endsAt) => {
+      try {
+        const s = new Date(startsAt);
+        const e = new Date(endsAt);
+        const sTime = s.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        const sDate = s.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+        const eTime = e.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+        return `${sTime} – ${eTime} · ${sDate}`;
+      } catch {
+        return `${new Date(startsAt).toLocaleString('vi-VN')}`;
+      }
+    };
+
+    let hasAnyShow = false;
+
+    if (data.show) {
+      hasAnyShow = true;
       const row = document.createElement('li');
-      row.textContent = `${show.title} · ${new Date(show.startsAt).toLocaleString('vi-VN')}`;
+      row.className = 'show-item live';
+
+      const badge = document.createElement('span');
+      badge.className = 'badge-show badge-live';
+      badge.textContent = '🔴 Đang chiếu';
+
+      const info = document.createElement('span');
+      info.className = 'show-info';
+      info.textContent = `${data.show.title} (${formatTimeRange(data.show.startsAt, data.show.endsAt)})`;
+
+      row.append(badge, info);
       upcoming.append(row);
     }
-    if (!data.upcoming.length) {
+
+    if (Array.isArray(data.upcoming)) {
+      for (const show of data.upcoming) {
+        hasAnyShow = true;
+        const row = document.createElement('li');
+        row.className = 'show-item upcoming';
+
+        const badge = document.createElement('span');
+        badge.className = 'badge-show badge-upcoming';
+        badge.textContent = '⏳ Sắp chiếu';
+
+        const info = document.createElement('span');
+        info.className = 'show-info';
+        info.textContent = `${show.title} (${formatTimeRange(show.startsAt, show.endsAt)})`;
+
+        row.append(badge, info);
+        upcoming.append(row);
+      }
+    }
+
+    if (!hasAnyShow) {
       const row = document.createElement('li');
-      row.textContent = 'Chưa có suất chiếu tiếp theo.';
+      row.className = 'show-empty';
+      row.textContent = 'Chưa có suất chiếu nào trong lịch.';
       upcoming.append(row);
     }
 

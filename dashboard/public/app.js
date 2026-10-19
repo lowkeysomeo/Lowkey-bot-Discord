@@ -540,14 +540,25 @@ boot();
 function cinemaLocalTime(value) {
   if (!value) return '';
   const date = new Date(value);
+  if (isNaN(date.getTime())) return '';
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 function cinemaShowRow(show = {}) {
+  let startsAt = show.startsAt;
+  let endsAt = show.endsAt;
+  if (!startsAt) {
+    const now = new Date();
+    now.setMinutes(Math.ceil(now.getMinutes() / 15) * 15, 0, 0);
+    startsAt = now.toISOString();
+  }
+  if (!endsAt || Date.parse(endsAt) <= Date.parse(startsAt)) {
+    endsAt = new Date(Date.parse(startsAt) + 2.5 * 3600000).toISOString();
+  }
   return `<fieldset class="cinema-show"><legend>Suất chiếu</legend><div class="form-grid">
-    <div class="field"><label>Tên phim<input data-show="title" maxlength="120" value="${h(show.title)}" required></label></div>
-    <div class="field"><label>URL video hợp pháp<input data-show="source" type="url" maxlength="2048" placeholder="https://kho-video.example/phim.mp4" value="${h(show.source)}" required></label></div>
-    <div class="field"><label>Bắt đầu<input data-show="startsAt" type="datetime-local" value="${h(cinemaLocalTime(show.startsAt))}" required></label></div>
-    <div class="field"><label>Kết thúc<input data-show="endsAt" type="datetime-local" value="${h(cinemaLocalTime(show.endsAt))}" required></label></div>
+    <div class="field"><label>Tên phim<input data-show="title" maxlength="120" value="${h(show.title || '')}" required></label></div>
+    <div class="field"><label>URL video hợp pháp<input data-show="source" type="url" maxlength="2048" placeholder="https://kho-video.example/phim.mp4" value="${h(show.source || '')}" required></label></div>
+    <div class="field"><label>Bắt đầu<input data-show="startsAt" type="datetime-local" value="${h(cinemaLocalTime(startsAt))}" required></label></div>
+    <div class="field"><label>Kết thúc<input data-show="endsAt" type="datetime-local" value="${h(cinemaLocalTime(endsAt))}" required></label></div>
     </div><button type="button" class="text-button" data-cinema-remove>Xóa suất chiếu</button></fieldset>`;
 }
 function cinemaPage() {
@@ -600,6 +611,22 @@ function bindCinema() {
   const form = document.querySelector('#cinema-form');
   if (!form) return;
   form.oninput = () => { state.dirty = true; document.querySelector('#cinema-save-status').textContent = ' Có thay đổi chưa lưu.'; };
+  form.addEventListener('change', event => {
+    if (event.target && event.target.matches('[data-show="startsAt"]')) {
+      const fieldset = event.target.closest('.cinema-show');
+      if (fieldset) {
+        const endInput = fieldset.querySelector('[data-show="endsAt"]');
+        if (event.target.value && endInput) {
+          const sDate = new Date(event.target.value);
+          const eDate = endInput.value ? new Date(endInput.value) : null;
+          if (!eDate || isNaN(eDate.getTime()) || eDate <= sDate) {
+            const newEnd = new Date(sDate.getTime() + 2.5 * 3600000);
+            endInput.value = cinemaLocalTime(newEnd.toISOString());
+          }
+        }
+      }
+    }
+  });
   document.querySelector('#cinema-add').onclick = () => {
     const shows = document.querySelector('#cinema-shows');
     if (shows.children.length >= 20) return notify('Tối đa 20 suất chiếu.');
@@ -610,6 +637,20 @@ function bindCinema() {
     event.preventDefault();
     const id = state.guild.id, requestId = state.requestId, button = document.querySelector('#cinema-save');
     const data = new FormData(form);
+    const showsPayload = [...form.querySelectorAll('.cinema-show')].map(row => {
+      const item = Object.fromEntries([...row.querySelectorAll('[data-show]')].map(input => [input.dataset.show, input.value]));
+      const sTime = Date.parse(item.startsAt);
+      let eTime = Date.parse(item.endsAt);
+      if (Number.isFinite(sTime) && (!Number.isFinite(eTime) || eTime <= sTime)) {
+        eTime = sTime + 2.5 * 3600000;
+      }
+      return {
+        title: item.title,
+        source: item.source,
+        startsAt: Number.isFinite(sTime) ? new Date(sTime).toISOString() : item.startsAt,
+        endsAt: Number.isFinite(eTime) ? new Date(eTime).toISOString() : item.endsAt,
+      };
+    });
     const payload = { title: data.get('title'), description: data.get('description'), enabled: data.has('enabled'), audience: data.get('audience'),
       categoryId: data.get('categoryId') || null,
       voiceChannelId: data.get('voiceChannelId') || null, notifyChannelId: data.get('notifyChannelId') || null,
@@ -617,7 +658,7 @@ function bindCinema() {
       preReminderHours: Number(data.get('preReminderHours') !== null ? data.get('preReminderHours') : 3),
       remind10m: data.has('remind10m'),
       roleIds: data.getAll('roleIds'), rightsConfirmed: data.has('rightsConfirmed'), revision: state.data.cinema.config.revision,
-      shows: [...form.querySelectorAll('.cinema-show')].map(row => Object.fromEntries([...row.querySelectorAll('[data-show]')].map(input => [input.dataset.show, input.type === 'datetime-local' ? new Date(input.value).toISOString() : input.value]))) };
+      shows: showsPayload };
     button.disabled = true;
     try {
       const result = await api(`/api/guilds/${id}/premium/cinema`, payload);

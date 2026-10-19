@@ -61,9 +61,13 @@ function validate(input, roles, env, channels) {
   if (!Array.isArray(input.shows) || input.shows.length > 20) fail(400, 'Tối đa 20 suất chiếu.');
   const shows = input.shows.map(show => {
     if (!show || typeof show !== 'object') fail(400, 'Suất chiếu không hợp lệ.');
-    const start = Date.parse(show.startsAt), end = Date.parse(show.endsAt);
-    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 24 * 3600000 ||
-        !/Z$|[+-]\d\d:\d\d$/.test(show.startsAt) || !/Z$|[+-]\d\d:\d\d$/.test(show.endsAt)) fail(400, 'Lịch chiếu cần múi giờ, giờ kết thúc sau giờ bắt đầu và dài tối đa 24 giờ.');
+    const start = Date.parse(show.startsAt);
+    let end = Date.parse(show.endsAt);
+    if (!Number.isFinite(start)) fail(400, 'Giờ bắt đầu không hợp lệ.');
+    if (!Number.isFinite(end) || end <= start) {
+      end = start + 2.5 * 3600000;
+    }
+    if (end - start > 24 * 3600000) fail(400, 'Lịch chiếu dài tối đa 24 giờ.');
     return { title: text(show.title, 120, true), source: sourceUrl(text(show.source, 2048, true), env), startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString() };
   }).sort((a, b) => a.startsAt.localeCompare(b.startsAt));
   for (let i = 1; i < shows.length; i++) if (shows[i].startsAt < shows[i - 1].endsAt) fail(400, 'Các suất chiếu không được trùng giờ.');

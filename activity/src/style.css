@@ -336,19 +336,51 @@ ul#upcoming {
   padding: 0;
   margin: 0;
   list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 ul#upcoming li {
-  padding: 14px 16px;
+  padding: 12px 16px;
   border-bottom: 1px solid rgba(229, 9, 20, 0.18);
   color: var(--text-secondary);
   font-size: 14px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
-ul#upcoming li:before {
+ul#upcoming li.show-empty:before {
   content: "🎬";
   font-size: 14px;
+}
+ul#upcoming li.live {
+  background: rgba(229, 9, 20, 0.15);
+  border: 1px solid rgba(229, 9, 20, 0.45);
+  border-radius: 10px;
+  color: #fff;
+}
+.badge-show {
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.badge-live {
+  background: rgba(229, 9, 20, 0.35);
+  border: 1px solid rgba(255, 107, 107, 0.7);
+  color: #ff6b6b;
+  box-shadow: 0 0 10px rgba(229, 9, 20, 0.4);
+}
+.badge-upcoming {
+  background: rgba(255, 214, 90, 0.15);
+  border: 1px solid rgba(255, 214, 90, 0.5);
+  color: var(--vnl-gold);
+}
+.show-info {
+  flex: 1;
+  line-height: 1.4;
 }
 .note {
   color: var(--text-muted);

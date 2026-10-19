@@ -130,6 +130,16 @@ async function execute(interaction) {
 
     const voiceTag = targetChannel ? `<#${targetChannel.id}>` : 'phòng chiếu phim';
 
+    const futureShows = config.shows.filter(s => Date.parse(s.startsAt) > now).slice(0, 5);
+    let upcomingText = '';
+    if (futureShows.length) {
+      upcomingText = '\n\n**📅 Lịch chiếu tiếp theo:**\n' + futureShows.map(s => {
+        const uStart = Math.floor(Date.parse(s.startsAt) / 1000);
+        const uEnd = Math.floor(Date.parse(s.endsAt) / 1000);
+        return `• **${s.title}** — <t:${uStart}:t> - <t:${uEnd}:t> (<t:${uStart}:R>)`;
+      }).join('\n');
+    }
+
     const embed = new EmbedBuilder()
       .setColor(0xE50914)
       .setTitle(`🎬 VNL CINEMA · ĐANG CHIẾU: ${currentShow.title}`)
@@ -137,7 +147,8 @@ async function execute(interaction) {
         `Bộ phim **${currentShow.title}** đang được chiếu trực tiếp tại **${voiceTag}**!\n\n` +
         `⏰ **Suất chiếu:** <t:${startUnix}:t> - <t:${endUnix}:t> (<t:${startUnix}:R>)\n` +
         `⏱️ **Tiến trình:** Đang chiếu ở phút thứ **${elapsedMins}** / **${totalMins}**\n\n` +
-        `🍿 Bấm nút **[Vào xem phim ngay]** bên dưới để mở màn hình xem phim đồng bộ cùng mọi người!`
+        `🍿 Bấm nút **[Vào xem phim ngay]** bên dưới để mở màn hình xem phim đồng bộ cùng mọi người!` +
+        upcomingText
       )
       .setFooter({ text: 'VNL Cinema • Đồng bộ thời gian thực' })
       .setTimestamp();
@@ -209,10 +220,20 @@ async function execute(interaction) {
 
   const row = new ActionRowBuilder().addComponents(selectMenu);
 
+  const futureShows = config.shows.filter(s => Date.parse(s.startsAt) > now).slice(0, 5);
+  let upcomingDesc = '';
+  if (futureShows.length) {
+    upcomingDesc = '\n\n**📅 Lịch chiếu đã lên lịch:**\n' + futureShows.map(s => {
+      const uStart = Math.floor(Date.parse(s.startsAt) / 1000);
+      const uEnd = Math.floor(Date.parse(s.endsAt) / 1000);
+      return `• **${s.title}** — <t:${uStart}:t> - <t:${uEnd}:t> (<t:${uStart}:R>)`;
+    }).join('\n');
+  }
+
   const embed = new EmbedBuilder()
     .setColor(0xE50914)
     .setTitle('🎬 VNL CINEMA · CHỌN PHIM PHÁT NGAY')
-    .setDescription(`Chọn một bộ phim từ danh sách bên dưới để bắt đầu chiếu ngay lập tức tại **<#${targetChannel.id}>**!\n\n🍿 **Đồng bộ thời gian thực:** Mọi người trong phòng thoại sẽ xem cùng một mốc thời gian.`)
+    .setDescription(`Chọn một bộ phim từ danh sách bên dưới để bắt đầu chiếu ngay lập tức tại **<#${targetChannel.id}>**!\n\n🍿 **Đồng bộ thời gian thực:** Mọi người trong phòng thoại sẽ xem cùng một mốc thời gian.${upcomingDesc}`)
     .setFooter({ text: 'VNL Cinema • Phát phim theo yêu cầu' })
     .setTimestamp();
 
@@ -405,6 +426,16 @@ async function handleSelect(interaction) {
   const endUnix = Math.floor(finalEndsAt / 1000);
   const activityWebUrl = (process.env.DASHBOARD_URL || 'https://vietnamlegacy.up.railway.app').replace(/\/$/, '') + '/activity';
 
+  const upcomingList = config.shows.filter(s => Date.parse(s.startsAt) > now && s.title !== immediateShow.title).slice(0, 5);
+  let upcomingText = '';
+  if (upcomingList.length) {
+    upcomingText = '\n\n**📅 Lịch chiếu tiếp theo:**\n' + upcomingList.map(s => {
+      const uStart = Math.floor(Date.parse(s.startsAt) / 1000);
+      const uEnd = Math.floor(Date.parse(s.endsAt) / 1000);
+      return `• **${s.title}** — <t:${uStart}:t> - <t:${uEnd}:t> (<t:${uStart}:R>)`;
+    }).join('\n');
+  }
+
   const playingEmbed = new EmbedBuilder()
     .setColor(0xE50914)
     .setTitle(`🎬 ĐANG PHÁT PHIM: ${immediateShow.title}`)
@@ -413,7 +444,8 @@ async function handleSelect(interaction) {
       `⏰ **Thời gian:** <t:${startUnix}:t> - <t:${endUnix}:t> (Kết thúc <t:${endUnix}:R>)\n\n` +
       `👇 **Cách xem:**\n` +
       `1. Bấm nút **"Vào rạp xem phim"** bên dưới (hoặc bấm biểu tượng **Tên Lửa / Hoạt Động (Activities)** ở thanh điều khiển cuộc gọi).\n` +
-      `2. Màn hình rạp chiếu sẽ tự động mở lên đồng bộ cho tất cả mọi người cùng xem!`
+      `2. Màn hình rạp chiếu sẽ tự động mở lên đồng bộ cho tất cả mọi người cùng xem!` +
+      upcomingText
     )
     .setFooter({ text: 'VNL Cinema • Phát phim đồng bộ thời gian thực' })
     .setTimestamp();
