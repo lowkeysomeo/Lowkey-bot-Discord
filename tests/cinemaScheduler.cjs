@@ -137,7 +137,47 @@ async function testScheduler() {
   assert.equal(voiceDestroyed, true, 'Voice connection must be destroyed on movie end');
   assert.equal(scheduler.activeSessions.has(guildId), false, 'Session must be removed from map');
 
-  console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave.');
+  // Test 5: /cinema command creates immediate show WITHOUT deleting future scheduled shows
+  const cinemaCommand = require('../commands/fun/cinema');
+  const futureStart = new Date(now + 18000000).toISOString(); // 5 hours in future
+  const futureEnd = new Date(now + 27000000).toISOString();
+  const scheduledShow = {
+    title: 'Thanh xuân 18x2 (Suất tối)',
+    source: 'https://pub-a6f2ebb772de4098b1e01e80864fbf6a.r2.dev/thanh-xuan-18-2.mp4',
+    startsAt: futureStart,
+    endsAt: futureEnd,
+  };
+  config.shows = [scheduledShow];
+  setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+
+  const selectInteraction = {
+    isStringSelectMenu: () => true,
+    customId: 'cinema:select_movie:u123',
+    user: { id: 'u123' },
+    guildId,
+    guild,
+    member: { voice: { channel: voiceChannel } },
+    values: ['0'],
+    deferUpdate: async () => {},
+    editReply: async () => {},
+    channelId: 'text-1',
+    client,
+  };
+
+  await cinemaCommand.handleSelect(selectInteraction);
+
+  const updatedConfig = cinema.getConfig(guildId);
+  assert.equal(updatedConfig.shows.length, 2, 'Must have 2 shows: the immediate show AND the future scheduled show');
+  const foundFuture = updatedConfig.shows.find(s => s.startsAt === futureStart);
+  assert(foundFuture, 'Future scheduled show must not be deleted');
+  assert.equal(foundFuture.startsAt, futureStart, 'Future scheduled show start time must remain unchanged');
+  assert.equal(foundFuture.endsAt, futureEnd, 'Future scheduled show end time must remain unchanged');
+
+  const foundImmediate = updatedConfig.shows.find(s => s.startsAt !== futureStart);
+  assert(foundImmediate, 'Immediate show must be created and added to schedule');
+  assert(Date.parse(foundImmediate.startsAt) <= Date.now(), 'Immediate show starts now');
+
+  console.log('PASS cinemaScheduler: 1 announcement per show, persistent restart dedup, custom role tag & message template, auto-join & leave, /cinema preserves scheduled shows.');
 }
 
 testScheduler().catch(err => {

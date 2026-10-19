@@ -150,21 +150,55 @@ async function handleSelect(interaction) {
     });
   }
 
-  // Cập nhật mốc thời gian của phim bắt đầu NGAY BÂY GIỜ từ giây 0
+  // 1. Xác định thời lượng dự kiến
   const now = Date.now();
   let duration = Date.parse(selectedShow.endsAt) - Date.parse(selectedShow.startsAt);
   if (!duration || duration <= 0 || duration > 24 * 3600000) {
     duration = 2.5 * 3600 * 1000; // Mặc định 2.5 tiếng nếu lịch cũ không chuẩn
   }
 
-  selectedShow.startsAt = new Date(now).toISOString();
-  selectedShow.endsAt = new Date(now + duration).toISOString();
+  // 2. Bảo toàn toàn bộ các suất chiếu đã đặt lịch (không ghi đè hay xóa các suất đã lên lịch)
+  const safeExistingShows = config.shows.map(s => {
+    const sStart = Date.parse(s.startsAt);
+    const sEnd = Date.parse(s.endsAt);
+    // Nếu có suất chiếu cũ đang diễn ra tại thời điểm này thì kết thúc nó tại 'now' để phát phim mới được chọn
+    if (sStart < now && sEnd > now) {
+      return { ...s, endsAt: new Date(now).toISOString() };
+    }
+    return { ...s };
+  }).filter(s => Date.parse(s.endsAt) > Date.parse(s.startsAt));
+
+  // Kiểm tra không đè vào suất chiếu kế tiếp trong tương lai
+  const futureShows = safeExistingShows
+    .filter(s => Date.parse(s.startsAt) > now)
+    .sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+
+  let finalEndsAt = now + duration;
+  if (futureShows.length > 0) {
+    const nextStart = Date.parse(futureShows[0].startsAt);
+    if (finalEndsAt > nextStart) {
+      // Giới hạn giờ kết thúc ngay trước khi suất chiếu đã đặt bắt đầu để không trùng lịch
+      finalEndsAt = Math.max(now + 60000, nextStart);
+    }
+  }
+
+  const immediateShow = {
+    title: selectedShow.title,
+    source: selectedShow.source,
+    startsAt: new Date(now).toISOString(),
+    endsAt: new Date(finalEndsAt).toISOString(),
+  };
+
+  // Ghép suất chiếu mới phát ngay cùng với các suất chiếu đã đặt sẵn (tối đa 20 suất)
+  config.shows = [...safeExistingShows, immediateShow]
+    .sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+    .slice(-20);
 
   // Lưu cấu hình vào database
   setGuildSetting(interaction.guildId, 'CINEMA_CONFIG', JSON.stringify(config));
 
   // Đánh dấu suất chiếu đã được thông báo để bộ scheduler không thông báo lặp
-  const showKey = `${selectedShow.startsAt}_${selectedShow.title}`;
+  const showKey = `${immediateShow.startsAt}_${immediateShow.title}`;
   cinema.markShowAnnounced(interaction.guildId, showKey);
 
   // 1. Bot tham gia kênh voice
@@ -177,7 +211,7 @@ async function handleSelect(interaction) {
       selfDeaf: true,
       selfMute: true,
     });
-    console.log(`[CINEMA] ✅ Bot đã vào kênh thoại #${targetChannel.name} để phát "${selectedShow.title}" (${interaction.guild.name})`);
+    console.log(`[CINEMA] ✅ Bot đã vào kênh thoại #${targetChannel.name} để phát "${immediateShow.title}" (${interaction.guild.name})`);
   } catch (err) {
     console.error('[CINEMA] Lỗi khi vào voice channel:', err.message);
   }
@@ -187,7 +221,7 @@ async function handleSelect(interaction) {
     if (scheduler.activeSessions) {
       scheduler.activeSessions.set(interaction.guildId, {
         showKey,
-        show: selectedShow,
+        show: immediateShow,
         joined: true,
         announced: true,
         connection: voiceConn || voice.getVoiceConnection(interaction.guildId),
@@ -202,7 +236,7 @@ async function handleSelect(interaction) {
       const invite = await targetChannel.createInvite({
         targetApplication: interaction.client.user.id,
         targetType: 2, // EmbeddedApplication
-        maxAge: Math.floor(duration / 1000),
+        maxAge: Math.floor((finalEndsAt - now) / 1000),
       });
       inviteUrl = invite.url;
     } catch (e) {
@@ -211,14 +245,14 @@ async function handleSelect(interaction) {
   }
 
   const startUnix = Math.floor(now / 1000);
-  const endUnix = Math.floor((now + duration) / 1000);
+  const endUnix = Math.floor(finalEndsAt / 1000);
   const activityWebUrl = (process.env.DASHBOARD_URL || 'https://vietnamlegacy.up.railway.app').replace(/\/$/, '') + '/activity';
 
   const playingEmbed = new EmbedBuilder()
     .setColor(0xE50914)
-    .setTitle(`🎬 ĐANG PHÁT PHIM: ${selectedShow.title}`)
+    .setTitle(`🎬 ĐANG PHÁT PHIM: ${immediateShow.title}`)
     .setDescription(
-      `🍿 Bộ phim **${selectedShow.title}** đã được khởi chiếu tại **<#${targetChannel.id}>** theo yêu cầu của <@${interaction.user.id}>!\n\n` +
+      `🍿 Bộ phim **${immediateShow.title}** đã được khởi chiếu tại **<#${targetChannel.id}>** theo yêu cầu của <@${interaction.user.id}>!\n\n` +
       `⏰ **Thời gian:** <t:${startUnix}:t> - <t:${endUnix}:t> (Kết thúc <t:${endUnix}:R>)\n\n` +
       `👇 **Cách xem:**\n` +
       `1. Bấm nút **"Vào rạp xem phim"** bên dưới (hoặc bấm biểu tượng **Tên Lửa / Hoạt Động (Activities)** ở thanh điều khiển cuộc gọi).\n` +
