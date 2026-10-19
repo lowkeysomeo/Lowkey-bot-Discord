@@ -8,20 +8,14 @@ const {
   ButtonStyle,
 } = require('discord.js');
 const cinema = require('../../utils/cinema');
+const { formatDuration } = require('../../utils/movieCatalog');
 
 const data = new SlashCommandBuilder()
   .setName('cinemalist')
   .setDescription('Xem danh sách các bộ phim đã được tải lên (upload) trên VNL Cinema')
   .setDMPermission(false);
 
-function formatBytes(bytes) {
-  if (!bytes || bytes <= 0) return 'Không xác định';
-  const mb = bytes / (1024 * 1024);
-  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
-  return `${mb.toFixed(1)} MB`;
-}
-
-function buildPageEmbed(movies, page, totalPages, guildConfig) {
+function buildPageEmbed(movies, page, totalPages) {
   const pageSize = 5;
   const startIdx = page * pageSize;
   const pageMovies = movies.slice(startIdx, startIdx + pageSize);
@@ -29,12 +23,8 @@ function buildPageEmbed(movies, page, totalPages, guildConfig) {
 
   const embed = new EmbedBuilder()
     .setColor(0xE50914) // Cinema Red
-    .setTitle('🎬 VNL CINEMA · KHO PHIM ĐÃ TẢI LÊN')
-    .setDescription(
-      `Tổng cộng có **${movies.length}** bộ phim trên kho lưu trữ VNL Cinema.\n` +
-      `🍿 **Xem phim:** Vào phòng thoại Cinema và gõ lệnh \`/cinema\` để phát ngay.\n` +
-      `⚙️ **Lên lịch chiếu:** Sao chép **URL video** bên dưới và dán vào Dashboard.`
-    )
+    .setTitle('🎬 VNL CINEMA · KHO PHIM')
+    .setDescription(`Có **${movies.length}** phim trong kho.\n🍿 Vào phòng thoại Cinema và dùng lệnh \`/cinema\` để xem phim.`)
     .setFooter({
       text: `VNL Cinema • Trang ${page + 1}/${totalPages} • Cùng xem, cùng một khoảnh khắc`,
     })
@@ -64,12 +54,9 @@ function buildPageEmbed(movies, page, totalPages, guildConfig) {
       : 'Có sẵn trên kho';
 
     const fieldContent = [
-      `📁 **Tệp lưu trữ:** \`${m.key}\``,
-      `📊 **Dung lượng:** ${formatBytes(m.size)}`,
+      `⏱️ **Thời lượng:** ${formatDuration(m.durationSeconds)}`,
+      `🎬 **Trạng thái:** ${statusText}`,
       `📅 **Ngày tải lên:** ${uploadTime}`,
-      `⏰ **Trạng thái:** ${statusText}`,
-      `🔗 **Link video (dán vào Dashboard):**`,
-      `\`${m.source}\``,
     ].join('\n');
 
     embed.addFields({
@@ -82,7 +69,7 @@ function buildPageEmbed(movies, page, totalPages, guildConfig) {
   return embed;
 }
 
-function buildActionRows(page, totalPages, dashboardUrl) {
+function buildActionRows(page, totalPages) {
   const rows = [];
 
   const navRow = new ActionRowBuilder();
@@ -106,17 +93,9 @@ function buildActionRows(page, totalPages, dashboardUrl) {
     );
   }
 
-  const linkRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setLabel('🌐 Mở Web Dashboard')
-      .setStyle(ButtonStyle.Link)
-      .setURL(dashboardUrl)
-  );
-
   if (navRow.components.length > 0) {
     rows.push(navRow);
   }
-  rows.push(linkRow);
 
   return rows;
 }
@@ -134,36 +113,19 @@ async function execute(interaction) {
   await interaction.deferReply();
 
   try {
-    const guildConfig = cinema.getConfig(interaction.guildId);
     const movies = await cinema.listUploadedMovies(interaction.guildId);
-
-    const baseUrl = (process.env.DASHBOARD_URL || 'https://vietnamlegacy.up.railway.app').replace(/\/$/, '');
-    const dashboardUrl = `${baseUrl}/premium/guilds/${interaction.guildId}/cinema`;
 
     if (!movies || movies.length === 0) {
       const emptyEmbed = new EmbedBuilder()
         .setColor(0xE50914)
         .setTitle('🎬 VNL CINEMA · KHO PHIM')
-        .setDescription(
-          'Hiện tại chưa có bộ phim nào được tải lên kho lưu trữ VNL Cinema.\n\n' +
-          '💡 **Dành cho Quản trị viên:**\n' +
-          'Bạn có thể tải phim lên kho lưu trữ Cloudflare R2 bằng lệnh console:\n' +
-          '```bash\nnode scripts/uploadMovie.js "<duong_dan_file_phim.mp4>"\n```\n' +
-          'Sau khi tải lên thành công, phim sẽ xuất hiện tại đây và bạn có thể dán link vào Dashboard để tạo suất chiếu!'
-        )
+        .setDescription('Kho phim hiện chưa có phim. Vui lòng quay lại sau.')
         .setFooter({ text: 'VNL Cinema' })
         .setTimestamp();
 
-      const linkRow = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setLabel('🌐 Mở Web Dashboard')
-          .setStyle(ButtonStyle.Link)
-          .setURL(dashboardUrl)
-      );
-
       return interaction.editReply({
         embeds: [emptyEmbed],
-        components: [linkRow],
+        components: [],
       });
     }
 
@@ -171,8 +133,8 @@ async function execute(interaction) {
     const totalPages = Math.ceil(movies.length / pageSize);
     let currentPage = 0;
 
-    const initialEmbed = buildPageEmbed(movies, currentPage, totalPages, guildConfig);
-    const initialRows = buildActionRows(currentPage, totalPages, dashboardUrl);
+    const initialEmbed = buildPageEmbed(movies, currentPage, totalPages);
+    const initialRows = buildActionRows(currentPage, totalPages);
 
     const response = await interaction.editReply({
       embeds: [initialEmbed],
@@ -192,8 +154,8 @@ async function execute(interaction) {
           currentPage = Math.min(totalPages - 1, currentPage + 1);
         }
 
-        const newEmbed = buildPageEmbed(movies, currentPage, totalPages, guildConfig);
-        const newRows = buildActionRows(currentPage, totalPages, dashboardUrl);
+        const newEmbed = buildPageEmbed(movies, currentPage, totalPages);
+        const newRows = buildActionRows(currentPage, totalPages);
 
         await i.update({
           embeds: [newEmbed],
@@ -203,7 +165,7 @@ async function execute(interaction) {
 
       collector.on('end', async () => {
         try {
-          const disabledRows = buildActionRows(currentPage, totalPages, dashboardUrl);
+          const disabledRows = buildActionRows(currentPage, totalPages);
           // Vô hiệu hóa nút prev/next
           if (disabledRows[0] && disabledRows[0].components?.[0]?.data?.custom_id?.startsWith?.('cinemalist:')) {
             disabledRows[0].components.forEach(c => c.setDisabled(true));
@@ -215,7 +177,7 @@ async function execute(interaction) {
   } catch (err) {
     console.error('[CINEMA LIST] Lỗi lấy danh sách phim:', err);
     return interaction.editReply({
-      content: `❌ Đã có lỗi xảy ra khi kiểm tra kho phim: ${err.message}`,
+      content: '❌ Chưa thể tải kho phim. Vui lòng thử lại sau.',
       embeds: [],
       components: [],
     });

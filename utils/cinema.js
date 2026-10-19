@@ -1,3 +1,4 @@
+const { movieDetails } = require('./movieCatalog');
 const { getGuildSetting, setGuildSetting } = require('./guildSettings');
 const { PermissionFlagsBits } = require('discord.js');
 
@@ -445,15 +446,6 @@ function clearHistory(guildId) {
   return config;
 }
 
-function formatTitleFromKey(key) {
-  if (!key) return 'Phim không tên';
-  const base = key.replace(/\.[^.]+$/, '');
-  return base
-    .replace(/[-_.]+/g, ' ')
-    .trim()
-    .replace(/\b\w/g, c => c.toUpperCase());
-}
-
 async function listUploadedMovies(guildId, env = process.env) {
   const result = [];
   const publicDomain = (env.CINEMA_MEDIA_ORIGIN || 'https://pub-a6f2ebb772de4098b1e01e80864fbf6a.r2.dev').replace(/\/$/, '');
@@ -501,7 +493,8 @@ async function listUploadedMovies(guildId, env = process.env) {
 
       result.push({
         key: obj.Key,
-        title: matchedShow?.title || formatTitleFromKey(obj.Key),
+        title: movieDetails(obj.Key, obj.Size, matchedShow?.title).title,
+        durationSeconds: movieDetails(obj.Key, obj.Size).durationSeconds,
         source: url,
         size: obj.Size || 0,
         lastModified: obj.LastModified ? new Date(obj.LastModified) : null,
@@ -518,7 +511,8 @@ async function listUploadedMovies(guildId, env = process.env) {
       const fileName = s.source.split('/').pop() || s.title;
       result.push({
         key: fileName,
-        title: s.title,
+        title: movieDetails(fileName, null, s.title).title,
+        durationSeconds: null,
         source: s.source,
         size: 0,
         lastModified: null,
