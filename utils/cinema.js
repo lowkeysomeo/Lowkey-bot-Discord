@@ -20,9 +20,55 @@ function sourceUrl(value, env) {
   }
   return url.href;
 }
+function archiveExpiredShows(guildId, now = Date.now()) {
+  try {
+    const raw = getGuildSetting(guildId, 'CINEMA_CONFIG');
+    if (!raw) return null;
+    const config = JSON.parse(raw);
+    if (!Array.isArray(config.shows) || config.shows.length === 0) return config;
+
+    let changed = false;
+    if (!Array.isArray(config.history)) config.history = [];
+    const activeShows = [];
+
+    for (const s of config.shows) {
+      const end = Date.parse(s.endsAt);
+      if (Number.isFinite(end) && end <= now) {
+        changed = true;
+        const alreadyInHistory = config.history.some(h =>
+          h.startsAt === s.startsAt && h.title === s.title
+        );
+        if (!alreadyInHistory) {
+          config.history.unshift({
+            title: s.title,
+            source: s.source,
+            startsAt: s.startsAt,
+            endsAt: s.endsAt,
+            endedAt: new Date(now).toISOString(),
+            status: 'completed',
+          });
+        }
+      } else {
+        activeShows.push(s);
+      }
+    }
+
+    if (changed) {
+      config.shows = activeShows;
+      config.history = config.history.slice(0, 50);
+      setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+    }
+    return config;
+  } catch (err) {
+    console.error('[CINEMA] Lỗi lưu trữ suất chiếu hết hạn:', err.message);
+    return null;
+  }
+}
+
 function getConfig(guildId) {
+  archiveExpiredShows(guildId);
   const raw = getGuildSetting(guildId, 'CINEMA_CONFIG');
-  const d = { enabled: false, title: 'VNL Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, categoryId: null, voiceChannelId: null, notifyChannelId: null, notifyRoleId: null, notifyMessage: '', preReminderHours: 3, remind10m: true, shows: [], revision: 0 };
+  const d = { enabled: false, title: 'VNL Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, categoryId: null, voiceChannelId: null, notifyChannelId: null, notifyRoleId: null, notifyMessage: '', preReminderHours: 3, remind10m: true, shows: [], history: [], revision: 0 };
   return raw ? { ...d, ...JSON.parse(raw) } : d;
 }
 function text(value, max, required = false) {
@@ -75,12 +121,16 @@ function validate(input, roles, env, channels) {
     fail(400, 'Vui lòng xác nhận quyền sử dụng video để bật Cinema.');
   }
   return { enabled: input.enabled, title: text(input.title, 80, true), description: text(input.description, 1500), audience: input.audience,
-    roleIds: [...new Set(input.roleIds)], rightsConfirmed: input.rightsConfirmed, categoryId, voiceChannelId, notifyChannelId, notifyRoleId, notifyMessage, preReminderHours, remind10m, shows };
+    roleIds: [...new Set(input.roleIds)], rightsConfirmed: input.rightsConfirmed, categoryId, voiceChannelId, notifyChannelId, notifyRoleId, notifyMessage, preReminderHours, remind10m, shows,
+    history: Array.isArray(input.history) ? input.history.slice(0, 50) : [] };
 }
 function saveConfig(guildId, input, roles, env, channels) {
   const next = validate(input, roles, env, channels);
   const current = getConfig(guildId);
   if (input.revision !== current.revision) fail(409, 'Cấu hình đã được admin khác sửa. Hãy tải lại trước khi lưu.');
+  next.history = Array.isArray(input.history) && input.history.length > 0
+    ? input.history.slice(0, 50)
+    : (Array.isArray(current.history) ? current.history : []);
   next.revision = current.revision + 1;
   setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(next));
   return next;
@@ -309,18 +359,43 @@ function markReminderAnnounced(guildId, showOrKey, type = 'early') {
 
 function markShowEnded(guildId, now = Date.now()) {
   try {
-    const config = getConfig(guildId);
+    const raw = getGuildSetting(guildId, 'CINEMA_CONFIG');
+    if (!raw) return false;
+    const config = JSON.parse(raw);
     let changed = false;
-    config.shows = (config.shows || []).map(s => {
+    if (!Array.isArray(config.history)) config.history = [];
+    const remainingShows = [];
+
+    for (const s of (config.shows || [])) {
       const start = Date.parse(s.startsAt);
       const end = Date.parse(s.endsAt);
       if (Number.isFinite(start) && Number.isFinite(end) && start <= now && now < end) {
         changed = true;
-        return { ...s, endsAt: new Date(now).toISOString() };
+        config.history.unshift({
+          title: s.title,
+          source: s.source,
+          startsAt: s.startsAt,
+          endsAt: new Date(now).toISOString(),
+          endedAt: new Date(now).toISOString(),
+          status: 'completed',
+        });
+      } else if (Number.isFinite(end) && end <= now) {
+        changed = true;
+        config.history.unshift({
+          title: s.title,
+          source: s.source,
+          startsAt: s.startsAt,
+          endsAt: s.endsAt,
+          endedAt: new Date(now).toISOString(),
+          status: 'completed',
+        });
+      } else {
+        remainingShows.push(s);
       }
-      return s;
-    });
+    }
     if (changed) {
+      config.shows = remainingShows;
+      config.history = config.history.slice(0, 50);
       setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
     }
     return changed;
@@ -328,6 +403,46 @@ function markShowEnded(guildId, now = Date.now()) {
     console.error('[CINEMA] Lỗi đánh dấu kết thúc suất chiếu:', err.message);
     return false;
   }
+}
+
+function deleteShow(guildId, criteria = {}) {
+  const config = getConfig(guildId);
+  const shows = config.shows || [];
+  if (!shows.length) return config;
+
+  let targetIdx = -1;
+  if (typeof criteria.index === 'number' && criteria.index >= 0 && criteria.index < shows.length) {
+    targetIdx = criteria.index;
+  } else if (criteria.startsAt) {
+    targetIdx = shows.findIndex(s => s.startsAt === criteria.startsAt);
+  } else if (criteria.title) {
+    targetIdx = shows.findIndex(s => s.title === criteria.title);
+  }
+
+  if (targetIdx !== -1) {
+    const [deleted] = shows.splice(targetIdx, 1);
+    if (!Array.isArray(config.history)) config.history = [];
+    config.history.unshift({
+      title: deleted.title,
+      source: deleted.source,
+      startsAt: deleted.startsAt,
+      endsAt: deleted.endsAt,
+      endedAt: new Date().toISOString(),
+      status: 'deleted',
+    });
+    config.history = config.history.slice(0, 50);
+    config.revision += 1;
+    setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+  }
+  return config;
+}
+
+function clearHistory(guildId) {
+  const config = getConfig(guildId);
+  config.history = [];
+  config.revision += 1;
+  setGuildSetting(guildId, 'CINEMA_CONFIG', JSON.stringify(config));
+  return config;
 }
 
 function formatTitleFromKey(key) {
@@ -434,4 +549,7 @@ module.exports = {
   markReminderAnnounced,
   markShowEnded,
   listUploadedMovies,
+  archiveExpiredShows,
+  deleteShow,
+  clearHistory,
 };

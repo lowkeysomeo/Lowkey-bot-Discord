@@ -519,6 +519,29 @@ function createDashboard(client, options = {}) {
           }
           return json(res, 200, { config: savedConfig });
         }
+        const cinemaDelete = /^\/api\/guilds\/(\d+)\/premium\/cinema\/delete-show$/.exec(route);
+        if (cinemaDelete) {
+          const guild = await managedGuild(cinemaDelete[1], value);
+          if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
+          const input = await body(req);
+          const savedConfig = cinema.deleteShow(guild.id, input);
+          try {
+            const scheduler = require('../utils/cinemaScheduler');
+            if (typeof scheduler.checkShows === 'function') {
+              scheduler.checkShows(client);
+            }
+          } catch (e) {
+            console.warn('[DASHBOARD] Lỗi cập nhật cinema scheduler sau khi xóa:', e.message);
+          }
+          return json(res, 200, { ok: true, config: savedConfig });
+        }
+        const cinemaClearHist = /^\/api\/guilds\/(\d+)\/premium\/cinema\/clear-history$/.exec(route);
+        if (cinemaClearHist) {
+          const guild = await managedGuild(cinemaClearHist[1], value);
+          if (req.method !== 'POST') fail(405, 'Thao tác không được hỗ trợ.');
+          const savedConfig = cinema.clearHistory(guild.id);
+          return json(res, 200, { ok: true, config: savedConfig });
+        }
         const match = /^\/api\/guilds\/(\d+)\/(settings|leaderboard|test|giveaways|confession-panel|reaction-roles|ticket)$/.exec(route);
         if (!match) fail(404, 'Không tìm thấy trang.');
         const guild = await managedGuild(match[1], value);

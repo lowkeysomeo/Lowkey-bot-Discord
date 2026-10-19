@@ -562,12 +562,14 @@ function cinemaShowRow(show = {}) {
     ? ' <span class="badge" style="background:rgba(229,9,20,0.25);border:1px solid #e50914;color:#ff6b6b;font-size:11px;font-weight:700;padding:2px 8px;margin-left:8px;border-radius:999px;">🔴 Đang chiếu trực tiếp</span>'
     : (Number.isFinite(sTime) && sTime > now ? ' <span class="badge" style="background:rgba(255,214,90,0.15);border:1px solid rgba(255,214,90,0.5);color:#ffd65a;font-size:11px;padding:2px 8px;margin-left:8px;border-radius:999px;">⏳ Sắp chiếu</span>' : '');
 
-  return `<fieldset class="cinema-show"><legend>Suất chiếu${statusBadge}</legend><div class="form-grid">
+  const isSaved = Boolean(show.startsAt && show.title);
+
+  return `<fieldset class="cinema-show" data-starts-at="${h(show.startsAt || '')}" data-title="${h(show.title || '')}"><legend>Suất chiếu${statusBadge}</legend><div class="form-grid">
     <div class="field"><label>Tên phim<input data-show="title" maxlength="120" value="${h(show.title || '')}" required></label></div>
     <div class="field"><label>URL video hợp pháp<input data-show="source" type="url" maxlength="2048" placeholder="https://kho-video.example/phim.mp4" value="${h(show.source || '')}" required></label></div>
     <div class="field"><label>Bắt đầu<input data-show="startsAt" type="datetime-local" value="${h(cinemaLocalTime(startsAt))}" required></label></div>
     <div class="field"><label>Kết thúc<input data-show="endsAt" type="datetime-local" value="${h(cinemaLocalTime(endsAt))}" required></label></div>
-    </div><button type="button" class="text-button" data-cinema-remove style="color:#ff6b6b;">Xóa suất chiếu${isRunning ? ' (Dừng chiếu)' : ''}</button></fieldset>`;
+    </div><div style="margin-top:14px;"><button type="button" class="text-button" data-cinema-remove-direct data-starts-at="${h(show.startsAt || '')}" data-title="${h(show.title || '')}" data-saved="${isSaved ? '1' : '0'}" style="color:#ff6b6b;font-weight:600;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:rgba(255,107,107,0.12);border:1px solid rgba(255,107,107,0.3);border-radius:6px;cursor:pointer;">🗑️ Xóa suất chiếu${isRunning ? ' (Dừng chiếu ngay)' : ''}</button></div></fieldset>`;
 }
 function cinemaPage() {
   const data = state.data.cinema;
@@ -578,6 +580,44 @@ function cinemaPage() {
   const voiceChannels = channels.filter(ch => ch.type === 2 || ch.type === 13);
   const textChannels = channels.filter(ch => ch.type === 0 || ch.type === 5);
   const showsList = (c.shows && c.shows.length) ? c.shows.map(cinemaShowRow).join('') : '<p class="subtle" id="cinema-no-shows">Chưa có suất chiếu nào được lên lịch. Hãy bấm nút bên dưới để thêm suất chiếu mới.</p>';
+  const historyList = (c.history && c.history.length) ? `
+    <div class="table-wrap" style="margin-top:12px;overflow-x:auto;">
+      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+        <thead>
+          <tr style="border-bottom:1px solid rgba(255,255,255,0.1);text-align:left;">
+            <th style="padding:10px 8px;">Tên phim</th>
+            <th style="padding:10px 8px;">Thời gian chiếu</th>
+            <th style="padding:10px 8px;">Trạng thái</th>
+            <th style="padding:10px 8px;text-align:right;">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${c.history.map(item => {
+            const sUnix = item.startsAt ? Math.floor(Date.parse(item.startsAt) / 1000) : null;
+            const eUnix = item.endsAt ? Math.floor(Date.parse(item.endsAt) / 1000) : null;
+            const timeLabel = (sUnix && eUnix)
+              ? `${new Date(sUnix * 1000).toLocaleString('vi-VN')} → ${new Date(eUnix * 1000).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}`
+              : (item.endedAt ? new Date(item.endedAt).toLocaleString('vi-VN') : 'Không rõ');
+            const statusBadge = item.status === 'deleted'
+              ? '<span class="badge" style="background:rgba(255,107,107,0.15);color:#ff6b6b;border:1px solid rgba(255,107,107,0.3);padding:2px 8px;border-radius:999px;font-size:11px;">Đã dừng / Xóa</span>'
+              : '<span class="badge" style="background:rgba(87,242,135,0.15);color:#57f287;border:1px solid rgba(87,242,135,0.3);padding:2px 8px;border-radius:999px;font-size:11px;">Hoàn thành</span>';
+            return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+              <td style="padding:10px 8px;font-weight:600;">🎞️ ${h(item.title)}</td>
+              <td style="padding:10px 8px;color:#a0a0b0;">${h(timeLabel)}</td>
+              <td style="padding:10px 8px;">${statusBadge}</td>
+              <td style="padding:10px 8px;text-align:right;">
+                <button type="button" class="secondary" data-cinema-rebook data-title="${h(item.title)}" data-source="${h(item.source || '')}" style="padding:4px 10px;font-size:12px;cursor:pointer;">🔄 Chiếu lại</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:14px;text-align:right;">
+      <button type="button" class="text-button" id="cinema-clear-history" style="color:#ff6b6b;font-size:12px;cursor:pointer;">Xóa toàn bộ lịch sử chiếu phim</button>
+    </div>
+  ` : '<p class="subtle" id="cinema-no-history">Chưa có lịch sử chiếu phim. Các bộ phim sau khi kết thúc sẽ tự động được lưu trữ tại đây.</p>';
+
   return heading('PREMIUM · RẠP PHIM CỘNG ĐỒNG', 'VNL Cinema', 'Quản lý lịch chiếu và quyền tham gia. Chỉ Administrator của server được sửa cấu hình.') +
     (!data.available || !data.mediaOrigin ? '<div class="error">Chủ bot cần hoàn tất cấu hình Activity và kho video trước khi thành viên có thể xem.</div>' : '') +
     `<form id="cinema-form"><section class="card cinema-card"><h2>Không gian của bạn</h2><div class="form-grid">
@@ -612,6 +652,7 @@ function cinemaPage() {
     <div class="cinema-roles">${data.roles.map(role => `<label class="cinema-check"><input type="checkbox" name="roleIds" value="${h(role.id)}" ${c.roleIds.includes(role.id) ? 'checked' : ''}> ${h(role.name)}</label>`).join('')}</div><p class="subtle">Danh sách role chỉ áp dụng khi chọn “Thành viên có role”. Administrator vẫn được xem.</p></section>
     <section class="card cinema-card"><h2>Lịch chiếu</h2><p>Giờ trên thiết bị: ${h(Intl.DateTimeFormat().resolvedOptions().timeZone)}. Mỗi suất tối đa 24 giờ; các suất không trùng giờ. Thành viên vào muộn tự đồng bộ theo lịch.</p><p>Kho video: <strong>${h(data.mediaOrigin || 'Chưa cấu hình')}</strong> · MP4 hoặc WebM.</p>
     <div id="cinema-shows">${showsList}</div><button type="button" class="secondary" id="cinema-add">+ Thêm suất chiếu</button></section>
+    <section class="card cinema-card"><h2>📜 Lịch sử chiếu phim</h2><p class="subtle">Lưu lại danh sách các bộ phim đã công chiếu hoặc dừng chiếu trên server. Bạn có thể bấm "Chiếu lại" để lên lịch nhanh chóng.</p>${historyList}</section>
     <section class="card cinema-card"><label class="cinema-check"><input name="rightsConfirmed" type="checkbox" ${c.rightsConfirmed ? 'checked' : ''}> Tôi có quyền trình chiếu các video này cho cộng đồng.</label>
     <p class="subtle">Dùng video tự sở hữu hoặc được cấp phép. Không nhập liên kết Netflix, YouTube, trang xem phim hay nguồn có DRM.</p>
     <button type="submit" class="primary" id="cinema-save">Lưu cấu hình Cinema</button><span id="cinema-save-status" role="status"></span></section></form>`;
@@ -643,24 +684,95 @@ function bindCinema() {
     if (shows.querySelectorAll('.cinema-show').length >= 20) return notify('Tối đa 20 suất chiếu.');
     shows.insertAdjacentHTML('beforeend', cinemaShowRow()); state.dirty = true;
   };
-  form.onclick = event => {
-    const button = event.target.closest('[data-cinema-remove]');
-    if (button) {
-      const fieldset = button.closest('.cinema-show');
-      if (fieldset) {
-        fieldset.remove();
+  const clearHistBtn = document.querySelector('#cinema-clear-history');
+  if (clearHistBtn) {
+    clearHistBtn.onclick = async () => {
+      if (!window.confirm('Bạn có chắc chắn muốn xóa toàn bộ lịch sử chiếu phim không?')) return;
+      clearHistBtn.disabled = true;
+      try {
+        const res = await api(`/api/guilds/${state.guild.id}/premium/cinema/clear-history`, {});
+        if (res && res.config) {
+          state.data.cinema.config = res.config;
+        }
+        notify('Đã xóa sạch lịch sử chiếu phim.');
+        render();
+      } catch (err) {
+        notify('Lỗi xóa lịch sử: ' + err.message);
+        clearHistBtn.disabled = false;
+      }
+    };
+  }
+  form.onclick = async event => {
+    const directBtn = event.target.closest('[data-cinema-remove-direct]');
+    if (directBtn) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const startsAt = directBtn.dataset.startsAt;
+      const title = directBtn.dataset.title;
+      const isSaved = directBtn.dataset.saved === '1';
+      const fieldset = directBtn.closest('.cinema-show');
+
+      // Nếu là hàng mới thêm chưa lưu vào DB
+      if (!isSaved || (!startsAt && !title)) {
+        if (fieldset) fieldset.remove();
         state.dirty = true;
         const shows = document.querySelector('#cinema-shows');
         if (shows && !shows.querySelector('.cinema-show')) {
           shows.innerHTML = '<p class="subtle" id="cinema-no-shows">Chưa có suất chiếu nào được lên lịch. Hãy bấm nút bên dưới để thêm suất chiếu mới.</p>';
         }
-        // Tự động lưu cấu hình ngay khi xóa suất chiếu để thay đổi có hiệu lực tức thì
-        if (typeof form.requestSubmit === 'function') {
-          form.requestSubmit();
-        } else {
-          form.dispatchEvent(new Event('submit', { cancelable: true }));
-        }
+        return;
       }
+
+      if (!window.confirm(`Bạn có chắc chắn muốn xóa suất chiếu "${title || 'này'}" không?`)) {
+        return;
+      }
+
+      directBtn.disabled = true;
+      directBtn.textContent = '⏳ Đang xóa…';
+
+      try {
+        const res = await api(`/api/guilds/${state.guild.id}/premium/cinema/delete-show`, {
+          startsAt,
+          title,
+        });
+        if (res && res.config) {
+          state.data.cinema.config = res.config;
+        }
+        state.dirty = false;
+        notify('✅ Đã xóa suất chiếu thành công!');
+        render();
+      } catch (err) {
+        notify('❌ Lỗi khi xóa suất chiếu: ' + err.message);
+        directBtn.disabled = false;
+        directBtn.textContent = '🗑️ Xóa suất chiếu';
+      }
+      return;
+    }
+
+    const rebookBtn = event.target.closest('[data-cinema-rebook]');
+    if (rebookBtn) {
+      event.preventDefault();
+      const title = rebookBtn.dataset.title;
+      const source = rebookBtn.dataset.source;
+      const shows = document.querySelector('#cinema-shows');
+      const noShows = document.querySelector('#cinema-no-shows');
+      if (noShows) noShows.remove();
+      if (shows.querySelectorAll('.cinema-show').length >= 20) return notify('Tối đa 20 suất chiếu.');
+
+      const now = new Date();
+      now.setMinutes(Math.ceil(now.getMinutes() / 15) * 15, 0, 0);
+      const startsAt = now.toISOString();
+      const endsAt = new Date(now.getTime() + 2.5 * 3600000).toISOString();
+
+      shows.insertAdjacentHTML('beforeend', cinemaShowRow({ title, source, startsAt, endsAt }));
+      state.dirty = true;
+      notify(`Đã nạp "${title}" vào lịch chiếu. Hãy kiểm tra lại thời gian và bấm "Lưu cấu hình Cinema"!`);
+      const newFieldset = shows.lastElementChild;
+      if (newFieldset && typeof newFieldset.scrollIntoView === 'function') {
+        newFieldset.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return;
     }
   };
   form.onsubmit = async event => {

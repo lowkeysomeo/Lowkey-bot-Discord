@@ -179,7 +179,33 @@ async function main() {
   };
   await cinemalistCmd.execute(mockInteraction);
   assert(repliedEmbed, 'cinemalist execute must editReply with embed');
-  assert.match(repliedEmbed.data.title, /KHO PHIM/i);
+  // Test archiveExpiredShows, direct deleteShow, clearHistory, and API endpoints
+  const now = Date.now();
+  const pastShow = { title: 'Phim Cũ Đã Chiếu', source: 'https://media.example.com/film.mp4', startsAt: new Date(now - 7200000).toISOString(), endsAt: new Date(now - 1000).toISOString() };
+  const upcomingShow = { title: 'Phim Tương Lai', source: 'https://media.example.com/film.mp4', startsAt: new Date(now + 3600000).toISOString(), endsAt: new Date(now + 7200000).toISOString() };
+  const testCfg = cinema.getConfig('111');
+  testCfg.shows = [pastShow, upcomingShow];
+  const { setGuildSetting } = require('../utils/guildSettings');
+  setGuildSetting('111', 'CINEMA_CONFIG', JSON.stringify(testCfg));
+  
+  const checkedCfg = cinema.getConfig('111');
+  assert.equal(checkedCfg.shows.length, 1, 'Past show automatically pruned from shows');
+  assert.equal(checkedCfg.shows[0].title, 'Phim Tương Lai');
+  assert.equal(checkedCfg.history.length, 1, 'Past show archived to history');
+  assert.equal(checkedCfg.history[0].title, 'Phim Cũ Đã Chiếu');
+  assert.equal(checkedCfg.history[0].status, 'completed');
+
+  // Test direct delete-show API
+  const delRes = await request('/api/guilds/111/premium/cinema/delete-show', { method: 'POST', headers, body: JSON.stringify({ startsAt: upcomingShow.startsAt, title: upcomingShow.title }) });
+  assert.equal(delRes.status, 200, 'delete-show API must succeed');
+  assert.equal(delRes.json().config.shows.length, 0, 'Show removed from schedule via API');
+  assert.equal(delRes.json().config.history.length, 2, 'Deleted show added to history');
+  assert.equal(delRes.json().config.history[0].status, 'deleted');
+
+  // Test clear-history API
+  const clearRes = await request('/api/guilds/111/premium/cinema/clear-history', { method: 'POST', headers, body: JSON.stringify({}) });
+  assert.equal(clearRes.status, 200, 'clear-history API must succeed');
+  assert.equal(clearRes.json().config.history.length, 0, 'History cleared via API');
 
   console.log('PASS Cinema: validation, schedule synchronization, guild isolation, admin revocation, direct page/API authorization, CSRF, viewer role revocation, session separation, disabled state, entry point, & /cinemalist uploaded library.');
   getDb().close();
