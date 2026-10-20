@@ -80,12 +80,15 @@ function loadGametimeProgress(userId) {
     const db = getDb();
     const row = db.prepare('SELECT * FROM gametime_sessions WHERE user_id = ?').get(uid);
     if (row) {
+      let notifiedHours = [];
+      try { notifiedHours = JSON.parse(row.notified_hours_json || '[]') || []; } catch {}
       return {
         userId: uid,
         accumulatedSeconds: row.accumulated_seconds || 0,
         currentSessionSeconds: row.current_session_seconds || 0,
         status: row.status || 'idle',
         gameName: row.game_name || DEFAULT_GAME.name,
+        notifiedHours,
         updatedAt: row.updated_at || Date.now()
       };
     }
@@ -95,7 +98,12 @@ function loadGametimeProgress(userId) {
   try {
     if (fs.existsSync(PROGRESS_FILE)) {
       const data = JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf8'));
-      if (data && data[uid]) return data[uid];
+      if (data && data[uid]) {
+        return {
+          ...data[uid],
+          notifiedHours: data[uid].notifiedHours || []
+        };
+      }
     }
   } catch (_) {}
 
@@ -104,6 +112,7 @@ function loadGametimeProgress(userId) {
     accumulatedSeconds: 0,
     currentSessionSeconds: 0,
     status: 'idle',
+    notifiedHours: [],
     updatedAt: Date.now()
   };
 }
@@ -121,12 +130,14 @@ function saveGametimeProgress(userId, progress) {
     const gameName = progress.game?.name || progress.gameName || DEFAULT_GAME.name;
     const appId = String(progress.game?.appId || progress.appId || DEFAULT_GAME.appId);
     const exeName = progress.game?.exe || progress.exeName || DEFAULT_GAME.exe;
+    const notifiedHoursJson = JSON.stringify(progress.notifiedHours || []);
 
     db.prepare(`
       INSERT INTO gametime_sessions (
         user_id, token, username, game_name, app_id, exe_name,
-        status, started_at, updated_at, accumulated_seconds, current_session_seconds, last_heartbeat_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        status, started_at, updated_at, accumulated_seconds, current_session_seconds, last_heartbeat_at,
+        notified_hours_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id) DO UPDATE SET
         token = CASE WHEN excluded.token != '' THEN excluded.token ELSE gametime_sessions.token END,
         username = COALESCE(excluded.username, gametime_sessions.username),
@@ -138,7 +149,8 @@ function saveGametimeProgress(userId, progress) {
         updated_at = excluded.updated_at,
         accumulated_seconds = excluded.accumulated_seconds,
         current_session_seconds = excluded.current_session_seconds,
-        last_heartbeat_at = excluded.last_heartbeat_at
+        last_heartbeat_at = excluded.last_heartbeat_at,
+        notified_hours_json = excluded.notified_hours_json
     `).run(
       uid,
       token,
@@ -151,7 +163,8 @@ function saveGametimeProgress(userId, progress) {
       Date.now(),
       progress.accumulatedSeconds || 0,
       progress.currentSessionSeconds || 0,
-      progress.lastHeartbeatAt || Date.now()
+      progress.lastHeartbeatAt || Date.now(),
+      notifiedHoursJson
     );
   } catch (e) {
     console.warn('[GAMETIME WORKER] DB saveProgress error:', e.message);
@@ -596,10 +609,17 @@ async function startGametimeFarming({
 
     const totalHours = Math.floor(progress.totalSeconds / 3600);
     const tier = TIERS.find((t) => t.hours === totalHours);
-    if (tier && typeof onMilestone === 'function') {
-      try {
-        onMilestone({ totalHours, tier });
-      } catch (_) {}
+    if (!Array.isArray(progress.notifiedHours)) {
+      progress.notifiedHours = [];
+    }
+    if (tier && !progress.notifiedHours.includes(tier.hours)) {
+      progress.notifiedHours.push(tier.hours);
+      saveGametimeProgress(uid, progress);
+      if (typeof onMilestone === 'function') {
+        try {
+          onMilestone({ totalHours, tier });
+        } catch (_) {}
+      }
     }
 
     if (typeof onTick === 'function') {

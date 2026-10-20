@@ -49,6 +49,7 @@ async function runTests() {
     status: 'running',
     accumulatedSeconds: 7200,
     currentSessionSeconds: 120,
+    notifiedHours: [1],
     game: DEFAULT_GAME
   });
 
@@ -58,12 +59,14 @@ async function runTests() {
   assert.equal(prog.currentSessionSeconds, 120);
   assert.equal(prog.status, 'running');
   assert.equal(prog.gameName, 'Counter-Strike 2');
+  assert.deepEqual(prog.notifiedHours, [1], 'notifiedHours must be persisted');
 
   // Verify in SQLite directly
   const dbRow = getDb().prepare('SELECT * FROM gametime_sessions WHERE user_id = ?').get(testUser);
   assert.ok(dbRow, 'Session must exist in SQLite gametime_sessions');
   assert.equal(dbRow.app_id, '1158877933042143272');
   assert.equal(dbRow.accumulated_seconds, 7200);
+  assert.equal(dbRow.notified_hours_json, '[1]');
   console.log('✅ 3. SQLite persistence & cross-session retrieval verified.');
 
   // 4. Verify stop updates SQLite status

@@ -51,7 +51,8 @@ async function runTests() {
     username: 'VarietyGamer',
     status: 'running',
     completed: ['Counter-Strike 2', 'Dota 2', 'Apex Legends'],
-    currentIndex: 3
+    currentIndex: 3,
+    notifiedCounts: [2]
   });
 
   const prog = loadProgress(testUser);
@@ -59,12 +60,14 @@ async function runTests() {
   assert.equal(prog.completed.length, 3);
   assert.equal(prog.currentIndex, 3);
   assert.equal(prog.status, 'running');
+  assert.deepEqual(prog.notifiedCounts, [2], 'notifiedCounts must be persisted');
 
   // Verify in SQLite directly
   const dbRow = getDb().prepare('SELECT * FROM variety_sessions WHERE user_id = ?').get(testUser);
   assert.ok(dbRow, 'Session must exist in SQLite variety_sessions');
   assert.equal(dbRow.username, 'VarietyGamer');
   assert.equal(dbRow.current_index, 3);
+  assert.equal(dbRow.notified_counts_json, '[2]');
   const parsedCompleted = JSON.parse(dbRow.completed_json);
   assert.deepEqual(parsedCompleted, ['Counter-Strike 2', 'Dota 2', 'Apex Legends']);
   console.log('✅ 3. SQLite persistence & cross-session retrieval verified.');

@@ -176,11 +176,14 @@ function loadProgress(userId) {
     if (row) {
       let completed = [];
       try { completed = JSON.parse(row.completed_json) || []; } catch {}
+      let notifiedCounts = [];
+      try { notifiedCounts = JSON.parse(row.notified_counts_json || '[]') || []; } catch {}
       return {
         userId: uid,
         completed,
         currentIndex: row.current_index || 0,
         status: row.status || 'idle',
+        notifiedCounts,
         updatedAt: row.updated_at || Date.now()
       };
     }
@@ -190,7 +193,12 @@ function loadProgress(userId) {
   try {
     if (fs.existsSync(PROGRESS_FILE)) {
       const data = JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf8'));
-      if (data && data[uid]) return data[uid];
+      if (data && data[uid]) {
+        return {
+          ...data[uid],
+          notifiedCounts: data[uid].notifiedCounts || []
+        };
+      }
     }
   } catch {}
   return {
@@ -198,6 +206,7 @@ function loadProgress(userId) {
     completed: [],
     currentIndex: 0,
     status: 'idle',
+    notifiedCounts: [],
     updatedAt: Date.now()
   };
 }
@@ -213,11 +222,13 @@ function saveProgress(userId, progress) {
     const token = progress.token || existing?.token || '';
     const username = progress.username || existing?.username || null;
     const completedJson = JSON.stringify(progress.completed || []);
+    const notifiedCountsJson = JSON.stringify(progress.notifiedCounts || []);
 
     db.prepare(`
       INSERT INTO variety_sessions (
-        user_id, token, username, status, completed_json, current_index, started_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        user_id, token, username, status, completed_json, current_index, started_at, updated_at,
+        notified_counts_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id) DO UPDATE SET
         token = CASE WHEN excluded.token != '' THEN excluded.token ELSE variety_sessions.token END,
         username = COALESCE(excluded.username, variety_sessions.username),
@@ -225,7 +236,8 @@ function saveProgress(userId, progress) {
         completed_json = excluded.completed_json,
         current_index = excluded.current_index,
         started_at = excluded.started_at,
-        updated_at = excluded.updated_at
+        updated_at = excluded.updated_at,
+        notified_counts_json = excluded.notified_counts_json
     `).run(
       uid,
       token,
@@ -234,7 +246,8 @@ function saveProgress(userId, progress) {
       completedJson,
       progress.currentIndex || 0,
       startedAt,
-      Date.now()
+      Date.now(),
+      notifiedCountsJson
     );
   } catch (e) {
     console.warn('[VARIETY WORKER] DB saveProgress error:', e.message);
@@ -710,12 +723,19 @@ async function startVarietyFarming({
       } catch (_) {}
     }
 
-    // Báo mốc danh hiệu nếu đạt mốc mới
+    // Báo mốc danh hiệu nếu đạt mốc mới (chỉ báo 1 lần duy nhất cho mỗi mốc)
     const milestoneReached = TIERS.find((t) => t.count === currentCount);
-    if (milestoneReached && typeof onMilestone === 'function') {
-      try {
-        onMilestone({ count: currentCount, tier: milestoneReached });
-      } catch (_) {}
+    if (!Array.isArray(progress.notifiedCounts)) {
+      progress.notifiedCounts = [];
+    }
+    if (milestoneReached && !progress.notifiedCounts.includes(milestoneReached.count)) {
+      progress.notifiedCounts.push(milestoneReached.count);
+      saveProgress(uid, progress);
+      if (typeof onMilestone === 'function') {
+        try {
+          onMilestone({ count: currentCount, tier: milestoneReached });
+        } catch (_) {}
+      }
     }
 
     session.timer = setTimeout(() => {
