@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>VNL Cinema · VietNam Legacy</title>
-  <link rel="stylesheet" href="style.css?v=2.3">
+  <link rel="stylesheet" href="style.css?v=2.4">
   <script>
     window.vnlDismissOverlay = function() {
       var el = document.getElementById('join-overlay');
@@ -227,7 +227,7 @@
     .show-info { flex: 1; line-height: 1.4; }
     .note { color: var(--text-muted); font-size: 12px; margin-top: 16px; line-height: 1.6; }
   </style>
-  <script type="module" src="main.js?v=2.7"></script>
+  <script type="module" src="main.js?v=2.8"></script>
 </head>
 <body>
   <main>
@@ -250,7 +250,7 @@
       </div>
 
       <div class="video-container" id="video-container">
-        <video id="video" playsinline controls preload="metadata"></video>
+        <video id="video" playsinline controls preload="auto"></video>
         <button id="theater-exit" class="theater-exit-btn" title="Thu nhỏ (Esc)" onclick="window.vnlToggleTheater && window.vnlToggleTheater(false)" hidden>🗗 Thu nhỏ (Esc)</button>
         <div id="toast" class="toast" hidden></div>
         <div id="join-overlay" class="join-overlay" onclick="window.vnlDismissOverlay()" hidden>

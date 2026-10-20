@@ -20,8 +20,27 @@ let current = null;
 let stopped = false;
 let isStaff = false;
 let isSyncingFromServer = false;
+let syncingSafetyTimer = null;
 let hasStarted = false;
 let hasEndedNotified = false;
+
+if (video) {
+  video.preload = 'auto';
+  video.playsInline = true;
+}
+
+function markSyncing() {
+  isSyncingFromServer = true;
+  clearTimeout(syncingSafetyTimer);
+  syncingSafetyTimer = setTimeout(() => {
+    isSyncingFromServer = false;
+  }, 3000);
+}
+
+function clearSyncing() {
+  clearTimeout(syncingSafetyTimer);
+  isSyncingFromServer = false;
+}
 let toastTimeout = null;
 let discordSdk = null;
 let currentClientId = null;
@@ -127,6 +146,8 @@ function showJoinOverlay() {
 function clearVideo() {
   current = null;
   hasStarted = false;
+  clearSyncing();
+  try { video.playbackRate = 1.0; } catch {}
   video.pause();
   video.removeAttribute('src');
   video.load();
@@ -138,30 +159,73 @@ function getSyncedPosition() {
   return current.position + (performance.now() - current.receivedAt) / 1000;
 }
 
-function sync() {
+function sync(forceHardSeek = false) {
   if (!current || !video.readyState) return;
   const position = getSyncedPosition();
   if (Number.isFinite(video.duration) && video.duration > 0 && position >= video.duration) {
     handleMovieEnded();
     return;
   }
-  if (Math.abs(video.currentTime - position) > 2) {
+
+  // If the browser is actively seeking, don't interrupt it unless forced
+  if (video.seeking && !forceHardSeek) return;
+
+  const diff = position - video.currentTime;
+  const absDiff = Math.abs(diff);
+
+  // 1. Initial play, explicit seek, or massive drift (> 6 seconds): Perform hard seek
+  if (forceHardSeek || absDiff > 6.0) {
+    markSyncing();
     video.currentTime = position;
+    try { video.playbackRate = 1.0; } catch {}
+    return;
   }
+
+  // 2. If the video is paused, maintain default rate
+  if (video.paused) {
+    try { video.playbackRate = 1.0; } catch {}
+    return;
+  }
+
+  // 3. Smooth drift correction via adaptive playbackRate
+  // Drift between 0.8s and 6.0s is seamlessly resolved without any seek/buffer stalls
+  try {
+    if (diff > 2.5) {
+      video.playbackRate = 1.08;
+    } else if (diff > 0.8) {
+      video.playbackRate = 1.04;
+    } else if (diff < -2.5) {
+      video.playbackRate = 0.92;
+    } else if (diff < -0.8) {
+      video.playbackRate = 0.96;
+    } else {
+      video.playbackRate = 1.0;
+    }
+  } catch {}
 }
 
 async function play() {
   hasStarted = true;
   hideJoinOverlay();
   try {
+    const position = getSyncedPosition();
+    if (position > 1.0 && Math.abs(video.currentTime - position) > 2.0) {
+      markSyncing();
+      video.currentTime = position;
+    }
     await video.play();
-    sync();
+    sync(true);
   } catch (err) {
     // If unmuted playback is blocked by browser autoplay policy, fallback to muted play
     try {
       video.muted = true;
+      const position = getSyncedPosition();
+      if (position > 1.0 && Math.abs(video.currentTime - position) > 2.0) {
+        markSyncing();
+        video.currentTime = position;
+      }
       await video.play();
-      sync();
+      sync(true);
       showToast('🔊 Video đã phát. Hãy bấm biểu tượng loa để bật tiếng nhé!');
     } catch (e) {
       console.warn('Playback error:', e);
@@ -179,7 +243,7 @@ async function sendStaffSeek(targetSeconds) {
   const scheduleDuration = (Date.parse(current.endsAt) - Date.parse(current.startsAt)) / 1000;
   const max = Math.max(0, Math.min(Number.isFinite(video.duration) && video.duration > 0 ? video.duration - 0.1 : 86400, scheduleDuration - 0.1));
   const clamped = Math.max(0, Math.min(max, targetSeconds));
-  isSyncingFromServer = true;
+  markSyncing();
   video.currentTime = clamped;
   try {
     const res = await request(`/guilds/${guildId}/seek`, {
@@ -194,9 +258,7 @@ async function sendStaffSeek(targetSeconds) {
     showToast(`⏩ Đã tua đến ${formatTime(clamped)}`);
   } catch (err) {
     showToast(`❌ ${err.message}`);
-    sync();
-  } finally {
-    setTimeout(() => { isSyncingFromServer = false; }, 800);
+    sync(true);
   }
 }
 
@@ -250,8 +312,11 @@ video.addEventListener('loadedmetadata', () => {
     handleMovieEnded();
     return;
   }
-  if (hasStarted) sync();
-  else play();
+  if (hasStarted) {
+    sync(true);
+  } else {
+    play();
+  }
 });
 
 video.addEventListener('ended', () => {
@@ -262,25 +327,51 @@ video.addEventListener('error', () => {
   status.textContent = 'Không tải được video. Admin cần kiểm tra URL mapping /media và định dạng tệp.';
 });
 
+video.addEventListener('play', () => {
+  if (!hasStarted) hasStarted = true;
+  hideJoinOverlay();
+  sync();
+});
+
+video.addEventListener('pause', () => {
+  try { video.playbackRate = 1.0; } catch {}
+});
+
+// Throttled timeupdate listener: smoothly corrects drift every 2.5s while playing
+let lastTimeUpdateSync = 0;
+video.addEventListener('timeupdate', () => {
+  const now = performance.now();
+  if (now - lastTimeUpdateSync > 2500) {
+    lastTimeUpdateSync = now;
+    if (hasStarted && current && !video.paused && !video.seeking) {
+      sync();
+    }
+  }
+});
+
 // Guard non-staff seeking on native controls
 video.addEventListener('seeking', () => {
-  if (!isStaff && current && !isSyncingFromServer) {
+  if (isSyncingFromServer) return;
+  if (!isStaff && current) {
     const target = getSyncedPosition();
-    if (Math.abs(video.currentTime - target) > 1.5) {
-      isSyncingFromServer = true;
+    if (Math.abs(video.currentTime - target) > 5.0) {
+      markSyncing();
       video.currentTime = target;
       showToast('⚠️ Chỉ Administrator mới có quyền tua video.');
-      setTimeout(() => { isSyncingFromServer = false; }, 400);
     }
   }
 });
 
 // Allow staff seeking on native controls
 video.addEventListener('seeked', () => {
-  if (isStaff && current && !isSyncingFromServer) {
+  if (isSyncingFromServer) {
+    clearSyncing();
+    return;
+  }
+  if (isStaff && current) {
     const target = video.currentTime;
     const synced = getSyncedPosition();
-    if (Math.abs(target - synced) > 2) {
+    if (Math.abs(target - synced) > 3.0) {
       sendStaffSeek(target);
     }
   }
@@ -459,9 +550,7 @@ async function poll() {
           showJoinOverlay();
         }
       } else {
-        isSyncingFromServer = true;
         sync();
-        setTimeout(() => { isSyncingFromServer = false; }, 300);
         if (!hasStarted && video.paused && !video.ended) {
           showJoinOverlay();
         }

@@ -42,6 +42,22 @@ async function main() {
   prime(); response.data.show = { ...show, position: 600 };
   await run('poll()'); assert.equal(node('#video').loads, 0, 'Seek synchronization does not reload media');
   assert.equal(node('#video').currentTime, 600);
-  console.log('PASS Cinema player: permission loss, transient vs prolonged network outage, local-ended isolation and no reload on seek.');
+
+  // Smooth adaptive rate sync (eliminates buffer drop & stutter on minor drift)
+  prime();
+  node('#video').currentTime = 300;
+  node('#video').playbackRate = 1.0;
+  response.data.show = { ...show, position: 302 };
+  await run('poll()');
+  assert.equal(node('#video').currentTime, 300, 'Minor drift does not trigger hard seek/buffer drop');
+  assert.equal(node('#video').playbackRate > 1.0, true, 'Minor lag speeds up playbackRate smoothly');
+
+  // Deadband (in-sync drift <= 0.8s keeps rate at 1.0)
+  response.data.show = { ...show, position: 300.3 };
+  await run('poll()');
+  assert.equal(node('#video').currentTime, 300, 'In-sync drift keeps currentTime untouched');
+  assert.equal(node('#video').playbackRate, 1.0, 'In-sync drift maintains normal 1.0x playback speed');
+
+  console.log('PASS Cinema player: permission loss, transient vs prolonged network outage, local-ended isolation, no reload on seek, and smooth adaptive-rate sync.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
