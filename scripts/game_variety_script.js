@@ -15,9 +15,9 @@
         window[LOCK_KEY].stop();
     }
 
-    // Cấu hình thời gian chạy mỗi game (ms). Mặc định 20 giây mỗi game để Discord kịp ghi nhận launch_game & heartbeat
+    // Cấu hình thời gian chạy mỗi game (ms). Đặt 6 phút (360.000 ms) để Discord ghi nhận đầy đủ heartbeat telemetry
     const CONFIG = {
-        DURATION_PER_GAME_MS: 20000, // 20 giây mỗi game
+        DURATION_PER_GAME_MS: 360000, // 6 phút mỗi game (chuẩn Discord Heartbeat Telemetry)
         TARGET_GAMES: 100,           // Mốc tối đa của huy hiệu (Thuyết phổ quát)
         AUTO_NEXT: true,
         STORAGE_KEY: "lowkey_game_variety_completed_v1"

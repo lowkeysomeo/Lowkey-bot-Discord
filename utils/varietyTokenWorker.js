@@ -429,7 +429,7 @@ function getActiveSession(userId) {
 async function startVarietyFarming({
   token,
   userId,
-  durationPerGameMs = 20000, // 20 giây mỗi game
+  durationPerGameMs = 360000, // 6 phút mỗi game (chuẩn Discord Heartbeat Telemetry)
   targetCount = 100,
   onProgress = null,
   onMilestone = null,

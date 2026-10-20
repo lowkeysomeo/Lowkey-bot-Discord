@@ -1,7 +1,7 @@
 /**
  * Lowkey Combo Badge Presence Script (2-in-1 Dual Runner)
  * Chạy ĐỒNG THỜI cả 2 nhiệm vụ huy hiệu Discord trên cùng 1 phiên:
- * 1. Huy hiệu "Trò chơi đa dạng" (Game Variety) — Tự động xoay vòng 100+ tựa game PC Detectable
+ * 1. Huy hiệu "Trò chơi đa dạng" (Game Variety) — Xoay vòng 100+ tựa game PC (mỗi game 6 phút chuẩn Discord Telemetry)
  * 2. Huy hiệu "Thời gian chơi" (Game Time / Dedicated) — Tích lũy giờ chơi liên tục không ngắt quãng
  * Tương thích: DevTools Console (F12), Vencord, và Chrome DevTools Protocol (CDP)
  */
@@ -17,8 +17,10 @@
     }
 
     // Cấu hình Combo
+    // Đặt mặc định 6 phút (360.000 ms) để máy chủ Discord kịp ghi nhận ít nhất 2-3 chu kỳ heartbeat/telemetry
+    let currentDurationSec = 360; // 6 phút
+
     const CONFIG = {
-        DURATION_PER_VARIETY_GAME_MS: 20000, // 20 giây đổi 1 game để Discord ghi nhận
         STORAGE_VARIETY_KEY: "lowkey_game_variety_completed_v1",
         STORAGE_GAMETIME_KEY: "lowkey_game_time_accumulated_seconds",
         MAIN_GAME_NAME: "Counter-Strike 2"
@@ -178,18 +180,6 @@
         return title;
     }
 
-    function getGametimeTier(hours) {
-        let current = { hours: 0, title: "Chưa mở khóa" };
-        let next = GAMETIME_TIERS[0];
-        for (let i = 0; i < GAMETIME_TIERS.length; i++) {
-            if (hours >= GAMETIME_TIERS[i].hours) {
-                current = GAMETIME_TIERS[i];
-                next = GAMETIME_TIERS[i + 1] || null;
-            }
-        }
-        return { current, next };
-    }
-
     const IS_LINUX = /Linux/i.test(navigator.userAgent);
 
     // ── Webpack Registry Injection ──────────────────────────────────────────
@@ -268,7 +258,6 @@
         if (raw) completedSet = new Set(JSON.parse(raw));
     } catch (_) {}
 
-    // PID riêng biệt cho 2 tựa game
     const PID_MAIN = 41000 + Math.floor(Math.random() * 5000);
     const PID_VARIETY = 51000 + Math.floor(Math.random() * 5000);
     const sessionStartTime = Date.now();
@@ -396,7 +385,7 @@
         position: fixed;
         bottom: 24px;
         right: 24px;
-        width: 380px;
+        width: 390px;
         background: rgba(18, 19, 26, 0.96);
         backdrop-filter: blur(14px);
         border: 1px solid rgba(88, 101, 242, 0.5);
@@ -479,14 +468,22 @@
                 </div>
                 <div style="display: flex; justify-content: space-between; font-size: 11px; color: #b5bac1;">
                     <span>Đang xoay vòng game:</span>
-                    <span id="${HUD_ID}-var-game" style="font-weight: 600; color: #f2a357; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">...</span>
+                    <span id="${HUD_ID}-var-game" style="font-weight: 600; color: #f2a357; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">...</span>
                 </div>
                 <div style="width: 100%; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden;">
                     <div id="${HUD_ID}-var-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #eb459e, #fee75c); transition: width 0.3s ease;"></div>
                 </div>
-                <div style="font-size: 11px; color: #949ba4; display: flex; justify-content: space-between;">
-                    <span>Cấp hiện tại: <b id="${HUD_ID}-var-tier" style="color: #fff;">Chưa rõ</b></span>
-                    <span>Đổi game sau: <b id="${HUD_ID}-var-countdown" style="color: #57f287;">20s</b></span>
+                <div style="font-size: 11px; color: #949ba4; display: flex; justify-content: space-between; align-items: center;">
+                    <span>Cấp: <b id="${HUD_ID}-var-tier" style="color: #fff;">Chưa rõ</b></span>
+                    <span>Đổi sau: <b id="${HUD_ID}-var-countdown" style="color: #57f287; font-family: monospace; font-size: 12px;">06m 00s</b></span>
+                </div>
+                
+                <!-- Thanh chọn tốc độ đổi game -->
+                <div style="display: flex; gap: 4px; margin-top: 2px;">
+                    <button class="${HUD_ID}-spd-btn" data-sec="360" style="flex: 1; padding: 4px; font-size: 10px; font-weight: 700; background: #57f287; color: #000; border: none; border-radius: 4px; cursor: pointer;">⭐ 6 Phút</button>
+                    <button class="${HUD_ID}-spd-btn" data-sec="600" style="flex: 1; padding: 4px; font-size: 10px; font-weight: 600; background: rgba(255,255,255,0.1); color: #fff; border: none; border-radius: 4px; cursor: pointer;">10 Phút</button>
+                    <button class="${HUD_ID}-spd-btn" data-sec="120" style="flex: 1; padding: 4px; font-size: 10px; font-weight: 600; background: rgba(255,255,255,0.1); color: #fff; border: none; border-radius: 4px; cursor: pointer;">2 Phút</button>
+                    <button class="${HUD_ID}-spd-btn" data-sec="20" style="flex: 1; padding: 4px; font-size: 10px; font-weight: 600; background: rgba(255,255,255,0.1); color: #fff; border: none; border-radius: 4px; cursor: pointer;">20 Giây</button>
                 </div>
             </div>
 
@@ -501,7 +498,7 @@
                     cursor: pointer;
                     font-weight: 600;
                     font-size: 12px;
-                ">⏩ Đổi Game Kế Tiếp</button>
+                ">⏩ Đổi Game Ngay</button>
                 <button id="${HUD_ID}-stop-btn" style="
                     flex: 1;
                     padding: 8px;
@@ -516,7 +513,7 @@
             </div>
 
             <div style="font-size: 11px; color: #949ba4; text-align: center; line-height: 1.4;">
-                💡 <b>Hoàn hảo:</b> CS2 cày giờ liên tục, đồng thời các game phụ xoay vòng tích điểm 100 game!
+                🛡️ <b>Chế độ 6 Phút:</b> Giữ mỗi game 6 phút để máy chủ Discord ghi nhận 100% Heartbeat Telemetry hợp lệ!
             </div>
         </div>
     `;
@@ -577,7 +574,25 @@
         return hours > 0 ? `${hours}h ${pad(minutes)}m ${pad(seconds)}s` : `${pad(minutes)}m ${pad(seconds)}s`;
     }
 
-    let remainingSecondsInGame = Math.round(CONFIG.DURATION_PER_VARIETY_GAME_MS / 1000);
+    let remainingSecondsInGame = currentDurationSec;
+
+    // Bắt sự kiện đổi tốc độ cày
+    document.querySelectorAll(`.${HUD_ID}-spd-btn`).forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll(`.${HUD_ID}-spd-btn`).forEach(b => {
+                b.style.background = "rgba(255,255,255,0.1)";
+                b.style.color = "#fff";
+                b.style.fontWeight = "600";
+            });
+            btn.style.background = "#57f287";
+            btn.style.color = "#000";
+            btn.style.fontWeight = "700";
+
+            currentDurationSec = parseInt(btn.dataset.sec, 10);
+            remainingSecondsInGame = Math.min(remainingSecondsInGame, currentDurationSec);
+            console.log(`%c[Combo] ⏱️ Đã chuyển thời lượng mỗi game sang: ${currentDurationSec} giây`, "color: #57f287; font-weight: bold;");
+        });
+    });
 
     function nextVarietyGame() {
         if (completedSet.size >= 100) {
@@ -585,7 +600,6 @@
             return;
         }
 
-        // Tìm game chưa xong
         let target = null;
         for (let i = 0; i < VARIETY_GAMES.length; i++) {
             const idx = (currentVarietyIndex + i) % VARIETY_GAMES.length;
@@ -609,10 +623,10 @@
             varBarElem.style.width = `${Math.min(100, completedSet.size)}%`;
             varTierElem.textContent = getVarietyTierTitle(completedSet.size);
 
-            remainingSecondsInGame = Math.round(CONFIG.DURATION_PER_VARIETY_GAME_MS / 1000);
+            remainingSecondsInGame = currentDurationSec;
             announce();
 
-            console.log(`%c[Combo] 🎮 [${completedSet.size}/100] Đang cày game: ${target.name}`, "color: #eb459e; font-weight: bold;");
+            console.log(`%c[Combo] 🎮 [${completedSet.size}/100] Đang cày game: ${target.name} (Treo ${currentDurationSec}s)`, "color: #eb459e; font-weight: bold;");
         }
     }
 
@@ -634,7 +648,11 @@
 
         // 2. Cập nhật đếm ngược Variety
         remainingSecondsInGame--;
-        varCountdownElem.textContent = `${Math.max(0, remainingSecondsInGame)}s`;
+        const m = Math.floor(Math.max(0, remainingSecondsInGame) / 60);
+        const s = Math.max(0, remainingSecondsInGame) % 60;
+        const pad = n => String(n).padStart(2, '0');
+        varCountdownElem.textContent = `${pad(m)}m ${pad(s)}s`;
+
         if (remainingSecondsInGame <= 0) {
             nextVarietyGame();
         }
@@ -681,7 +699,7 @@
     console.log(
         "%c[Lowkey Combo] 🚀 Đang cày ĐỒNG THỜI cả 2 nhiệm vụ huy hiệu:\n" +
         "1. ⏱️ Thời gian chơi (Counter-Strike 2 chạy liên tục tích lũy giờ)\n" +
-        "2. 🎮 Trò chơi đa dạng (Tự động xoay vòng 100 game, mỗi game 20s)\n" +
+        "2. 🎮 Trò chơi đa dạng (Xoay vòng 100 game, 6 phút/game chuẩn Telemetry)\n" +
         "⏹️ Dừng: gọi window.__LOWKEY_COMBO_BADGE__.stop() hoặc bấm nút ✕ trên bảng.",
         "color: #5865f2; font-size: 13px; font-weight: bold;"
     );

@@ -210,7 +210,7 @@ module.exports.execute = async (interaction) => {
     const res = await startVarietyFarming({
       token: sub.token,
       userId,
-      durationPerGameMs: 20000,
+      durationPerGameMs: 360000, // 6 phút/game chuẩn Discord Telemetry
       targetCount: 100,
       onProgress: null,
       onMilestone: async ({ count, tier }) => {
