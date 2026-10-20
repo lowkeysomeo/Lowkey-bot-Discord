@@ -29,6 +29,9 @@ module.exports.data = {
         { name: '🎮 Cày Huy hiệu Trò chơi đa dạng (Token ngầm)', value: 'variety_start' },
         { name: '⏹️ Dừng cày Huy hiệu Trò chơi đa dạng', value: 'variety_stop' },
         { name: '📊 Xem tiến trình Huy hiệu Trò chơi đa dạng', value: 'variety_status' },
+        { name: '⏱️ Cày Huy hiệu Thời gian chơi (Token ngầm 24/7)', value: 'gametime_start' },
+        { name: '⏹️ Dừng cày Huy hiệu Thời gian chơi', value: 'gametime_stop' },
+        { name: '📊 Xem tiến trình Huy hiệu Thời gian chơi', value: 'gametime_status' },
         { name: '🛡️ Quản lý phê duyệt (Dành cho Admin)', value: 'admin' },
         { name: '🔑 Hướng dẫn lấy Token (iOS, Android & PC)', value: 'token_guide' },
         { name: '⚡ Lấy Script Auto Hoàn Thành Quest (Console)', value: 'script' },
@@ -271,6 +274,96 @@ module.exports.execute = async (interaction) => {
         `🏅 Cấp hiện tại: **${tierTitle}**\n` +
         `⚡ Trạng thái: **${isRunning ? '🟢 Đang cày ngầm' : '🔴 Không chạy'}**\n\n` +
         `${isRunning ? '💡 Dùng \`/quest action:variety_stop\` để dừng.' : '💡 Dùng \`/quest action:variety_start\` để tiếp tục cày!'}`,
+    });
+  }
+
+
+  if (action === 'gametime_start') {
+    if (!isApproved(userId) && !isOwner(userId)) {
+      return interaction.reply({ flags: 64, ...buildAccessGatePayload(userObj) });
+    }
+    const { getSubscriber } = require('../../utils/questScheduler');
+    const sub = getSubscriber(userId);
+    if (!sub || !sub.token) {
+      return interaction.reply({
+        flags: 64,
+        content: '❌ Bạn chưa nạp Token. Dùng `/quest action:token` để nạp token trước nhé!',
+      });
+    }
+    const { startGametimeFarming, isGametimeFarmingActive, loadGametimeProgress, getTierTitle } = require('../../utils/gameTimeWorker');
+    if (isGametimeFarmingActive(userId)) {
+      const prog = loadGametimeProgress(userId);
+      const totalHours = Math.floor((prog.accumulatedSeconds || 0) / 3600);
+      return interaction.reply({
+        flags: 64,
+        content: `⚡ Tiến trình cày giờ chơi đang chạy rồi! **~${totalHours} giờ chơi** — Cấp: **${getTierTitle(totalHours)}**`,
+      });
+    }
+    if (typeof interaction.deferReply === 'function') {
+      await interaction.deferReply({ flags: 64 });
+    }
+    const res = await startGametimeFarming({
+      token: sub.token,
+      userId,
+      onMilestone: async ({ totalHours, tier }) => {
+        try {
+          const user = await interaction.client.users.fetch(userId);
+          await user.send(`🎉 **Đạt mốc Huy hiệu Thời gian chơi!** Bạn đã tích lũy **${totalHours} giờ** — Cấp: **${tier.title}**!`);
+        } catch (_) {}
+      },
+    });
+    if (!res.success) {
+      return interaction.editReply({ content: `❌ ${res.message}` });
+    }
+    const prog = loadGametimeProgress(userId);
+    const totalHours = Math.floor((prog.accumulatedSeconds || 0) / 3600);
+    return interaction.editReply({
+      content:
+        `✅ **Đã bắt đầu cày ngầm Huy hiệu Thời gian chơi 24/7!**\n` +
+        `🎮 Tựa game: **${res.gameName}** | Người dùng: **${res.username}**\n` +
+        `⏱️ Giờ chơi đã tích lũy: **~${totalHours}h** | Cấp: **${getTierTitle(totalHours)}**\n` +
+        `💡 Bot sẽ giữ kết nối trên Cloud 24/7. Tắt máy vẫn tiếp tục tích lũy giờ. Dùng \`/quest action:gametime_stop\` để dừng.`,
+    });
+  }
+
+  if (action === 'gametime_stop') {
+    const { stopGametimeFarming, isGametimeFarmingActive, loadGametimeProgress, getTierTitle } = require('../../utils/gameTimeWorker');
+    if (!isGametimeFarmingActive(userId)) {
+      return interaction.reply({
+        flags: 64,
+        content: '⚠️ Hiện không có phiên cày giờ chơi nào đang chạy trên tài khoản của bạn.',
+      });
+    }
+    stopGametimeFarming(userId);
+    const prog = loadGametimeProgress(userId);
+    const totalHours = Math.floor((prog.accumulatedSeconds || 0) / 3600);
+    return interaction.reply({
+      flags: 64,
+      content: `⏹️ **Đã dừng cày giờ chơi!** Tiến trình đã lưu: **~${totalHours} giờ** — Cấp: **${getTierTitle(totalHours)}**`,
+    });
+  }
+
+  if (action === 'gametime_status') {
+    const { isGametimeFarmingActive, loadGametimeProgress, getTierTitle, TIERS } = require('../../utils/gameTimeWorker');
+    const prog = loadGametimeProgress(userId);
+    const isRunning = isGametimeFarmingActive(userId);
+    const totalHours = Math.floor((prog.accumulatedSeconds || 0) / 3600);
+    const currentTier = getTierTitle(totalHours);
+    let nextTier = TIERS.find(t => t.hours > totalHours) || null;
+    let pct = 100;
+    if (nextTier) {
+      pct = Math.min(100, Math.round((totalHours / nextTier.hours) * 100));
+    }
+    const bar = '█'.repeat(Math.floor(pct / 10)) + '░'.repeat(10 - Math.floor(pct / 10));
+    return interaction.reply({
+      flags: 64,
+      content:
+        `⏱️ **Huy hiệu Thời gian chơi — Tiến trình của bạn**\n\n` +
+        `${bar} **${pct}%**\n` +
+        `⏳ Đã tích lũy: **~${totalHours} giờ** chơi\n` +
+        `🏅 Cấp hiện tại: **${currentTier}**` + (nextTier ? ` → Mục tiêu: **${nextTier.title} (${nextTier.hours}h)**` : '') + `\n` +
+        `⚡ Trạng thái: **${isRunning ? '🟢 Đang cày ngầm 24/7' : '🔴 Không chạy'}**\n\n` +
+        `${isRunning ? '💡 Dùng \`/quest action:gametime_stop\` để dừng.' : '💡 Dùng \`/quest action:gametime_start\` để tiếp tục cày!'}`,
     });
   }
 

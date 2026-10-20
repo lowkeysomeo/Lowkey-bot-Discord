@@ -250,7 +250,12 @@ function buildMainHubPayload(guildId, userId = null) {
       .setCustomId('quest:info')
       .setLabel('Mẹo & Điểm ORB')
       .setEmoji('ℹ️')
-      .setStyle(ButtonStyle.Secondary)
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('quest:gametime_status')
+      .setLabel('Cày Giờ chơi')
+      .setEmoji('⏱️')
+      .setStyle(ButtonStyle.Success)
   );
 
   const { isOwner } = require('./questAuth');
@@ -432,6 +437,34 @@ async function handleButtonInteraction(interaction) {
   if (action === 'token_guide') {
     const payload = buildTokenGuidePayload();
     return interaction.update({ content: null, ...payload });
+  }
+
+  if (action === 'gametime_status') {
+    const { isGametimeFarmingActive, loadGametimeProgress, getTierTitle, TIERS } = require('./gameTimeWorker');
+    const prog = loadGametimeProgress(userId);
+    const isRunning = isGametimeFarmingActive(userId);
+    const totalHours = Math.floor((prog.accumulatedSeconds || 0) / 3600);
+    const currentTier = getTierTitle(totalHours);
+    let nextTier = TIERS.find(t => t.hours > totalHours) || null;
+    let pct = 100;
+    if (nextTier) {
+      pct = Math.min(100, Math.round((totalHours / nextTier.hours) * 100));
+    }
+    const bar = '█'.repeat(Math.floor(pct / 10)) + '░'.repeat(10 - Math.floor(pct / 10));
+    const statusEmoji = isRunning ? '🟢 Đang cày ngầm 24/7' : '🔴 Không chạy';
+    const hint = isRunning
+      ? '💡 Dùng `/quest action:gametime_stop` để dừng.'
+      : '💡 Dùng `/quest action:gametime_start` để tiếp tục cày!';
+    return interaction.reply({
+      flags: 64,
+      content:
+        `⏱️ **Huy hiệu Thời gian chơi — Tiến trình của bạn**\n\n` +
+        `${bar} **${pct}%**\n` +
+        `⏳ Đã tích lũy: **~${totalHours} giờ** chơi\n` +
+        `🏅 Cấp hiện tại: **${currentTier}**` + (nextTier ? ` → Mục tiêu: **${nextTier.title} (${nextTier.hours}h)**` : '') + `\n` +
+        `⚡ Trạng thái: **${statusEmoji}**\n\n` +
+        `${hint}`,
+    });
   }
 
   if (action === 'variety_status') {
