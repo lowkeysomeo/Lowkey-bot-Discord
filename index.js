@@ -144,6 +144,13 @@ client.on(
     if (message.webhookId) return;
     if (message.author.bot) return;
 
+    // Tự động thả emoji vào các kênh cấu hình (ví dụ: kênh quotes)
+    try {
+      require('./utils/autoReaction').handleMessage(message);
+    } catch (err) {
+      console.error('[AUTO-REACT ERROR]', err);
+    }
+
     // Xử lý lệnh moderation gõ trực tiếp trong chat (vnban, vnkick, vntimeout, vnuntimeout)
     if (await require('./utils/chatModeration').handleChatModeration(message)) return;
 
