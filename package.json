@@ -8,7 +8,9 @@
     "start": "node index.js",
     "test": "node check.js --tests",
     "check": "node check.js",
-    "quest:token": "node scripts/autoQuestToken.js"
+    "quest:token": "node scripts/autoQuestToken.js",
+    "variety:start": "node scripts/run_game_variety_cdp.js",
+    "variety:token": "node scripts/auto_variety_token.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1152.0",

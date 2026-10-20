@@ -26,6 +26,9 @@ module.exports.data = {
         { name: '⏰ Đặt lịch Tự động quét & làm Quest mới', value: 'auto' },
         { name: '🔄 Quét tìm nhiệm vụ mới ngay lập tức', value: 'scan' },
         { name: '🤖 Auto 100% bằng User Token (Cả Điện thoại & PC)', value: 'token' },
+        { name: '🎮 Cày Huy hiệu Trò chơi đa dạng (Token ngầm)', value: 'variety_start' },
+        { name: '⏹️ Dừng cày Huy hiệu Trò chơi đa dạng', value: 'variety_stop' },
+        { name: '📊 Xem tiến trình Huy hiệu Trò chơi đa dạng', value: 'variety_status' },
         { name: '🛡️ Quản lý phê duyệt (Dành cho Admin)', value: 'admin' },
         { name: '🔑 Hướng dẫn lấy Token (iOS, Android & PC)', value: 'token_guide' },
         { name: '⚡ Lấy Script Auto Hoàn Thành Quest (Console)', value: 'script' },
@@ -173,6 +176,101 @@ module.exports.execute = async (interaction) => {
     }
     return replyFn({
       content: 'ℹ️ Bot hiện không ở trong phòng Voice nào để hỗ trợ quest trong server này.',
+    });
+  }
+
+
+  if (action === 'variety_start') {
+    if (!isApproved(userId) && !isOwner(userId)) {
+      return interaction.reply({ flags: 64, ...buildAccessGatePayload(userObj) });
+    }
+    const { getSubscriber } = require('../../utils/questScheduler');
+    const sub = getSubscriber(userId);
+    if (!sub || !sub.token) {
+      return interaction.reply({
+        flags: 64,
+        content: '❌ Bạn chưa nạp Token. Dùng `/quest action:token` để nạp token trước nhé!',
+      });
+    }
+    const { startVarietyFarming, isFarmingActive, loadProgress, getTierTitle } = require('../../utils/varietyTokenWorker');
+    if (isFarmingActive(userId)) {
+      const prog = loadProgress(userId);
+      const count = (prog.completed || []).length;
+      return interaction.reply({
+        flags: 64,
+        content: `⚡ Tiến trình cày ngầm đang chạy rồi! **${count}/100 games** - Cấp: **${getTierTitle(count)}**`,
+      });
+    }
+    if (typeof interaction.deferReply === 'function') {
+      await interaction.deferReply({ flags: 64 });
+    }
+    const res = await startVarietyFarming({
+      token: sub.token,
+      userId,
+      durationPerGameMs: 20000,
+      targetCount: 100,
+      onProgress: null,
+      onMilestone: async ({ count, tier }) => {
+        try {
+          const user = await interaction.client.users.fetch(userId);
+          await user.send(`🎉 **Đạt mốc huy hiệu!** Bạn đã chơi **${count}/100** game — Cấp: **${tier.title}**!`);
+        } catch (_) {}
+      },
+      onComplete: async ({ totalGames, tierTitle }) => {
+        try {
+          const user = await interaction.client.users.fetch(userId);
+          await user.send(`🏆 **HOÀN TẤT 100% CÀY HUY HIỆU!**\nĐã ghi nhận **${totalGames}** game — Huy hiệu: **${tierTitle}**!`);
+        } catch (_) {}
+      },
+    });
+    if (!res.success) {
+      return interaction.editReply({ content: `❌ ${res.message}` });
+    }
+    const prog2 = loadProgress(userId);
+    const count2 = (prog2.completed || []).length;
+    return interaction.editReply({
+      content:
+        `✅ **Đã bắt đầu cày ngầm Huy hiệu Trò chơi đa dạng!**\n` +
+        `🎮 Người dùng: **${res.username}**\n` +
+        `📊 Tiến trình: **${count2}/100** games | Cấp: **${getTierTitle(count2)}**\n` +
+        `💡 Chạy ngầm 24/7 qua Token Gateway. Dùng \`/quest action:variety_stop\` để dừng.`,
+    });
+  }
+
+  if (action === 'variety_stop') {
+    const { stopVarietyFarming, isFarmingActive, loadProgress, getTierTitle } = require('../../utils/varietyTokenWorker');
+    if (!isFarmingActive(userId)) {
+      return interaction.reply({
+        flags: 64,
+        content: '⚠️ Hiện không có phiên cày ngầm nào đang chạy trên tài khoản của bạn.',
+      });
+    }
+    stopVarietyFarming(userId);
+    const prog = loadProgress(userId);
+    const count = (prog.completed || []).length;
+    return interaction.reply({
+      flags: 64,
+      content: `⏹️ **Đã dừng cày ngầm!** Tiến trình đã lưu: **${count}/100** games — Cấp: **${getTierTitle(count)}**`,
+    });
+  }
+
+  if (action === 'variety_status') {
+    const { isFarmingActive, loadProgress, getTierTitle } = require('../../utils/varietyTokenWorker');
+    const prog = loadProgress(userId);
+    const count = (prog.completed || []).length;
+    const isRunning = isFarmingActive(userId);
+    const tierTitle = getTierTitle(count);
+    const pct = Math.min(100, Math.round((count / 100) * 100));
+    const bar = '█'.repeat(Math.floor(pct / 10)) + '░'.repeat(10 - Math.floor(pct / 10));
+    return interaction.reply({
+      flags: 64,
+      content:
+        `🎮 **Huy hiệu Trò chơi đa dạng — Tiến trình của bạn**\n\n` +
+        `${bar} **${pct}%**\n` +
+        `📊 Đã hoàn thành: **${count}/100** games\n` +
+        `🏅 Cấp hiện tại: **${tierTitle}**\n` +
+        `⚡ Trạng thái: **${isRunning ? '🟢 Đang cày ngầm' : '🔴 Không chạy'}**\n\n` +
+        `${isRunning ? '💡 Dùng \`/quest action:variety_stop\` để dừng.' : '💡 Dùng \`/quest action:variety_start\` để tiếp tục cày!'}`,
     });
   }
 

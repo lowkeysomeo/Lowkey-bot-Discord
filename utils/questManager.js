@@ -227,7 +227,12 @@ function buildMainHubPayload(guildId, userId = null) {
       .setCustomId('quest:stream')
       .setLabel('Treo Voice 15p')
       .setEmoji('🎙️')
-      .setStyle(ButtonStyle.Secondary)
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('quest:variety_status')
+      .setLabel('Cày Huy hiệu')
+      .setEmoji('🎮')
+      .setStyle(ButtonStyle.Success)
   );
 
   const row2 = new ActionRowBuilder().addComponents(
@@ -427,6 +432,30 @@ async function handleButtonInteraction(interaction) {
   if (action === 'token_guide') {
     const payload = buildTokenGuidePayload();
     return interaction.update({ content: null, ...payload });
+  }
+
+  if (action === 'variety_status') {
+    const { isFarmingActive, loadProgress, getTierTitle } = require('./varietyTokenWorker');
+    const prog = loadProgress(userId);
+    const count = (prog.completed || []).length;
+    const isRunning = isFarmingActive(userId);
+    const tierTitle = getTierTitle(count);
+    const pct = Math.min(100, Math.round((count / 100) * 100));
+    const bar = '\u2588'.repeat(Math.floor(pct / 10)) + '\u2591'.repeat(10 - Math.floor(pct / 10));
+    const statusEmoji = isRunning ? '\U0001f7e2 \u0110ang c\u00e0y ng\u1ea7m' : '\U0001f534 Kh\u00f4ng ch\u1ea1y';
+    const hint = isRunning
+      ? '\U0001f4a1 D\u00f9ng `/quest action:variety_stop` \u0111\u1ec3 d\u1eebng.'
+      : '\U0001f4a1 D\u00f9ng `/quest action:variety_start` \u0111\u1ec3 ti\u1ebfp t\u1ee5c c\u00e0y!';
+    return interaction.reply({
+      flags: 64,
+      content:
+        `\U0001f3ae **Huy hi\u1ec7u Tr\u00f2 ch\u01a1i \u0111a d\u1ea1ng \u2014 Ti\u1ebfn tr\u00ecnh c\u1ee7a b\u1ea1n**\n\n` +
+        `${bar} **${pct}%**\n` +
+        `\U0001f4ca \u0110\u00e3 ho\u00e0n th\u00e0nh: **${count}/100** games\n` +
+        `\U0001f3c5 C\u1ea5p hi\u1ec7n t\u1ea1i: **${tierTitle}**\n` +
+        `\u26a1 Tr\u1ea1ng th\u00e1i: **${statusEmoji}**\n\n` +
+        `${hint}`,
+    });
   }
 
   if (action === 'hub') {
