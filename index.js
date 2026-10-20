@@ -493,3 +493,70 @@ client.login(process.env.TOKEN).catch(error => {
   dashboardServer?.close();
   process.exitCode = 1;
 });
+
+// Xử lý tắt bot an toàn (Graceful shutdown) khi Railway deploy container mới hoặc SIGTERM/SIGINT
+let isShuttingDown = false;
+async function handleShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  console.log(`[SHUTDOWN] Nhận tín hiệu ${signal}. Đang dọn dẹp các kết nối an toàn...`);
+
+  if (voiceTimer) {
+    try { clearInterval(voiceTimer); } catch (_) {}
+  }
+
+  // Dọn dẹp an toàn các phiên cày game time và lưu thời gian đã tích lũy
+  try {
+    const { activeSessions: gtSessions } = require('./utils/gameTimeWorker');
+    if (gtSessions && typeof gtSessions.forEach === 'function') {
+      gtSessions.forEach((session, uid) => {
+        try {
+          if (session.timer) clearInterval(session.timer);
+          session.running = false;
+          const elapsed = Math.floor((Date.now() - session.startedAt) / 1000);
+          session.client?.disconnect(true);
+          try {
+            const { getDb } = require('./utils/database');
+            const db = getDb();
+            const row = db.prepare('SELECT accumulated_seconds FROM gametime_sessions WHERE user_id = ?').get(uid);
+            if (row) {
+              const updatedSec = (row.accumulated_seconds || 0) + elapsed;
+              db.prepare('UPDATE gametime_sessions SET accumulated_seconds = ?, current_session_seconds = 0 WHERE user_id = ?').run(updatedSec, uid);
+            }
+          } catch (_) {}
+        } catch (_) {}
+      });
+      gtSessions.clear();
+    }
+  } catch (_) {}
+
+  // Dọn dẹp an toàn các phiên cày variety token
+  try {
+    const { activeSessions: varSessions } = require('./utils/varietyTokenWorker');
+    if (varSessions && typeof varSessions.forEach === 'function') {
+      varSessions.forEach((session) => {
+        try {
+          if (session.timer) clearTimeout(session.timer);
+          session.running = false;
+          session.client?.disconnect(true);
+        } catch (_) {}
+      });
+      varSessions.clear();
+    }
+  } catch (_) {}
+
+  try {
+    dashboardServer?.close();
+  } catch (_) {}
+
+  try {
+    await client.destroy();
+  } catch (_) {}
+
+  console.log('[SHUTDOWN] Đã ngắt tất cả kết nối Gateway & Discord. Tiến trình dừng an toàn.');
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+process.on('SIGINT', () => handleShutdown('SIGINT'));
+

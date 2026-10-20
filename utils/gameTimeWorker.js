@@ -13,7 +13,15 @@ try {
   WebSocketImpl = require('ws');
 } catch (e) {}
 
-const PROGRESS_FILE = path.join(__dirname, '..', 'data', 'gametime_progress.json');
+function resolveProgressFilePath() {
+  const railwayDataDir = '/data';
+  if (fs.existsSync(railwayDataDir)) {
+    return path.join(railwayDataDir, 'gametime_progress.json');
+  }
+  return path.join(__dirname, '..', 'data', 'gametime_progress.json');
+}
+
+const PROGRESS_FILE = resolveProgressFilePath();
 
 // Danh sách các tựa game với Discord Snowflake Application ID chính thức từ Discord Database
 const SUPPORTED_GAMES = [
@@ -553,6 +561,20 @@ async function startGametimeFarming({
   if (accumulatedSeconds !== null && Number.isFinite(accumulatedSeconds)) {
     progress.accumulatedSeconds = accumulatedSeconds;
   }
+
+  // Tự động đánh dấu tất cả các mốc đã đạt từ trước để không bao giờ gửi lại
+  const totalAccumulated = (progress.accumulatedSeconds || 0) + (progress.currentSessionSeconds || 0);
+  const initialHours = Math.floor(totalAccumulated / 3600);
+  if (!Array.isArray(progress.notifiedHours)) {
+    progress.notifiedHours = [];
+  }
+  for (const t of TIERS) {
+    if (t.hours <= initialHours && !progress.notifiedHours.includes(t.hours)) {
+      progress.notifiedHours.push(t.hours);
+    }
+  }
+  saveGametimeProgress(uid, progress);
+
   const startedAt = Date.now();
   const client = new GametimeGatewayClient(token, game, startedAt);
 
@@ -608,17 +630,18 @@ async function startGametimeFarming({
     saveGametimeProgress(uid, progress);
 
     const totalHours = Math.floor(progress.totalSeconds / 3600);
-    const tier = TIERS.find((t) => t.hours === totalHours);
     if (!Array.isArray(progress.notifiedHours)) {
       progress.notifiedHours = [];
     }
-    if (tier && !progress.notifiedHours.includes(tier.hours)) {
-      progress.notifiedHours.push(tier.hours);
-      saveGametimeProgress(uid, progress);
-      if (typeof onMilestone === 'function') {
-        try {
-          onMilestone({ totalHours, tier });
-        } catch (_) {}
+    for (const tier of TIERS) {
+      if (totalHours >= tier.hours && !progress.notifiedHours.includes(tier.hours)) {
+        progress.notifiedHours.push(tier.hours);
+        saveGametimeProgress(uid, progress);
+        if (typeof onMilestone === 'function') {
+          try {
+            onMilestone({ totalHours: tier.hours, tier });
+          } catch (_) {}
+        }
       }
     }
 
@@ -759,5 +782,6 @@ module.exports = {
   stopGametimeFarming,
   isGametimeFarmingActive,
   getGametimeSession,
-  initGametimeAutoResume
+  initGametimeAutoResume,
+  activeSessions
 };

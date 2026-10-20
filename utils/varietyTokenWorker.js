@@ -13,7 +13,15 @@ try {
   WebSocketImpl = require('ws');
 } catch (e) {}
 
-const PROGRESS_FILE = path.join(__dirname, '..', 'data', 'variety_progress.json');
+function resolveProgressFilePath() {
+  const railwayDataDir = '/data';
+  if (fs.existsSync(railwayDataDir)) {
+    return path.join(railwayDataDir, 'variety_progress.json');
+  }
+  return path.join(__dirname, '..', 'data', 'variety_progress.json');
+}
+
+const PROGRESS_FILE = resolveProgressFilePath();
 
 // Danh mục 130 tựa game PC Detectable của Discord kèm Application ID chính thức
 const GAME_CATALOG = Object.freeze([
@@ -668,6 +676,16 @@ async function startVarietyFarming({
     return { success: false, message: `Không thể kết nối Gateway: ${err.message}` };
   }
 
+  const currentInitialCount = completedSet.size;
+  if (!Array.isArray(progress.notifiedCounts)) {
+    progress.notifiedCounts = [];
+  }
+  for (const t of TIERS) {
+    if (t.count <= currentInitialCount && !progress.notifiedCounts.includes(t.count)) {
+      progress.notifiedCounts.push(t.count);
+    }
+  }
+
   progress.status = 'running';
   saveProgress(uid, progress);
 
@@ -724,17 +742,18 @@ async function startVarietyFarming({
     }
 
     // Báo mốc danh hiệu nếu đạt mốc mới (chỉ báo 1 lần duy nhất cho mỗi mốc)
-    const milestoneReached = TIERS.find((t) => t.count === currentCount);
     if (!Array.isArray(progress.notifiedCounts)) {
       progress.notifiedCounts = [];
     }
-    if (milestoneReached && !progress.notifiedCounts.includes(milestoneReached.count)) {
-      progress.notifiedCounts.push(milestoneReached.count);
-      saveProgress(uid, progress);
-      if (typeof onMilestone === 'function') {
-        try {
-          onMilestone({ count: currentCount, tier: milestoneReached });
-        } catch (_) {}
+    for (const tier of TIERS) {
+      if (currentCount >= tier.count && !progress.notifiedCounts.includes(tier.count)) {
+        progress.notifiedCounts.push(tier.count);
+        saveProgress(uid, progress);
+        if (typeof onMilestone === 'function') {
+          try {
+            onMilestone({ count: tier.count, tier });
+          } catch (_) {}
+        }
       }
     }
 
@@ -873,5 +892,6 @@ module.exports = {
   stopVarietyFarming,
   isFarmingActive,
   getActiveSession,
-  initVarietyAutoResume
+  initVarietyAutoResume,
+  activeSessions
 };
