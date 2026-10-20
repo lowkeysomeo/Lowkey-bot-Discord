@@ -204,6 +204,15 @@ module.exports.execute = async (interaction) => {
         content: `⚡ Tiến trình cày ngầm đang chạy rồi! **${count}/100 games** - Cấp: **${getTierTitle(count)}**`,
       });
     }
+
+    // Tự động tạm dừng cày Thời gian chơi nếu đang chạy để tránh xung đột Presence
+    const { isGametimeFarmingActive, stopGametimeFarming } = require('../../utils/gameTimeWorker');
+    let autoPausedGametime = false;
+    if (isGametimeFarmingActive(userId)) {
+      stopGametimeFarming(userId);
+      autoPausedGametime = true;
+    }
+
     if (typeof interaction.deferReply === 'function') {
       await interaction.deferReply({ flags: 64 });
     }
@@ -231,12 +240,16 @@ module.exports.execute = async (interaction) => {
     }
     const prog2 = loadProgress(userId);
     const count2 = (prog2.completed || []).length;
+    const pauseNote = autoPausedGametime
+      ? `\n*(ℹ️ Đã tự động tạm dừng cày Thời gian chơi để chuyển sang cày 100 game Đa dạng — tránh gửi 2 game xung đột lên Discord)*`
+      : '';
     return interaction.editReply({
       content:
         `✅ **Đã bắt đầu cày ngầm Huy hiệu Trò chơi đa dạng!**\n` +
         `🎮 Người dùng: **${res.username}**\n` +
         `📊 Tiến trình: **${count2}/100** games | Cấp: **${getTierTitle(count2)}**\n` +
-        `💡 Chạy ngầm 24/7 qua Token Gateway. Dùng \`/quest action:variety_stop\` để dừng.`,
+        `💡 Chạy ngầm 24/7 qua Token Gateway. Dùng \`/quest action:variety_stop\` để dừng.` +
+        pauseNote,
     });
   }
 
@@ -299,6 +312,15 @@ module.exports.execute = async (interaction) => {
         content: `⚡ Tiến trình cày giờ chơi đang chạy rồi! **~${totalHours} giờ chơi** — Cấp: **${getTierTitle(totalHours)}**`,
       });
     }
+
+    // Tự động tạm dừng cày Trò chơi đa dạng nếu đang chạy để tránh xung đột Presence
+    const { isFarmingActive: isVarietyActive, stopVarietyFarming } = require('../../utils/varietyTokenWorker');
+    let autoPausedVariety = false;
+    if (isVarietyActive(userId)) {
+      stopVarietyFarming(userId);
+      autoPausedVariety = true;
+    }
+
     if (typeof interaction.deferReply === 'function') {
       await interaction.deferReply({ flags: 64 });
     }
@@ -317,12 +339,16 @@ module.exports.execute = async (interaction) => {
     }
     const prog = loadGametimeProgress(userId);
     const totalHours = Math.floor((prog.accumulatedSeconds || 0) / 3600);
+    const pauseNote = autoPausedVariety
+      ? `\n*(ℹ️ Đã tự động tạm dừng cày Trò chơi đa dạng để chuyển sang cày Thời gian chơi 24/7)*`
+      : '';
     return interaction.editReply({
       content:
         `✅ **Đã bắt đầu cày ngầm Huy hiệu Thời gian chơi 24/7!**\n` +
         `🎮 Tựa game: **${res.gameName}** | Người dùng: **${res.username}**\n` +
         `⏱️ Giờ chơi đã tích lũy: **~${totalHours}h** | Cấp: **${getTierTitle(totalHours)}**\n` +
-        `💡 Bot sẽ giữ kết nối trên Cloud 24/7. Tắt máy vẫn tiếp tục tích lũy giờ. Dùng \`/quest action:gametime_stop\` để dừng.`,
+        `💡 Bot sẽ giữ kết nối trên Cloud 24/7. Tắt máy vẫn tiếp tục tích lũy giờ. Dùng \`/quest action:gametime_stop\` để dừng.` +
+        pauseNote,
     });
   }
 

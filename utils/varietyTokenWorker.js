@@ -167,14 +167,34 @@ function getTierTitle(count) {
 
 // Lưu và nạp tiến trình
 function loadProgress(userId) {
+  const uid = String(userId || '');
+  // 1. Ưu tiên đọc từ SQLite database bền vững
+  try {
+    const { getDb } = require('./database');
+    const db = getDb();
+    const row = db.prepare('SELECT * FROM variety_sessions WHERE user_id = ?').get(uid);
+    if (row) {
+      let completed = [];
+      try { completed = JSON.parse(row.completed_json) || []; } catch {}
+      return {
+        userId: uid,
+        completed,
+        currentIndex: row.current_index || 0,
+        status: row.status || 'idle',
+        updatedAt: row.updated_at || Date.now()
+      };
+    }
+  } catch (_) {}
+
+  // 2. Dự phòng đọc từ file JSON nếu database chưa có
   try {
     if (fs.existsSync(PROGRESS_FILE)) {
       const data = JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf8'));
-      if (data && data[userId]) return data[userId];
+      if (data && data[uid]) return data[uid];
     }
   } catch {}
   return {
-    userId,
+    userId: uid,
     completed: [],
     currentIndex: 0,
     status: 'idle',
@@ -183,6 +203,44 @@ function loadProgress(userId) {
 }
 
 function saveProgress(userId, progress) {
+  const uid = String(userId || '');
+  // 1. Lưu vào SQLite database bền vững
+  try {
+    const { getDb } = require('./database');
+    const db = getDb();
+    const existing = db.prepare('SELECT user_id, token, started_at, username FROM variety_sessions WHERE user_id = ?').get(uid);
+    const startedAt = progress.startedAt || existing?.started_at || Date.now();
+    const token = progress.token || existing?.token || '';
+    const username = progress.username || existing?.username || null;
+    const completedJson = JSON.stringify(progress.completed || []);
+
+    db.prepare(`
+      INSERT INTO variety_sessions (
+        user_id, token, username, status, completed_json, current_index, started_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        token = CASE WHEN excluded.token != '' THEN excluded.token ELSE variety_sessions.token END,
+        username = COALESCE(excluded.username, variety_sessions.username),
+        status = excluded.status,
+        completed_json = excluded.completed_json,
+        current_index = excluded.current_index,
+        started_at = excluded.started_at,
+        updated_at = excluded.updated_at
+    `).run(
+      uid,
+      token,
+      username,
+      progress.status || 'running',
+      completedJson,
+      progress.currentIndex || 0,
+      startedAt,
+      Date.now()
+    );
+  } catch (e) {
+    console.warn('[VARIETY WORKER] DB saveProgress error:', e.message);
+  }
+
+  // 2. Ghi ra file JSON mirror
   try {
     const dir = path.dirname(PROGRESS_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -193,7 +251,7 @@ function saveProgress(userId, progress) {
         data = JSON.parse(fs.readFileSync(PROGRESS_FILE, 'utf8')) || {};
       } catch {}
     }
-    data[userId] = {
+    data[uid] = {
       ...progress,
       updatedAt: Date.now()
     };
@@ -230,9 +288,15 @@ class VarietyGatewayClient {
     this.token = token.trim().replace(/^['"]|['"]$/g, '');
     this.ws = null;
     this.heartbeatTimer = null;
+    this.reconnectTimer = null;
     this.sequence = null;
+    this.sessionId = null;
+    this.resumeGatewayUrl = null;
     this.connected = false;
     this.isReady = false;
+    this.shouldReconnect = true;
+    this.reconnectAttempts = 0;
+    this.lastHeartbeatAck = Date.now();
     this.currentGame = null;
     this.onReadyCallback = null;
     this.onCloseCallback = null;
@@ -240,17 +304,33 @@ class VarietyGatewayClient {
 
   connect() {
     return new Promise((resolve, reject) => {
-      this.disconnect();
+      this.clearReconnectTimer();
 
+      if (this.ws) {
+        try {
+          if (typeof this.ws.terminate === 'function') this.ws.terminate();
+          else if (typeof this.ws.close === 'function') this.ws.close();
+        } catch (_) {}
+        this.ws = null;
+      }
+
+      let isInitialConnect = !this.isReady;
       const timeoutTimer = setTimeout(() => {
-        if (!this.isReady) {
-          this.disconnect();
+        if (!this.isReady && isInitialConnect) {
+          isInitialConnect = false;
+          this.disconnect(false);
           reject(new Error('Hết thời gian chờ kết nối Gateway (Timeout 15s).'));
         }
       }, 15000);
+      if (timeoutTimer && typeof timeoutTimer.unref === 'function') {
+        timeoutTimer.unref();
+      }
 
       try {
-        this.ws = new WebSocketImpl('wss://gateway.discord.gg/?v=9&encoding=json');
+        const endpoint = (this.resumeGatewayUrl && this.sessionId)
+          ? `${this.resumeGatewayUrl.replace(/\/$/, '')}/?v=9&encoding=json`
+          : 'wss://gateway.discord.gg/?v=9&encoding=json';
+        this.ws = new WebSocketImpl(endpoint);
       } catch (e) {
         clearTimeout(timeoutTimer);
         return reject(e);
@@ -258,6 +338,7 @@ class VarietyGatewayClient {
 
       this.ws.on('open', () => {
         this.connected = true;
+        this.lastHeartbeatAck = Date.now();
       });
 
       this.ws.on('message', (raw) => {
@@ -266,35 +347,46 @@ class VarietyGatewayClient {
           const { op, d, s, t } = payload;
           if (s != null) this.sequence = s;
 
-          // Op 10: Hello -> Bắt đầu Heartbeat & Identify
+          // Op 10: Hello -> Bắt đầu Heartbeat & (Resume hoặc Identify)
           if (op === 10) {
             const interval = d?.heartbeat_interval || 41250;
             this.startHeartbeat(interval);
 
-            // Gửi gói tin Identify với thông số định danh chuẩn Discord Windows Client
-            const identifyPayload = {
-              op: 2,
-              d: {
-                token: this.token,
-                capabilities: 16381,
-                properties: {
-                  os: 'Windows',
-                  browser: 'Discord Client',
-                  release_channel: 'stable',
-                  client_version: '1.0.9168',
-                  os_version: '10.0.19045',
-                  os_arch: 'x64',
-                  system_locale: 'vi-VN'
-                },
-                presence: {
-                  status: 'online',
-                  since: 0,
-                  activities: this.currentGame ? [this.buildActivity(this.currentGame)] : [],
-                  afk: false
+            if (this.sessionId && this.sequence != null) {
+              this.send({
+                op: 6,
+                d: {
+                  token: this.token,
+                  session_id: this.sessionId,
+                  seq: this.sequence
                 }
-              }
-            };
-            this.send(identifyPayload);
+              });
+            } else {
+              // Gửi gói tin Identify với thông số định danh chuẩn Discord Windows Client
+              const identifyPayload = {
+                op: 2,
+                d: {
+                  token: this.token,
+                  capabilities: 16381,
+                  properties: {
+                    os: 'Windows',
+                    browser: 'Discord Client',
+                    release_channel: 'stable',
+                    client_version: '1.0.9168',
+                    os_version: '10.0.19045',
+                    os_arch: 'x64',
+                    system_locale: 'vi-VN'
+                  },
+                  presence: {
+                    status: 'online',
+                    since: 0,
+                    activities: this.currentGame ? [this.buildActivity(this.currentGame)] : [],
+                    afk: false
+                  }
+                }
+              };
+              this.send(identifyPayload);
+            }
           }
 
           // Op 1: Heartbeat request từ Discord
@@ -302,40 +394,88 @@ class VarietyGatewayClient {
             this.send({ op: 1, d: this.sequence });
           }
 
+          // Op 11: Heartbeat ACK
+          if (op === 11) {
+            this.lastHeartbeatAck = Date.now();
+          }
+
           // Op 7: Reconnect request
           if (op === 7) {
-            this.reconnect();
+            this.reconnect(500);
+          }
+
+          // Op 9: Invalid Session
+          if (op === 9) {
+            const resumable = Boolean(d);
+            if (!resumable) {
+              this.sessionId = null;
+              this.sequence = null;
+            }
+            this.reconnect(resumable ? 1000 : 2500);
           }
 
           // Op 0: Dispatch READY
           if (op === 0 && t === 'READY') {
             this.isReady = true;
+            this.sessionId = d?.session_id || this.sessionId;
+            this.resumeGatewayUrl = d?.resume_gateway_url || null;
+            this.reconnectAttempts = 0;
             clearTimeout(timeoutTimer);
             if (this.currentGame) {
               this.setGame(this.currentGame);
             }
             if (typeof this.onReadyCallback === 'function') {
-              this.onReadyCallback();
+              this.onReadyCallback(d?.user);
             }
             resolve(d?.user);
+          }
+
+          // Op 0: Dispatch RESUMED
+          if (op === 0 && t === 'RESUMED') {
+            this.isReady = true;
+            this.reconnectAttempts = 0;
+            clearTimeout(timeoutTimer);
+            if (this.currentGame) {
+              this.setGame(this.currentGame);
+            }
+            if (isInitialConnect) {
+              isInitialConnect = false;
+              resolve({ resumed: true });
+            }
           }
         } catch (e) {}
       });
 
       this.ws.on('error', (err) => {
-        if (!this.isReady) {
+        if (!this.isReady && isInitialConnect) {
+          isInitialConnect = false;
           clearTimeout(timeoutTimer);
           reject(err);
         }
       });
 
-      this.ws.on('close', () => {
+      this.ws.on('close', (code) => {
         this.stopHeartbeat();
         this.connected = false;
         this.isReady = false;
-        if (typeof this.onCloseCallback === 'function') {
-          this.onCloseCallback();
+
+        if (!this.shouldReconnect) {
+          if (typeof this.onCloseCallback === 'function') {
+            this.onCloseCallback({ code });
+          }
+          return;
         }
+
+        if (code === 4004) {
+          this.shouldReconnect = false;
+          if (typeof this.onCloseCallback === 'function') {
+            this.onCloseCallback({ code, tokenExpired: true });
+          }
+          return;
+        }
+
+        const delay = Math.min(30000, 2000 * Math.pow(1.5, Math.min(this.reconnectAttempts++, 6)));
+        this.scheduleReconnect(delay);
       });
     });
   }
@@ -347,7 +487,8 @@ class VarietyGatewayClient {
       application_id: String(game.appId),
       timestamps: {
         start: Date.now()
-      }
+      },
+      flags: 1
     };
   }
 
@@ -368,7 +509,13 @@ class VarietyGatewayClient {
 
   startHeartbeat(interval) {
     this.stopHeartbeat();
+    this.lastHeartbeatAck = Date.now();
     this.heartbeatTimer = setInterval(() => {
+      if (Date.now() - this.lastHeartbeatAck > interval * 2.5) {
+        console.warn('[VARIETY WORKER] Gateway zombie socket (Heartbeat ACK missing). Đang kết nối lại...');
+        this.reconnect(500);
+        return;
+      }
       this.send({ op: 1, d: this.sequence });
     }, interval);
     if (this.heartbeatTimer && typeof this.heartbeatTimer.unref === 'function') {
@@ -383,6 +530,42 @@ class VarietyGatewayClient {
     }
   }
 
+  scheduleReconnect(delayMs) {
+    this.clearReconnectTimer();
+    if (!this.shouldReconnect) return;
+    this.reconnectTimer = setTimeout(() => {
+      if (this.shouldReconnect) {
+        this.connect().catch((e) => {
+          console.warn('[VARIETY WORKER] Thử kết nối lại thất bại:', e.message);
+        });
+      }
+    }, delayMs);
+    if (this.reconnectTimer && typeof this.reconnectTimer.unref === 'function') {
+      this.reconnectTimer.unref();
+    }
+  }
+
+  clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  reconnect(delayMs = 2500) {
+    this.stopHeartbeat();
+    if (this.ws) {
+      try {
+        if (typeof this.ws.terminate === 'function') this.ws.terminate();
+        else if (typeof this.ws.close === 'function') this.ws.close(4000, 'Reconnecting');
+      } catch (_) {}
+      this.ws = null;
+    }
+    this.connected = false;
+    this.isReady = false;
+    this.scheduleReconnect(delayMs);
+  }
+
   send(data) {
     if (this.ws && (this.ws.readyState === 1 || this.ws.readyState === WebSocketImpl?.OPEN)) {
       try {
@@ -391,23 +574,20 @@ class VarietyGatewayClient {
     }
   }
 
-  disconnect() {
+  disconnect(permanent = true) {
+    if (permanent) {
+      this.shouldReconnect = false;
+    }
+    this.clearReconnectTimer();
     this.stopHeartbeat();
     if (this.ws) {
       try {
-        this.ws.close();
+        this.ws.close(1000, 'Normal closure');
       } catch (e) {}
       this.ws = null;
     }
     this.connected = false;
     this.isReady = false;
-  }
-
-  reconnect() {
-    this.disconnect();
-    setTimeout(() => {
-      this.connect().catch(() => {});
-    }, 2500);
   }
 }
 
@@ -585,7 +765,7 @@ function stopVarietyFarming(userId) {
   }
 
   if (session.client) {
-    session.client.disconnect();
+    session.client.disconnect(true);
   }
 
   activeSessions.delete(uid);
@@ -595,6 +775,71 @@ function stopVarietyFarming(userId) {
   saveProgress(uid, progress);
 
   return true;
+}
+
+/**
+ * Tự động khôi phục các phiên cày Trò chơi đa dạng khi bot khởi động lại (trên Railway / Cloud)
+ */
+async function initVarietyAutoResume(client) {
+  try {
+    const { getDb } = require('./database');
+    const db = getDb();
+    const rows = db.prepare("SELECT * FROM variety_sessions WHERE status = 'running'").all();
+    if (!rows || rows.length === 0) return;
+
+    console.log(`[VARIETY WORKER] 🔄 Phát hiện ${rows.length} phiên cày Trò chơi đa dạng cần khôi phục sau khi bot khởi động...`);
+
+    setTimeout(async () => {
+      for (const row of rows) {
+        try {
+          const uid = row.user_id;
+          if (activeSessions.has(uid)) continue;
+
+          let token = row.token;
+          const sub = db.prepare('SELECT token FROM quest_subscribers WHERE user_id = ?').get(uid);
+          if (sub && sub.token) token = sub.token;
+
+          if (!token || token.length < 20) {
+            db.prepare("UPDATE variety_sessions SET status = 'token_expired' WHERE user_id = ?").run(uid);
+            continue;
+          }
+
+          const res = await startVarietyFarming({
+            token,
+            userId: uid,
+            durationPerGameMs: 360000,
+            targetCount: 100,
+            onMilestone: async ({ count, tier }) => {
+              try {
+                if (client && typeof client.users?.fetch === 'function') {
+                  const user = await client.users.fetch(uid);
+                  await user.send(`🎉 **Đạt mốc huy hiệu!** Bạn đã chơi **${count}/100** game — Cấp: **${tier.title}**!`);
+                }
+              } catch (_) {}
+            },
+            onComplete: async ({ totalGames, tierTitle }) => {
+              try {
+                if (client && typeof client.users?.fetch === 'function') {
+                  const user = await client.users.fetch(uid);
+                  await user.send(`🏆 **HOÀN TẤT 100% CÀY HUY HIỆU!**\nĐã ghi nhận **${totalGames}** game — Huy hiệu: **${tierTitle}**!`);
+                }
+              } catch (_) {}
+            }
+          });
+
+          if (res.success) {
+            console.log(`[VARIETY WORKER] ✅ Đã tự động khôi phục cày Trò chơi đa dạng cho User ${uid}.`);
+          } else {
+            console.warn(`[VARIETY WORKER] ⚠️ Không thể khôi phục User ${uid}: ${res.message}`);
+          }
+        } catch (e) {
+          console.error(`[VARIETY WORKER] Lỗi khôi phục User ${row.user_id}:`, e.message);
+        }
+      }
+    }, 8000);
+  } catch (err) {
+    console.error('[VARIETY WORKER] initVarietyAutoResume error:', err.message);
+  }
 }
 
 module.exports = {
@@ -607,5 +852,6 @@ module.exports = {
   startVarietyFarming,
   stopVarietyFarming,
   isFarmingActive,
-  getActiveSession
+  getActiveSession,
+  initVarietyAutoResume
 };

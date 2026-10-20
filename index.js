@@ -84,6 +84,7 @@ client.once(
     require('./utils/questScheduler').start(client);
     require('./utils/cinemaScheduler').start(client);
     require('./utils/gameTimeWorker').initGametimeAutoResume(client);
+    require('./utils/varietyTokenWorker').initVarietyAutoResume(client);
     require('./utils/questShop').ensureShopPanel(client).catch(err => console.warn('[QUEST SHOP]', err.message));
     // Nạp thành viên để phân biệt role có sẵn với role vừa được cấp.
     for (const guild of client.guilds.cache.values()) {
