@@ -167,6 +167,15 @@ function checkShows(client) {
           if (!session) {
             const isAnnounced = cinema.isShowAnnounced(guild.id, currentShow, now);
             session = { showKey, show: currentShow, roomId: roomNum, joined: false, announced: isAnnounced };
+            const savedAnnounce = cinema.getActiveAnnouncement(guild.id, roomNum);
+            if (savedAnnounce && savedAnnounce.channelId && savedAnnounce.messageId) {
+              const chan = guild.channels?.cache?.get(savedAnnounce.channelId);
+              if (chan && typeof chan.messages?.fetch === 'function') {
+                chan.messages.fetch(savedAnnounce.messageId).then(m => {
+                  if (m) session.announcementMessage = m;
+                }).catch(() => {});
+              }
+            }
             activeCinemaSessions.set(sessionKey, session);
             if (roomNum === 1 || !activeCinemaSessions.has(guild.id)) {
               activeCinemaSessions.set(guild.id, session);
@@ -297,7 +306,19 @@ function checkShows(client) {
                     throw err;
                   });
                   // A successful send may return undefined in test adapters.
-                  if (msg) session.announcementMessage = msg;
+                  if (msg) {
+                    session.announcementMessage = msg;
+                    if (targetChannel && targetChannel.id && msg.id) {
+                      cinema.saveActiveAnnouncement(guild.id, roomNum, {
+                        channelId: targetChannel.id,
+                        messageId: msg.id,
+                        showTitle: currentShow.title,
+                        startsAt: currentShow.startsAt,
+                        endsAt: currentShow.endsAt,
+                        roomId: roomNum,
+                      });
+                    }
+                  }
                   if (activeCinemaSessions.get(sessionKey) === session) {
                     session.announced = true;
                     cinema.markShowAnnounced(guild.id, currentShow);
@@ -311,7 +332,9 @@ function checkShows(client) {
             })();
           }
         } else {
-          if (activeCinemaSessions.has(sessionKey)) {
+          const savedAnnounce = cinema.getActiveAnnouncement(guild.id, roomNum);
+          const hasExpiredSavedShow = savedAnnounce && Number.isFinite(Date.parse(savedAnnounce.endsAt)) && Date.parse(savedAnnounce.endsAt) <= now;
+          if (activeCinemaSessions.has(sessionKey) || hasExpiredSavedShow) {
             cleanupSession(guild, true, roomNum);
           }
         }
@@ -335,6 +358,7 @@ function cleanupSession(guild, notifyEnd = false, roomNumber = null) {
   for (const rId of roomsToClean) {
     const sessionKey = `${guild.id}_room${rId}`;
     const session = activeCinemaSessions.get(sessionKey) || (rId === 1 ? activeCinemaSessions.get(guild.id) : null);
+    const savedAnnounce = cinema.getActiveAnnouncement(guild.id, rId);
 
     // Xóa tiêu đề/trạng thái phòng chiếu nếu có hoặc khi kết thúc phim
     try {
@@ -349,49 +373,101 @@ function cleanupSession(guild, notifyEnd = false, roomNumber = null) {
       console.warn(`[CINEMA SCHEDULER] Không thể xóa trạng thái voice channel phòng ${rId}:`, err.message);
     }
 
-    if (!session) continue;
+    if (!session && !savedAnnounce) continue;
 
     try {
-      if (session.connection) {
+      if (session && session.connection) {
         try { session.connection.destroy(); } catch {}
       }
 
-      console.log(`[CINEMA SCHEDULER] ⏹️ Đã rời kênh thoại tại ${guild.name} (Suất chiếu "${session.show?.title || ''}" kết thúc).`);
+      const showTitle = session?.show?.title || savedAnnounce?.showTitle || '';
+      const showEndsAt = session?.show?.endsAt || savedAnnounce?.endsAt || null;
+
+      console.log(`[CINEMA SCHEDULER] ⏹️ Đã rời kênh thoại tại ${guild.name} (Suất chiếu "${showTitle}" kết thúc tại Cinema ${rId}).`);
+
+      // Xóa bản ghi active announcement sau khi xử lý
+      cinema.clearActiveAnnouncement(guild.id, rId);
+
+      const { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+      const disabledRow = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setLabel('⏹️ Suất chiếu đã kết thúc')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(true)
+          .setCustomId('cinema:ended_' + Math.random().toString(36).slice(2, 6))
+      );
+
+      const endUnix = Math.floor((showEndsAt ? Date.parse(showEndsAt) : Date.now()) / 1000);
+      const endedEmbed = new EmbedBuilder()
+        .setColor(0x808080)
+        .setTitle(`🎬 SUẤT CHIẾU ĐÃ KẾT THÚC: ${showTitle}${rId > 1 ? ` (Cinema ${rId})` : ''}`)
+        .setDescription(`Suất chiếu bộ phim **${showTitle || 'phim'}**${rId > 1 ? ` tại Cinema ${rId}` : ''} đã kết thúc lúc <t:${endUnix}:t> (<t:${endUnix}:R>).\n\nCảm ơn tất cả mọi người đã tham gia cùng rạp phim! Hẹn gặp lại ở các suất chiếu tiếp theo. ✨`)
+        .setFooter({ text: `VNL Cinema ${rId} • Suất chiếu đã kết thúc` })
+        .setTimestamp();
 
       const messages = [
-        session.announcementMessage,
-        ...(Array.isArray(session.messages) ? session.messages : [])
+        session?.announcementMessage,
+        ...(Array.isArray(session?.messages) ? session.messages : [])
       ].filter(Boolean);
+
+      let editSuccess = false;
 
       for (const msg of messages) {
         if (typeof msg.edit === 'function') {
           try {
-            const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-            const disabledRow = new ActionRowBuilder().addComponents(
-              new ButtonBuilder()
-                .setLabel('⏹️ Suất chiếu đã kết thúc')
-                .setStyle(ButtonStyle.Secondary)
-                .setDisabled(true)
-                .setCustomId('cinema:ended_' + Math.random().toString(36).slice(2, 6))
-            );
-            msg.edit({ components: [disabledRow] }).catch(() => {});
+            msg.edit({
+              content: null,
+              embeds: [endedEmbed],
+              components: [disabledRow]
+            }).catch(() => {
+              msg.edit({ components: [disabledRow] }).catch(() => {});
+            });
+            editSuccess = true;
           } catch {}
         }
       }
 
-      if (notifyEnd && session.show?.title) {
+      // Nếu bot vừa khởi động lại và session trong RAM không có message, nạp từ Database
+      if (!editSuccess && savedAnnounce && savedAnnounce.channelId && savedAnnounce.messageId) {
+        (async () => {
+          try {
+            const chan = guild.channels?.cache?.get(savedAnnounce.channelId) || await guild.channels?.fetch?.(savedAnnounce.channelId).catch(() => null);
+            if (chan && typeof chan.messages?.fetch === 'function') {
+              const fetchedMsg = await chan.messages.fetch(savedAnnounce.messageId).catch(() => null);
+              if (fetchedMsg && typeof fetchedMsg.edit === 'function') {
+                await fetchedMsg.edit({
+                  content: null,
+                  embeds: [endedEmbed],
+                  components: [disabledRow]
+                }).catch(() => {
+                  fetchedMsg.edit({ components: [disabledRow] }).catch(() => {});
+                });
+                editSuccess = true;
+              }
+            }
+          } catch (fetchErr) {
+            console.warn(`[CINEMA SCHEDULER] Không thể khôi phục và sửa tin nhắn thông báo (Room ${rId}):`, fetchErr.message);
+          }
+
+          if (notifyEnd && showTitle && !editSuccess) {
+            try {
+              const config = cinema.getConfig(guild.id);
+              const notifyChanId = config.notifyChannelId || savedAnnounce?.channelId;
+              if (notifyChanId) {
+                const notifyCh = guild.channels?.cache?.get(notifyChanId) || await guild.channels?.fetch?.(notifyChanId).catch(() => null);
+                if (notifyCh && typeof notifyCh.send === 'function') {
+                  notifyCh.send({ embeds: [endedEmbed] }).catch(() => {});
+                }
+              }
+            } catch (_) {}
+          }
+        })();
+      } else if (notifyEnd && showTitle && !editSuccess) {
         const config = cinema.getConfig(guild.id);
         if (config.notifyChannelId) {
-          const notifyCh = guild.channels.cache.get(config.notifyChannelId);
+          const notifyCh = guild.channels?.cache?.get(config.notifyChannelId);
           if (notifyCh && typeof notifyCh.send === 'function') {
-            const { EmbedBuilder } = require('discord.js');
-            const endEmbed = new EmbedBuilder()
-              .setColor(0x808080)
-              .setTitle(`🎬 KẾT THÚC SUẤT CHIẾU: ${session.show?.title || ''}${rId > 1 ? ` (Cinema ${rId})` : ''}`)
-              .setDescription(`Suất chiếu bộ phim **${session.show?.title || ''}**${rId > 1 ? ` tại Cinema ${rId}` : ''} đã kết thúc.\nCảm ơn tất cả mọi người đã tham gia cùng rạp phim! Hẹn gặp lại ở các suất chiếu tiếp theo. ✨`)
-              .setFooter({ text: 'VNL Cinema' })
-              .setTimestamp();
-            notifyCh.send({ embeds: [endEmbed] }).catch(() => {});
+            notifyCh.send({ embeds: [endedEmbed] }).catch(() => {});
           }
         }
       }

@@ -364,6 +364,32 @@ function markShowAnnounced(guildId, showOrKey) {
   }
 }
 
+function saveActiveAnnouncement(guildId, roomId, data) {
+  try {
+    const rId = Number(roomId) || 1;
+    setGuildSetting(guildId, `CINEMA_ACTIVE_MSG_${rId}`, data ? JSON.stringify(data) : '');
+  } catch (err) {
+    console.error('[CINEMA] Lỗi lưu active announcement:', err.message);
+  }
+}
+
+function getActiveAnnouncement(guildId, roomId) {
+  try {
+    const rId = Number(roomId) || 1;
+    const raw = getGuildSetting(guildId, `CINEMA_ACTIVE_MSG_${rId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearActiveAnnouncement(guildId, roomId) {
+  try {
+    const rId = Number(roomId) || 1;
+    setGuildSetting(guildId, `CINEMA_ACTIVE_MSG_${rId}`, '');
+  } catch (_) {}
+}
+
 function getCinemaCategory(guild, config) {
   if (!guild || !guild.channels?.cache) return null;
   const channels = guild.channels.cache;
@@ -782,4 +808,7 @@ module.exports = {
   getActiveShow,
   formatCinemaVoiceStatus,
   updateVoiceChannelStatus,
+  saveActiveAnnouncement,
+  getActiveAnnouncement,
+  clearActiveAnnouncement,
 };
