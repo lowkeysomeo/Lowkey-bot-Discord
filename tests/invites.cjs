@@ -35,6 +35,12 @@ async function main(){
   assert.equal(system.attribute(undefined,before,1),null);
   assert.equal(system.attribute(before,new Map([['new',{uses:1,inviter:'A'}]]),1),null);
   assert.equal(system.attribute(before,new Map(),1),null,'Link dùng một lần đã mất không được đoán');
+  // Link 1 lần dùng duy nhất bị biến mất khi có 1 thành viên tham gia
+  const beforeSingle = new Map([['perm',{uses:5,inviter:'Mod'}],['single_use',{uses:0,inviter:'A'}]]);
+  assert.equal(system.attribute(beforeSingle, new Map([['perm',{uses:5,inviter:'Mod'}]]), 1), 'A', 'Link 1 lần dùng bị biến mất phải được nhận diện chính xác');
+  // Link mời mới xuất hiện với 1 lượt dùng
+  const beforeNew = new Map([['perm',{uses:5,inviter:'Mod'}]]);
+  assert.equal(system.attribute(beforeNew, new Map([['perm',{uses:5,inviter:'Mod'}],['new_direct',{uses:1,inviter:'B'}]]), 1), 'B', 'Link mời mới xuất hiện với 1 lượt dùng phải được nhận diện');
   for(let n=0;n<49;n++)system.record('g','member'+n,'owner');
   assert.equal(system.count('g','owner'),50);
   await system.reward(guild,'owner');assert(cache.has('r50'));
@@ -57,6 +63,8 @@ async function main(){
   assert.throws(()=>validate({inviteRole100:'r100'}));
   saveOptions('g',{inviteEnabled:false});uses=7;await system.processBatch(guild,[{id:'disabled',user:{bot:false}}]);
   assert.equal(system.count('g','owner'),101);
+  await system.setInviter(guild, 'manual_member', 'owner');
+  assert.equal(system.count('g','owner'),102,'Gán thủ công người mời thành công');
   console.log('Đạt: invite thường, không đoán lượt mơ hồ, chống vào lại/bot/tự mời, dữ liệu SQLite, 50→100 chỉ giữ role cao nhất, thử lại và kiểm tra cấu hình.');
   let failPrime=true, primeCalls=0;
   const recovery={...guild,id:'recovery',members:{...guild.members,fetch:async()=>{primeCalls++;if(failPrime)throw Error('Rate limited');return new Collection();}}};

@@ -1,7 +1,9 @@
-const { EmbedBuilder, PermissionFlagsBits: P } = require('discord.js');
+const { EmbedBuilder, PermissionFlagsBits: P, AuditLogEvent } = require('discord.js');
 const { getDb } = require('./database');
 const { getOptions } = require('./customization');
 const snapshots = new Map();
+const vanitySnapshots = new Map();
+const recentlyDeleted = new Map();
 const initialized = new Set();
 const queues = new Map();
 const batches = new Map();
@@ -28,7 +30,13 @@ function serial(guildId, task) {
   return p.finally(()=>{if(queues.get(guildId)===p) queues.delete(guildId);});
 }
 function snapshot(invites) {
-  return new Map([...invites.values()].map(i=>[i.code,{ uses:Number(i.uses)||0, inviter:i.inviter?.bot ? null : i.inviter?.id || null }]));
+  return new Map([...invites.values()].map(i=>[i.code,{
+    uses: Number(i.uses) || 0,
+    maxUses: Number(i.maxUses) || 0,
+    inviter: i.inviter?.bot ? null : i.inviter?.id || null,
+    createdTimestamp: i.createdTimestamp || Date.now(),
+    expiresTimestamp: i.expiresTimestamp || null,
+  }]));
 }
 async function prime(guild) {
   return serial(guild.id,async()=>{
@@ -38,6 +46,12 @@ async function prime(guild) {
       db().transaction(()=>{
         for(const member of existing.values())db().prepare('INSERT OR IGNORE INTO invite_members VALUES (?,?,NULL,?,1)').run(guild.id,member.id,Date.now());
       })();
+      if (guild.vanityURLCode) {
+        try {
+          const v = await guild.fetchVanityData();
+          if (v?.uses !== undefined) vanitySnapshots.set(guild.id, v.uses);
+        } catch {}
+      }
       snapshots.set(guild.id,snapshot(await guild.invites.fetch()));
       initialized.add(guild.id);
       console.log('[INVITES] Theo dõi server '+guild.id+'; đã ghi nhận '+existing.size+' thành viên có sẵn.');
@@ -49,20 +63,48 @@ function record(guildId, memberId, inviterId, bot=false) {
   return db().prepare('INSERT OR IGNORE INTO invite_members(guild_id,member_id,inviter_id,joined_at,notified) VALUES (?,?,?,?,?)')
     .run(guildId,memberId,bot || inviterId===memberId ? null : inviterId,Date.now(),bot?1:0).changes > 0;
 }
-function attribute(before, after, size) {
+function attribute(before, after, size = 1) {
   if (!before) return null;
-  let total=0;
-  const inviters=new Set();
-  for(const [code, item] of after) {
-    const previous=before.get(code);
-    // Link mới chưa có mốc so sánh hoặc lượt dùng giảm: không suy đoán người mời.
-    if(!previous) { if(item.uses>0)return null; continue; }
-    const delta=item.uses-previous.uses;
-    if(delta<0)return null;
-    if(delta>0){total+=delta;inviters.add(item.inviter);}
+  let total = 0;
+  const inviters = new Set();
+
+  // 1. Kiểm tra các invite trong `after` (các link hiện tại trên server)
+  for (const [code, item] of after) {
+    const previous = before.get(code);
+    if (!previous) {
+      // Link mới xuất hiện trong `after` chưa kịp có trong `before`
+      if (item.uses > 0 && item.uses <= size) {
+        total += item.uses;
+        if (item.inviter) inviters.add(item.inviter);
+      }
+      continue;
+    }
+    const delta = item.uses - previous.uses;
+    if (delta < 0) return null; // Lượt dùng giảm bất thường: không suy đoán
+    if (delta > 0) {
+      total += delta;
+      if (item.inviter) inviters.add(item.inviter);
+    }
   }
-  // Nhiều người vào cùng lúc qua các người mời khác nhau thì không thể ghép chắc chắn.
-  return total===size && inviters.size===1 ? [...inviters][0] : null;
+
+  // 2. Kiểm tra các invite trong `before` bị xóa khỏi `after`
+  // (Đặc trưng của link 1 lần dùng / link trực tiếp gửi bạn bè trong Discord mobile)
+  const now = Date.now();
+  for (const [code, previous] of before) {
+    if (!after.has(code)) {
+      const expiredByTime = previous.expiresTimestamp && previous.expiresTimestamp <= now;
+      if (!expiredByTime) {
+        total += 1;
+        if (previous.inviter) inviters.add(previous.inviter);
+      }
+    }
+  }
+
+  // Nếu tổng delta khớp với số thành viên gia nhập và chỉ xuất phát từ duy nhất 1 người mời
+  if (total === size && inviters.size === 1) {
+    return [...inviters][0];
+  }
+  return null;
 }
 async function reward(guild,userId) {
   const options=getOptions(guild.id);
@@ -104,11 +146,69 @@ async function processBatch(guild,members) {
     if(!initialized.has(guild.id))return; // Chờ dữ liệu ban đầu để không cộng nhầm người đã có trong server.
     const unique=[...new Map(members.map(m=>[m.id,m])).values()];
     let inviter=null;
+
+    // 1. Kiểm tra xem có phải tham gia qua Vanity URL không
+    let isVanity = false;
+    if (guild.vanityURLCode) {
+      try {
+        const vData = await guild.fetchVanityData();
+        const prevUses = vanitySnapshots.get(guild.id);
+        if (typeof prevUses === 'number' && vData?.uses > prevUses) {
+          isVanity = true;
+        }
+        if (vData?.uses !== undefined) {
+          vanitySnapshots.set(guild.id, vData.uses);
+        }
+      } catch {}
+    }
+
+    // 2. Fetch danh sách invite hiện tại và so sánh diff
     try {
       const next=snapshot(await guild.invites.fetch());
-      inviter=attribute(snapshots.get(guild.id),next,unique.length);
+      if (!isVanity) {
+        inviter=attribute(snapshots.get(guild.id),next,unique.length);
+      }
       snapshots.set(guild.id,next);
-    } catch(error) { snapshots.delete(guild.id); console.warn('[INVITES] Không đọc được lượt dùng:',error.message); }
+    } catch(error) { console.warn('[INVITES] Không đọc được lượt dùng:',error.message); }
+
+    // 3. Fallback 1: Kiểm tra recentlyDeleted nếu là link 1 lần dùng vừa bị xóa
+    if (!inviter && !isVanity && unique.length === 1) {
+      const guildDeleted = recentlyDeleted.get(guild.id);
+      if (guildDeleted && guildDeleted.size > 0) {
+        const now = Date.now();
+        const validRecent = [...guildDeleted.values()].filter(d => (now - d.deletedAt) < 20000);
+        if (validRecent.length === 1 && validRecent[0].inviter) {
+          inviter = validRecent[0].inviter;
+          console.log(`[INVITES] Xác định người mời qua RecentlyDeleted: ${inviter}`);
+        }
+      }
+    }
+
+    // 4. Fallback 2: Kiểm tra Discord Audit Log (InviteCreate gần nhất)
+    if (!inviter && !isVanity && unique.length === 1) {
+      try {
+        const me = guild.members.me || await guild.members.fetchMe().catch(() => null);
+        if (me?.permissions?.has(P.ViewAuditLog)) {
+          const logs = await guild.fetchAuditLogs({
+            type: AuditLogEvent.InviteCreate,
+            limit: 5,
+          });
+          const now = Date.now();
+          const entry = logs.entries.find(e => {
+            if (!e.executor || e.executor.bot) return false;
+            const diff = now - e.createdTimestamp;
+            return diff >= 0 && diff <= 5 * 60 * 1000; // trong vòng 5 phút
+          });
+          if (entry) {
+            inviter = entry.executor.id;
+            console.log(`[INVITES] Xác định người mời qua Audit Log: ${entry.executor.tag || entry.executor.id} (${inviter})`);
+          }
+        }
+      } catch (err) {
+        console.warn('[INVITES] Không thể kiểm tra Audit Log:', err.message);
+      }
+    }
+
     for(const member of unique) {
       const fresh=record(guild.id,member.id,inviter,member.user.bot);
       if(!fresh || member.user.bot)continue;
@@ -133,9 +233,53 @@ function joined(member) {
 function created(invite) {
   if(!invite.guild)return;
   void serial(invite.guild.id,async()=>{
-    const current=snapshots.get(invite.guild.id);
-    if(current&&!current.has(invite.code))current.set(invite.code,{uses:Number(invite.uses)||0,inviter:invite.inviter?.bot?null:invite.inviter?.id||null});
+    let current=snapshots.get(invite.guild.id);
+    if (!current) {
+      current = new Map();
+      snapshots.set(invite.guild.id, current);
+    }
+    const inviterId = invite.inviter?.bot ? null : invite.inviter?.id || null;
+    current.set(invite.code, {
+      uses: Number(invite.uses) || 0,
+      maxUses: Number(invite.maxUses) || 0,
+      inviter: inviterId,
+      createdTimestamp: invite.createdTimestamp || Date.now(),
+      expiresTimestamp: invite.expiresTimestamp || null,
+    });
   }).catch(e=>console.error('[INVITES]',e.message));
+}
+function deleted(invite) {
+  if(!invite.guild)return;
+  void serial(invite.guild.id,async()=>{
+    const current=snapshots.get(invite.guild.id);
+    const prev=current?.get(invite.code);
+    const inviterId=prev?.inviter || (invite.inviter?.bot ? null : invite.inviter?.id || null);
+    if(inviterId) {
+      let guildDeleted=recentlyDeleted.get(invite.guild.id);
+      if(!guildDeleted) {
+        guildDeleted=new Map();
+        recentlyDeleted.set(invite.guild.id,guildDeleted);
+      }
+      guildDeleted.set(invite.code,{code:invite.code,inviter:inviterId,deletedAt:Date.now()});
+      const now=Date.now();
+      for(const [c,d] of guildDeleted) {
+        if(now - d.deletedAt > 60000) guildDeleted.delete(c);
+      }
+    }
+  }).catch(e=>console.error('[INVITES]',e.message));
+}
+async function setInviter(guild, memberId, inviterId) {
+  const d = db();
+  if (!guild || !memberId || !inviterId) throw new Error('Thiếu tham số hợp lệ.');
+  if (memberId === inviterId) throw new Error('Không thể tự mời chính mình.');
+
+  d.prepare(`INSERT INTO invite_members(guild_id, member_id, inviter_id, joined_at, notified)
+    VALUES (?, ?, ?, ?, 1)
+    ON CONFLICT(guild_id, member_id) DO UPDATE SET inviter_id = excluded.inviter_id`
+  ).run(guild.id, memberId, inviterId, Date.now());
+
+  await reward(guild, inviterId).catch(e => console.warn('[INVITES] Lỗi cấp role:', e.message));
+  return count(guild.id, inviterId);
 }
 async function tick(client) {
   if(ticking)return;ticking=true;
@@ -166,4 +310,4 @@ function start(client) {
   timer=setInterval(()=>tick(client).catch(e=>console.error('[INVITES]',e.message)),60000);timer.unref();
   console.log('[INVITES] Hệ thống lời mời đã sẵn sàng.');
 }
-module.exports={prime,record,count,attribute,reward,announce,processBatch,joined,created,start,tick};
+module.exports={prime,record,count,attribute,reward,announce,processBatch,joined,created,deleted,setInviter,start,tick};

@@ -47,6 +47,7 @@ client.on(Events.GuildMemberAdd, async member => {
   try { await require('./utils/receptionistNotice').notifyReceptionist(member); } catch (e) { console.error('[RECEPTIONIST]', e.message); }
 });
 client.on(Events.InviteCreate, invite => require('./utils/inviteSystem').created(invite));
+client.on(Events.InviteDelete, invite => require('./utils/inviteSystem').deleted(invite));
 client.on(Events.GuildCreate, guild => {
   if(getOptions(guild.id).inviteEnabled)require('./utils/inviteSystem').prime(guild).catch(error=>console.warn('[INVITES]',error.message));
 });
