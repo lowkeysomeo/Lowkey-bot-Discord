@@ -165,16 +165,25 @@ async function fetchQuests(token) {
  */
 async function enrollQuest(token, questId, platform = 0) {
   const isVideo = platform === -1 || platform === null || platform === false;
-  const enrollBody = isVideo ? { location: 1 } : { location: 1, platform };
-  const res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/enroll`, {
-    method: 'POST',
-    headers: getHeaders(token),
-    body: JSON.stringify(enrollBody),
-  });
+  // Với Video Quests: Discord client gửi { location: 11, is_targeted: false } hoặc { location: 1 }
+  const enrollBodies = isVideo
+    ? [{ location: 11, is_targeted: false }, { location: 1 }, {}]
+    : [{ location: 1, platform }, { platform }, { location: 11, platform }, {}];
 
-  if (!res.ok && res.status !== 400) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Lỗi khi nhận nhiệm vụ (${questId}): HTTP ${res.status} ${text}`);
+  let lastRes = null;
+  for (const enrollBody of enrollBodies) {
+    try {
+      const res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/enroll`, {
+        method: 'POST',
+        headers: getHeaders(token),
+        body: JSON.stringify(enrollBody),
+      });
+
+      if (res.ok || res.status === 400) {
+        break;
+      }
+      lastRes = res;
+    } catch (e) {}
   }
 
   // Tuyệt đối KHÔNG gọi select-task-platform với nhiệm vụ video (tránh khóa quest vào desktop game)
@@ -484,11 +493,20 @@ async function completeVideoQuest(token, quest, options = {}) {
       const res = await sendVideoProgress(token, questId, payloadTs);
       lastServerResponse = res;
 
-      const serverVal =
+      let serverVal =
         res?.user_status?.progress?.[taskKey]?.value ??
         res?.user_status?.progress?.WATCH_VIDEO?.value ??
         res?.progress?.[taskKey]?.value ??
         res?.progress?.WATCH_VIDEO?.value;
+
+      if (serverVal == null && res?.user_status?.progress && typeof res.user_status.progress === 'object') {
+        for (const val of Object.values(res.user_status.progress)) {
+          if (typeof val?.value === 'number') {
+            serverVal = val.value;
+            break;
+          }
+        }
+      }
 
       if (typeof serverVal === 'number' && serverVal > currentSeconds) {
         currentSeconds = Math.min(targetSeconds, serverVal);
@@ -761,26 +779,53 @@ function extractQuestTasks(quest) {
   const rawTasks = v2 || v1 || {};
 
   const result = {};
+
+  const addTask = (key, taskObj) => {
+    if (!taskObj || typeof taskObj !== 'object') return;
+    const resolvedKey = key || taskObj.name || taskObj.key || taskObj.type || taskObj.action || taskObj.event_name;
+    if (resolvedKey) {
+      result[resolvedKey] = taskObj;
+    }
+    if (taskObj.type && typeof taskObj.type === 'string') {
+      result[taskObj.type] = taskObj;
+    }
+    if (taskObj.name && typeof taskObj.name === 'string') {
+      result[taskObj.name] = taskObj;
+    }
+    if (taskObj.action && typeof taskObj.action === 'string') {
+      result[taskObj.action] = taskObj;
+    }
+    if (taskObj.event_name && typeof taskObj.event_name === 'string') {
+      result[taskObj.event_name] = taskObj;
+    }
+  };
+
   if (rawTasks instanceof Map) {
     for (const [k, v] of rawTasks.entries()) {
-      result[k] = v;
+      addTask(k, v);
     }
   } else if (Array.isArray(rawTasks)) {
     for (const t of rawTasks) {
-      if (t?.name || t?.key) result[t.name || t.key] = t;
+      addTask(null, t);
     }
   } else if (typeof rawTasks === 'object' && rawTasks !== null) {
-    Object.assign(result, rawTasks);
+    for (const [k, v] of Object.entries(rawTasks)) {
+      addTask(k, v);
+    }
   }
 
   if (v1 && v1 !== rawTasks) {
     if (v1 instanceof Map) {
       for (const [k, v] of v1.entries()) {
-        if (!result[k]) result[k] = v;
+        addTask(k, v);
+      }
+    } else if (Array.isArray(v1)) {
+      for (const t of v1) {
+        addTask(null, t);
       }
     } else if (typeof v1 === 'object' && v1 !== null) {
       for (const [k, v] of Object.entries(v1)) {
-        if (!result[k]) result[k] = v;
+        addTask(k, v);
       }
     }
   }
@@ -816,32 +861,54 @@ function isVideoQuest(quest) {
   if (!quest) return false;
   const cfg = quest.config || {};
 
-  // 1. Kiểm tra video metadata
-  if (cfg.video_metadata || cfg.videoMetadata || cfg.video_metadata_v2 || cfg.videoMetadataV2) return true;
+  // 1. Kiểm tra video metadata ở config hoặc task_config
+  if (
+    cfg.video_metadata || cfg.videoMetadata ||
+    cfg.video_metadata_v2 || cfg.videoMetadataV2 ||
+    cfg.task_config_v2?.video_metadata || cfg.task_config?.video_metadata
+  ) return true;
 
   // 2. Kiểm tra quest_type
   if (cfg.quest_type === 1 || cfg.questType === 1 || cfg.quest_type === 'video' || cfg.questType === 'video') return true;
 
-  // 3. Kiểm tra các task trong cấu hình
+  // 3. Kiểm tra các task trong cấu hình (cả key và value properties: type, name, action, event_name)
   const tasks = extractQuestTasks(quest);
-  for (const k of Object.keys(tasks)) {
-    const upper = k.toUpperCase();
-    if (
-      upper.includes('VIDEO') ||
-      upper.startsWith('WATCH_') ||
-      upper.includes('WATCH') ||
-      upper.includes('TRAILER')
-    ) {
-      return true;
+  for (const [k, v] of Object.entries(tasks)) {
+    const candidates = [
+      String(k || ''),
+      String(v?.type || ''),
+      String(v?.name || ''),
+      String(v?.action || ''),
+      String(v?.event_name || ''),
+    ];
+
+    for (const raw of candidates) {
+      const upper = raw.toUpperCase();
+      if (
+        upper.includes('VIDEO') ||
+        upper.startsWith('WATCH_') ||
+        upper.includes('WATCH') ||
+        upper.includes('TRAILER')
+      ) {
+        return true;
+      }
     }
+
+    if (v?.video_metadata || v?.videoMetadata) return true;
   }
 
   // 4. Kiểm tra user_status progress keys
   if (quest.user_status?.progress && typeof quest.user_status.progress === 'object') {
-    for (const k of Object.keys(quest.user_status.progress)) {
-      const upper = k.toUpperCase();
+    for (const [k, v] of Object.entries(quest.user_status.progress)) {
+      const upper = String(k).toUpperCase();
       if (upper.includes('VIDEO') || upper.startsWith('WATCH_') || upper.includes('WATCH') || upper.includes('TRAILER')) {
         return true;
+      }
+      if (v && typeof v === 'object') {
+        const subType = String(v.type || v.name || '').toUpperCase();
+        if (subType.includes('VIDEO') || subType.startsWith('WATCH_') || subType.includes('WATCH')) {
+          return true;
+        }
       }
     }
   }
@@ -886,7 +953,14 @@ function getVideoTaskInfo(quest) {
   let targetSeconds = 30;
 
   // Đọc duration từ video_metadata nếu có
-  const meta = quest?.config?.video_metadata || quest?.config?.videoMetadata || quest?.config?.video_metadata_v2 || quest?.config?.videoMetadataV2;
+  const meta =
+    quest?.config?.video_metadata ||
+    quest?.config?.videoMetadata ||
+    quest?.config?.video_metadata_v2 ||
+    quest?.config?.videoMetadataV2 ||
+    quest?.config?.task_config_v2?.video_metadata ||
+    quest?.config?.task_config?.video_metadata;
+
   if (meta) {
     if (typeof meta.duration_seconds === 'number' && meta.duration_seconds > 0) {
       targetSeconds = meta.duration_seconds;
@@ -894,6 +968,8 @@ function getVideoTaskInfo(quest) {
       targetSeconds = meta.duration;
     } else if (typeof meta.durationSeconds === 'number' && meta.durationSeconds > 0) {
       targetSeconds = meta.durationSeconds;
+    } else if (typeof meta.target === 'number' && meta.target > 0) {
+      targetSeconds = meta.target;
     }
   }
 
@@ -901,14 +977,24 @@ function getVideoTaskInfo(quest) {
     taskKey = 'WATCH_VIDEO';
     if (typeof tasks.WATCH_VIDEO.target === 'number' && tasks.WATCH_VIDEO.target > 0) {
       targetSeconds = tasks.WATCH_VIDEO.target;
+    } else if (typeof tasks.WATCH_VIDEO.duration === 'number' && tasks.WATCH_VIDEO.duration > 0) {
+      targetSeconds = tasks.WATCH_VIDEO.duration;
     }
   } else {
     for (const [k, v] of Object.entries(tasks)) {
-      const upper = k.toUpperCase();
-      if (upper.includes('VIDEO') || upper.startsWith('WATCH_') || upper.includes('WATCH') || upper.includes('TRAILER')) {
+      const upperK = String(k).toUpperCase();
+      const upperType = String(v?.type || '').toUpperCase();
+      const upperName = String(v?.name || '').toUpperCase();
+      if (
+        upperK.includes('VIDEO') || upperK.startsWith('WATCH_') || upperK.includes('WATCH') || upperK.includes('TRAILER') ||
+        upperType.includes('VIDEO') || upperType.startsWith('WATCH_') ||
+        upperName.includes('VIDEO')
+      ) {
         taskKey = k;
         if (typeof v?.target === 'number' && v.target > 0) {
           targetSeconds = v.target;
+        } else if (typeof v?.duration === 'number' && v.duration > 0) {
+          targetSeconds = v.duration;
         }
         break;
       }

@@ -743,6 +743,57 @@ setWebSocketImplementation(MockWebSocket);
     // Lần quét tiếp theo (mô phỏng 20 phút sau): quest đã được ghi nhớ -> KHÔNG gửi thêm DM
     await scanUserQuests('user-scan-btn', { heartbeatDelayMs: 10 }, mockDiscordClient);
     assert.equal(sentDMs.length, dmsAfterFirst, 'Không được gửi thông báo lặp lại sau 20 phút');
+
+    // 9.14 Kiểm tra khách mua Gói Tháng tự động làm cả Video Quest (dạng modern numeric keys & array tasks)
+    const modernNumericVideoQuest = {
+      id: 'quest-modern-numeric-video',
+      config: {
+        messages: { quest_name: 'Apex Legends Modern Trailer 30s' },
+        task_config_v2: {
+          tasks: {
+            '134812345678901234': {
+              type: 'WATCH_VIDEO',
+              target: 30,
+            },
+          },
+        },
+      },
+      user_status: { enrolled_at: null, completed_at: null, claimed_at: null },
+    };
+
+    const modernArrayVideoQuest = {
+      id: 'quest-modern-array-video',
+      config: {
+        messages: { quest_name: 'Valorant Champions Promo Video' },
+        task_config_v2: {
+          tasks: [
+            {
+              type: 'WATCH_VIDEO',
+              target: 30,
+            },
+          ],
+        },
+      },
+      user_status: { enrolled_at: null, completed_at: null, claimed_at: null },
+    };
+
+    assert.equal(isVideoQuest(modernNumericVideoQuest), true, 'Nhiệm vụ Video với numeric task key phải nhận diện đúng');
+    assert.equal(isVideoQuest(modernArrayVideoQuest), true, 'Nhiệm vụ Video với array tasks phải nhận diện đúng');
+
+    const numVidRes = await completeSingleQuest('valid_token_xyz', modernNumericVideoQuest, { heartbeatDelayMs: 10 });
+    assert.equal(numVidRes.completed, true);
+    assert.equal(numVidRes.type, 'video');
+
+    const arrVidRes = await completeSingleQuest('valid_token_xyz', modernArrayVideoQuest, { heartbeatDelayMs: 10 });
+    assert.equal(arrVidRes.completed, true);
+    assert.equal(arrVidRes.type, 'video');
+
+    // Đăng ký khách hàng mua gói tháng (package_type: monthly)
+    approveUser('user-monthly-vip', 'test-suite');
+    registerSubscriber('user-monthly-vip', 'valid_token_xyz', 'MonthlyVIP', 1, 'monthly');
+    const monthlyScanRes = await scanUserQuests('user-monthly-vip', { heartbeatDelayMs: 10 });
+    assert.equal(monthlyScanRes.success, true);
+    assert(monthlyScanRes.actions.some((a) => a.type === 'video' && a.completed), 'Gói tháng phải tự động hoàn thành video quests');
   } finally {
     setFetchImplementation(null);
   }

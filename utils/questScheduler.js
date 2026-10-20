@@ -203,8 +203,44 @@ function autoEnrollLocalToken() {
 }
 
 async function scanUserQuests(subscriber, client, options = {}) {
-  const token = subscriber.token;
-  const userId = subscriber.user_id;
+  let sub = subscriber;
+  let clientInstance = null;
+  let opts = {};
+
+  const isDiscordClient = (obj) =>
+    obj && typeof obj === 'object' && (Boolean(obj.users) || Boolean(obj.channels) || typeof obj.login === 'function');
+
+  if (typeof subscriber === 'string') {
+    sub = getSubscriber(subscriber) || { user_id: subscriber };
+  } else if (subscriber && typeof subscriber === 'object') {
+    sub = subscriber;
+  }
+
+  if (isDiscordClient(client)) {
+    clientInstance = client;
+    if (options && typeof options === 'object') opts = { ...options };
+  } else if (client && typeof client === 'object') {
+    opts = { ...client };
+    if (isDiscordClient(options)) {
+      clientInstance = options;
+    } else if (options && typeof options === 'object') {
+      opts = { ...opts, ...options };
+    }
+  } else if (isDiscordClient(options)) {
+    clientInstance = options;
+  }
+
+  if (!sub?.token && sub?.user_id) {
+    const dbSub = getSubscriber(sub.user_id);
+    if (dbSub) sub = { ...dbSub, ...sub };
+  }
+
+  const token = sub?.token;
+  const userId = sub?.user_id;
+
+  if (!token || !userId) {
+    return { success: false, error: 'Không tìm thấy thông tin subscriber hoặc Token Discord' };
+  }
 
   if (activeUserJobs.has(userId)) {
     return {
@@ -223,8 +259,8 @@ async function scanUserQuests(subscriber, client, options = {}) {
       try {
         getDb().prepare('UPDATE quest_subscribers SET enabled = 0 WHERE user_id = ?').run(userId);
       } catch (e) {}
-      if (subscriber.notify_dm && client) {
-        const u = await client.users.fetch(userId).catch(() => null);
+      if (sub.notify_dm && clientInstance) {
+        const u = await clientInstance.users.fetch(userId).catch(() => null);
         if (u) {
           u.send(
             '⚠️ **[Lowkey Quest]** Discord User Token của bạn đã hết hạn hoặc bạn vừa đổi mật khẩu Discord. Bot đã tạm ngưng tự động làm quest. Vui lòng vào server gõ `/quest action:token` và bấm **Đổi Token Mới** để cập nhật lại nhé!'
@@ -238,10 +274,10 @@ async function scanUserQuests(subscriber, client, options = {}) {
   const now = Date.now();
   const activeQuests = allQuests.filter(isQuestActive);
 
-  // Ghi nhận các quest đã đạt 100% (completed_at) hoặc đã nhận thưởng (claimed_at) từ trước lần quét này
+  // Ghi nhận các quest đã nhận thưởng (claimed_at) từ trước lần quét này
   const alreadyCompletedIds = new Set(
     activeQuests
-      .filter((q) => q.user_status?.completed_at || q.user_status?.claimed_at)
+      .filter((q) => q.user_status?.claimed_at)
       .map((q) => q.id)
   );
 
@@ -271,24 +307,9 @@ async function scanUserQuests(subscriber, client, options = {}) {
 
   console.log(`[QUEST SCHEDULER] Bắt đầu tự động làm ${pendingQuests.length} nhiệm vụ cho User ${userId}...`);
 
-  // Sắp xếp ưu tiên các nhiệm vụ Video làm trước
-  pendingQuests.sort((a, b) => {
-    const aVid = isVideoQuest(a) ? 1 : 0;
-    const bVid = isVideoQuest(b) ? 1 : 0;
-    return bVid - aVid;
-  });
-
-  // Tự động Enroll trước cho tất cả các nhiệm vụ chưa nhận
-  for (const q of pendingQuests) {
-    if (!q.user_status?.enrolled_at) {
-      try {
-        const isVid = isVideoQuest(q);
-        const tasks = extractQuestTasks(q);
-        const platform = isVid ? -1 : (tasks.PLAY_ON_MOBILE ? 2 : 0);
-        await enrollQuest(token, q.id, platform);
-      } catch (e) {}
-    }
-  }
+  // Phân chia nhiệm vụ Video và nhiệm vụ Game
+  const videoQuests = pendingQuests.filter(isVideoQuest);
+  const gameQuests = pendingQuests.filter((q) => !isVideoQuest(q));
 
   activeUserJobs.set(userId, {
     startTime: Date.now(),
@@ -298,52 +319,138 @@ async function scanUserQuests(subscriber, client, options = {}) {
   const actions = [];
 
   try {
-    // Chạy song song có giãn cách (stagger 2.5s) để cày đồng thời các nhiệm vụ an toàn tuyệt đối
-    const results = await Promise.allSettled(
-      pendingQuests.map((quest, idx) => {
-        return (async () => {
-          if (idx > 0) {
-            const staggerDelay = options.heartbeatDelayMs && options.heartbeatDelayMs < 1000 ? 5 : 2500;
-            await new Promise((r) => setTimeout(r, idx * staggerDelay));
+    // 1. TỰ ĐỘNG LÀM VIDEO QUESTS TRƯỚC (Nhanh chóng: ~30-45s)
+    if (videoQuests.length > 0) {
+      console.log(`[QUEST SCHEDULER] User ${userId}: Đang tự động làm ${videoQuests.length} nhiệm vụ Video...`);
+      for (const vq of videoQuests) {
+        const questName =
+          vq.config?.messages?.quest_name ||
+          vq.config?.messages?.game_title ||
+          vq.config?.messages?.game_name ||
+          vq.config?.application?.name ||
+          `Nhiệm vụ #${vq.id}`;
+
+        try {
+          const res = await completeSingleQuest(token, vq, { autoClaim: true, ...opts });
+          const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
+          actions.push({
+            questId: vq.id,
+            questName,
+            type: 'video',
+            completed: !!res.completed,
+            claimed: !!res.claimed,
+            progressPercent,
+            message: res.message || (res.completed ? 'Hoàn thành 100% Video & Đã nhận thưởng ORB' : 'Tiến độ cập nhật'),
+          });
+        } catch (err) {
+          actions.push({
+            questId: vq.id,
+            questName,
+            type: 'video',
+            completed: false,
+            claimed: false,
+            error: err.message,
+            message: `Lỗi Video: ${err.message}`,
+          });
+        }
+      }
+
+      // Lưu kết quả trung gian của Video Quests vào database
+      getDb()
+        .prepare('UPDATE quest_subscribers SET last_checked_at = ?, last_quests_json = ? WHERE user_id = ?')
+        .run(Date.now(), JSON.stringify(actions), userId);
+
+      // Nếu có video quest MỚI hoàn thành và bật notify_dm, gửi DM ngay lập tức (không bắt khách chờ 15 phút game)
+      const completedVideos = actions.filter((a) => a.type === 'video' && a.completed && !alreadyCompletedIds.has(a.questId) && !isQuestNotified(userId, a.questId));
+      if (sub.notify_dm && completedVideos.length > 0 && clientInstance) {
+        try {
+          const user = await clientInstance.users.fetch(userId).catch(() => null);
+          if (user) {
+            const embed = new EmbedBuilder()
+              .setColor(0x57f287)
+              .setTitle('🎬 [LOWKEY QUEST] ĐÃ HOÀN THÀNH TỰ ĐỘNG VIDEO QUESTS!')
+              .setDescription(
+                `Hệ thống vừa tự động xem và hoàn thành **${completedVideos.length}** nhiệm vụ Video cho tài khoản của bạn:\n\n` +
+                  completedVideos
+                    .map((a, i) => `**${i + 1}.** 🎬 **${a.questName}** (100%)\n↪ ✅ **${a.message}**!`)
+                    .join('\n\n')
+              )
+              .addFields({
+                name: '🎁 Nhận phần thưởng (Claim ORB)',
+                value: 'Nhiệm vụ đã hoàn thành 100%! Vui lòng mở **Cài đặt -> Quests** trên Discord để bấm **Claim** nhận quà.',
+              })
+              .setFooter({ text: 'Lowkey Auto Quest Scheduler • Tự động 100% không cần mở app' })
+              .setTimestamp();
+            await user.send({ embeds: [embed] }).catch(() => {});
+            for (const a of completedVideos) {
+              markQuestNotified(userId, a.questId);
+            }
           }
-          return completeSingleQuest(token, quest, { autoClaim: true, ...options });
-        })();
-      })
-    );
+        } catch (e) {
+          console.warn('[QUEST SCHEDULER] Lỗi gửi DM video completion:', e.message);
+        }
+      }
+    }
 
-    for (let i = 0; i < pendingQuests.length; i++) {
-      const quest = pendingQuests[i];
-      const questName =
-        quest.config?.messages?.quest_name ||
-        quest.config?.messages?.game_title ||
-        quest.config?.messages?.game_name ||
-        quest.config?.application?.name ||
-        `Nhiệm vụ #${quest.id}`;
+    // 2. CHẠY CÁC NHIỆM VỤ GAME (Nếu có)
+    if (gameQuests.length > 0) {
+      console.log(`[QUEST SCHEDULER] User ${userId}: Đang tự động cày ${gameQuests.length} nhiệm vụ Game...`);
+      // Tự động enroll game quests trước nếu chưa enroll
+      for (const gq of gameQuests) {
+        if (!gq.user_status?.enrolled_at) {
+          try {
+            const tasks = extractQuestTasks(gq);
+            const platform = tasks.PLAY_ON_MOBILE ? 2 : 0;
+            await enrollQuest(token, gq.id, platform);
+          } catch (e) {}
+        }
+      }
 
-      const isVid = isVideoQuest(quest);
-      const resItem = results[i];
-      if (resItem.status === 'fulfilled') {
-        const res = resItem.value;
-        const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
-        actions.push({
-          questId: quest.id,
-          questName,
-          type: res.type || (isVid ? 'video' : 'game'),
-          completed: !!res.completed,
-          claimed: !!res.claimed,
-          progressPercent,
-          message: res.message || (res.completed ? 'Hoàn thành 100% & Đã nhận thưởng ORB' : 'Tiến độ cập nhật'),
-        });
-      } else {
-        actions.push({
-          questId: quest.id,
-          questName,
-          type: isVid ? 'video' : 'game',
-          completed: false,
-          claimed: false,
-          error: resItem.reason?.message || 'Lỗi không xác định',
-          message: `Lỗi: ${resItem.reason?.message || 'Không thành công'}`,
-        });
+      const results = await Promise.allSettled(
+        gameQuests.map((quest, idx) => {
+          return (async () => {
+            if (idx > 0) {
+              const staggerDelay = opts.heartbeatDelayMs && opts.heartbeatDelayMs < 1000 ? 5 : 2500;
+              await new Promise((r) => setTimeout(r, idx * staggerDelay));
+            }
+            return completeSingleQuest(token, quest, { autoClaim: true, ...opts });
+          })();
+        })
+      );
+
+      for (let i = 0; i < gameQuests.length; i++) {
+        const quest = gameQuests[i];
+        const questName =
+          quest.config?.messages?.quest_name ||
+          quest.config?.messages?.game_title ||
+          quest.config?.messages?.game_name ||
+          quest.config?.application?.name ||
+          `Nhiệm vụ #${quest.id}`;
+
+        const resItem = results[i];
+        if (resItem.status === 'fulfilled') {
+          const res = resItem.value;
+          const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
+          actions.push({
+            questId: quest.id,
+            questName,
+            type: res.type || 'game',
+            completed: !!res.completed,
+            claimed: !!res.claimed,
+            progressPercent,
+            message: res.message || (res.completed ? 'Hoàn thành 100% & Đã nhận thưởng ORB' : 'Tiến độ cập nhật'),
+          });
+        } else {
+          actions.push({
+            questId: quest.id,
+            questName,
+            type: 'game',
+            completed: false,
+            claimed: false,
+            error: resItem.reason?.message || 'Lỗi không xác định',
+            message: `Lỗi: ${resItem.reason?.message || 'Không thành công'}`,
+          });
+        }
       }
     }
   } finally {
@@ -364,14 +471,14 @@ async function scanUserQuests(subscriber, client, options = {}) {
   });
 
   // CHỈ gửi thông báo DM nếu thực sự có nhiệm vụ MỚI hoàn thành trong lần quét này (tránh gửi lặp lại sau 20 phút)
-  if (subscriber.notify_dm && newlyCompletedList.length > 0 && client) {
-    const user = await client.users.fetch(userId).catch(() => null);
+  if (sub.notify_dm && newlyCompletedList.length > 0 && clientInstance) {
+    const user = await clientInstance.users.fetch(userId).catch(() => null);
     if (user) {
       const embed = new EmbedBuilder()
         .setColor(0x57f287)
         .setTitle('🔔 [LOWKEY QUEST] BÁO CÁO TỰ ĐỘNG HOÀN THÀNH DISCORD QUESTS')
         .setDescription(
-          `Hệ thống vừa tự động cày hoàn thành 100% thời gian cho **${newlyCompletedList.length}** nhiệm vụ (Video & Game):\n\n` +
+          `Hệ thống vừa tự động cày hoàn thành 100% thời gian cho **${newlyCompletedList.length}** nhiệm vụ:\n\n` +
             newlyCompletedList
               .map((a, i) => {
                 const pctText = typeof a.progressPercent === 'number' ? ` (${a.progressPercent}%)` : '';
