@@ -85,11 +85,20 @@ function archiveExpiredShows(guildId, now = Date.now()) {
   }
 }
 
+function scheduleAppearance(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) fail(400, 'Tùy chỉnh bảng lịch chiếu không hợp lệ.');
+  const color = input.color ?? '#5865f2';
+  if (typeof color !== 'string' || !/^#[0-9a-f]{6}$/i.test(color)) fail(400, 'Màu bảng lịch chiếu phải có dạng #RRGGBB.');
+  if (input.showPosters !== undefined && typeof input.showPosters !== 'boolean') fail(400, 'Tùy chọn ảnh phim không hợp lệ.');
+  return { title: text(input.title ?? '', 100), description: text(input.description ?? '', 700),
+    footer: text(input.footer ?? '', 120), color, showPosters: input.showPosters !== false };
+}
 function getConfig(guildId) {
   archiveExpiredShows(guildId);
   const raw = getGuildSetting(guildId, 'CINEMA_CONFIG');
   const d = { enabled: false, title: 'VNL Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, categoryId: null, voiceChannelId: null, notifyChannelId: null, notifyRoleId: null, notifyMessage: '', preReminderHours: 3, remind10m: true, shows: [], history: [], revision: 0 };
   const config = raw ? { ...d, ...JSON.parse(raw) } : d;
+  config.scheduleAppearance = scheduleAppearance(config.scheduleAppearance);
   let migrated = false;
   const announced = getAnnouncedShows(guildId);
   for (const show of config.shows) if (!show.id) {
@@ -164,13 +173,14 @@ function validate(input, roles, env, channels) {
   }
   return { enabled: input.enabled, title: text(input.title, 80, true), description: text(input.description, 1500), audience: input.audience,
     roleIds: [...new Set(input.roleIds)], rightsConfirmed: input.rightsConfirmed, categoryId, voiceChannelId, notifyChannelId, notifyRoleId, notifyMessage, preReminderHours, remind10m, shows,
-    history: [] };
+    history: [], scheduleAppearance: scheduleAppearance(input.scheduleAppearance) };
 }
 function saveConfig(guildId, input, roles, env, channels) {
   const next = validate(input, roles, env, channels);
   const current = getConfig(guildId);
   if (input.revision !== current.revision) fail(409, 'Cấu hình đã được admin khác sửa. Hãy tải lại trước khi lưu.');
   next.history = current.history;
+  if (input.scheduleAppearance === undefined) next.scheduleAppearance = current.scheduleAppearance;
   for (let i = 0; i < next.shows.length; i++) {
     const show = next.shows[i];
     const previous = current.shows.find(s => s.id === show.id ||

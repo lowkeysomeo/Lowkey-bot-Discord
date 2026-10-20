@@ -580,7 +580,7 @@ function cinemaShowRow(show = {}) {
     </select></label></div>
     <div class="field"><label>Tên phim<input data-show="title" maxlength="120" value="${h(show.title || '')}" required></label></div>
     <div class="field"><label>URL video hợp pháp<input data-show="source" type="url" maxlength="2048" placeholder="https://kho-video.example/phim.mp4" value="${h(show.source || '')}" required></label></div>
-    <div class="field cinema-poster-field"><label>Ảnh thông báo riêng của phim<input data-show="imageUrl" type="url" maxlength="2048" placeholder="https://kho-anh.example/poster.jpg" value="${h(show.imageUrl || '')}"></label><small>Ảnh xuất hiện dưới tên phim, trên giờ chiếu trong thông báo Discord.</small><img class="cinema-poster-preview" data-poster-preview alt="Ảnh thông báo phim" loading="lazy" referrerpolicy="no-referrer" ${cinemaPosterUrl(show.imageUrl) ? `src="${h(cinemaPosterUrl(show.imageUrl))}"` : 'hidden'}><label>Tải ảnh lên kho phim<input data-cinema-poster type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label><small data-poster-status>PNG, JPG, WebP hoặc GIF; tối đa 2 MB.</small></div>
+    <div class="field cinema-poster-field"><label>Ảnh phim (lịch chiếu & thông báo)<input data-show="imageUrl" type="url" maxlength="2048" placeholder="https://kho-anh.example/poster.jpg" value="${h(show.imageUrl || '')}"></label><small>Ảnh xuất hiện dưới tên phim, trên giờ chiếu trong bảng /cinemalist và thông báo Discord.</small><img class="cinema-poster-preview" data-poster-preview alt="Ảnh thông báo phim" loading="lazy" referrerpolicy="no-referrer" ${cinemaPosterUrl(show.imageUrl) ? `src="${h(cinemaPosterUrl(show.imageUrl))}"` : 'hidden'}><label>Tải ảnh lên kho phim<input data-cinema-poster type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label><small data-poster-status>PNG, JPG, WebP hoặc GIF; tối đa 2 MB.</small></div>
     <div class="field"><label>Bắt đầu<input data-show="startsAt" type="datetime-local" value="${h(cinemaLocalTime(startsAt))}" required></label></div>
     <div class="field"><label>Kết thúc<input data-show="endsAt" type="datetime-local" value="${h(cinemaLocalTime(endsAt))}" required></label></div>
     </div><div style="margin-top:14px;"><button type="button" class="text-button" data-cinema-remove-direct data-starts-at="${h(show.startsAt || '')}" data-title="${h(show.title || '')}" data-room-id="${roomNum}" data-saved="${isSaved ? '1' : '0'}" style="color:#ff6b6b;font-weight:600;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;background:rgba(255,107,107,0.12);border:1px solid rgba(255,107,107,0.3);border-radius:6px;cursor:pointer;">🗑️ Xóa suất chiếu${isRunning ? ' (Dừng chiếu ngay)' : ''}</button></div></fieldset>`;
@@ -642,6 +642,12 @@ function cinemaPage() {
     <div class="field"><label>Tên rạp<input name="title" maxlength="80" value="${h(c.title)}" required></label></div>
     <div class="field"><label>Giới thiệu<textarea name="description" maxlength="1500" rows="3">${h(c.description)}</textarea></label></div></div>
     <label class="cinema-check"><input type="checkbox" name="enabled" ${c.enabled ? 'checked' : ''}> Mở Cinema cho server này</label></section>
+    <section class="card cinema-card"><h2>Bảng lịch chiếu /cinemalist</h2><p>Tùy chỉnh tab “Lịch chiếu sắp tới”. Tên phim nằm trên ảnh; giờ chiếu và thông tin phòng nằm dưới ảnh. Mỗi trang tối đa 4 phim.</p><div class="form-grid">
+    <div class="field"><label>Tiêu đề bảng<input name="scheduleTitle" maxlength="100" placeholder="⏳ VNL CINEMA · LỊCH CHIẾU SẮP TỚI" value="${h(c.scheduleAppearance?.title || '')}"></label></div>
+    <div class="field"><label>Màu bảng<input name="scheduleColor" type="color" value="${h(c.scheduleAppearance?.color || '#5865f2')}"></label></div>
+    <div class="field"><label>Lời giới thiệu<textarea name="scheduleDescription" maxlength="700" rows="3" placeholder="Để trống để dùng lời giới thiệu tự động">${h(c.scheduleAppearance?.description || '')}</textarea></label></div>
+    <div class="field"><label>Chân bảng<input name="scheduleFooter" maxlength="120" placeholder="VNL Cinema • Cùng xem, cùng một khoảnh khắc" value="${h(c.scheduleAppearance?.footer || '')}"></label></div></div>
+    <label class="cinema-check"><input name="scheduleShowPosters" type="checkbox" ${c.scheduleAppearance?.showPosters !== false ? 'checked' : ''}> Hiện ảnh ngay dưới tên phim</label><p class="subtle">Thêm URL ảnh hoặc tải ảnh tại từng suất trong “Lịch chiếu” bên dưới. Không có ảnh thì bảng chỉ hiển thị thông tin phim. Cấu hình áp dụng khi gọi /cinemalist mới.</p></section>
     <section class="card cinema-card"><h2>Tự động vào phòng & Thông báo</h2><p>Khi đến đúng giờ chiếu, bot sẽ tự động vào kênh thoại đã chọn và đăng thẻ mời xem phim (Activity Invite) để mọi người bấm vào cùng xem. Hệ thống chỉ gửi thông báo 1 lần duy nhất cho mỗi suất chiếu.</p><div class="form-grid">
     <div class="field" style="grid-column: 1 / -1;"><label>Danh mục Rạp Phim (Giới hạn danh mục chiếu phim)<select name="categoryId"><option value="">-- Tự động nhận diện (danh mục chứa chữ 'Cinema' hoặc không giới hạn) --</option>${categories.map(cat => `<option value="${h(cat.id)}" ${c.categoryId === cat.id ? 'selected' : ''}>📁 ${h(cat.name)}</option>`).join('')}</select><small class="subtle">Khi chọn, chỉ các kênh thoại trong danh mục này mới được phép chiếu phim. Người dùng ở kênh khác gõ <code>/cinema</code> sẽ được yêu cầu vào đúng phòng chiếu.</small></label></div>
     <div class="field"><label>Kênh Voice chiếu phim (Bot tự vào khi đến giờ)<select name="voiceChannelId"><option value="">Tự động theo phòng người gọi lệnh (hoặc phòng đầu tiên trong danh mục)</option>${voiceChannels.map(ch => {
@@ -846,6 +852,11 @@ function bindCinema() {
       notifyChannelId: data.get('notifyChannelId') || null,
       notifyRoleId: data.get('notifyRoleId') || null,
       notifyMessage: (data.get('notifyMessage') || '').trim(),
+      scheduleAppearance: {
+        title: (data.get('scheduleTitle') || '').trim(), description: (data.get('scheduleDescription') || '').trim(),
+        footer: (data.get('scheduleFooter') || '').trim(), color: data.get('scheduleColor') || '#5865f2',
+        showPosters: data.has('scheduleShowPosters'),
+      },
       preReminderHours: Number(data.get('preReminderHours') !== null ? data.get('preReminderHours') : 3),
       remind10m: data.has('remind10m'),
       roleIds: data.getAll('roleIds'),

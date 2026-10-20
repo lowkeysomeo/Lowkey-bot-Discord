@@ -16,11 +16,11 @@ assert.equal(formatDuration(7442), '2 giờ 04 phút 02 giây');
 assert.equal(formatDuration(null), 'Chưa cập nhật');
 const sample = { key: 'secret-file.mp4', title: 'Bẫy Tiền', source: 'https://private.example/secret-file.mp4', size: 1027658862, durationSeconds: 6530, lastModified: new Date('2026-10-19T10:00:00Z') };
 const origListUploadedMovies = cinema.listUploadedMovies;
-async function run(movies) {
+async function run(movies, tab) {
   cinema.listUploadedMovies = async () => movies;
   let reply;
   const callbacks = {};
-  await command.execute({ inGuild: () => true, guildId: '111', user: { id: '222' }, deferReply: async () => {}, editReply: async payload => {
+  await command.execute({ inGuild: () => true, options: { getString: () => tab }, guildId: '111', user: { id: '222' }, deferReply: async () => {}, editReply: async payload => {
     reply = payload;
     return { createMessageComponentCollector: () => ({ on: (name, fn) => { callbacks[name] = fn; } }) };
   } });
@@ -43,6 +43,49 @@ async function run(movies) {
   await multiple.callbacks.collect({ customId: 'cinemalist:next', update: async payload => { page = payload; } });
   assert.equal(page.embeds[0].data.fields.length, 1);
   assert.equal(page.embeds[0].data.fields[0].name, '6. 🎞️ Phim 5');
+  const baseConfig = { enabled: false, title: 'Cinema', description: '', audience: 'members', roleIds: [], rightsConfirmed: false, shows: [], revision: 0 };
+  const appearance = { title: 'Lịch phim cuối tuần', description: 'Mời bạn xem phim!', footer: 'Rạp của mình', color: '#ab1234', showPosters: true };
+  const saved = cinema.saveConfig('custom-list', { ...baseConfig, scheduleAppearance: appearance }, new Map(), {});
+  assert.deepEqual(cinema.getConfig('custom-list').scheduleAppearance, appearance);
+  cinema.saveConfig('custom-list', { ...baseConfig, revision: saved.revision }, new Map(), {});
+  assert.deepEqual(cinema.getConfig('custom-list').scheduleAppearance, appearance, 'old clients must preserve appearance');
+  for (const invalid of [{color:'red'}, {showPosters:'false'}, {title:'x'.repeat(101)}, {description:'x'.repeat(701)}, {footer:'x'.repeat(121)}]) {
+    assert.throws(() => cinema.validate({...baseConfig, scheduleAppearance:invalid},new Map(),{}),{status:400});
+  }
+  const shows = Array.from({length:5},(_,i)=>({id:'show'+i,title:'Phim '+i,imageUrl:'https://images.example/poster'+i+'.jpg',roomId:i%3+1,startsAt:'2030-01-01T12:00:00Z',endsAt:'2030-01-01T14:00:00Z'}));
+  const cards=command.buildScheduleEmbeds(shows,0,2,4,appearance).map(e=>e.toJSON());
+  assert.equal(cards.length,9);
+  assert.equal(cards[0].title,appearance.title); assert.equal(cards[0].description,appearance.description); assert.equal(cards[0].color,0xab1234);
+  assert.equal(cards[1].title,'1. 🎞️ Phim 0'); assert.equal(cards[1].image.url,shows[0].imageUrl); assert.equal(cards[1].description,undefined);
+  assert.match(cards[2].description,/Phòng chiếu/); assert.match(cards[8].footer.text,/Rạp của mình/);
+  const secondPage=command.buildScheduleEmbeds(shows,1,2,4,appearance).map(e=>e.toJSON());
+  assert.equal(secondPage.length,3); assert.equal(secondPage[1].title,'5. 🎞️ Phim 4'); assert.equal(secondPage[1].image.url,shows[4].imageUrl);
+  const noPictures=command.buildScheduleEmbeds(shows,0,2,4,{...appearance,showPosters:false}).map(e=>e.toJSON());
+  assert.equal(noPictures.length,5); assert(noPictures.every(e=>!e.image));
+  const badImage=command.buildScheduleEmbeds([{...shows[0],imageUrl:'javascript:bad'}],0,1,4,appearance);
+  assert.equal(badImage.length,2); assert.equal(badImage[1].data.image,undefined);
+  assert.equal(command.buildScheduleEmbeds([],0,1,4,appearance).length,1);
+  const full=command.buildScheduleEmbeds(shows.map(q=>({...q,title:'x'.repeat(120)})),0,2,4,{...appearance,title:'t'.repeat(100),description:'d'.repeat(700),footer:'f'.repeat(120)}).map(e=>e.toJSON());
+  const textLength=full.reduce((n,e)=>n+(e.title||'').length+(e.description||'').length+(e.footer?.text||'').length,0);
+  assert(textLength<=6000);
+  const appSource=require('node:fs').readFileSync(require('node:path').join(__dirname,'../dashboard/public/app.js'),'utf8');
+  const renderSource=appSource.slice(appSource.indexOf('function cinemaPage()'),appSource.indexOf('function bindCinema()'));
+  const escapeSource=appSource.split('\n').find(l=>l.startsWith('const h ='));
+  const html=require('node:vm').runInNewContext(escapeSource+'\n'+renderSource+'\ncinemaPage()',{
+    state:{data:{cinema:{config:{...baseConfig,scheduleAppearance:{...appearance,title:'<img onerror=bad>'}},roles:[],channels:[],available:true,mediaOrigin:'https://media.example'}}},heading:()=>''
+  });
+  assert(html.includes('name="scheduleTitle"')); assert(html.includes('value="&lt;img onerror=bad&gt;"'));
+  assert(html.includes('name="scheduleShowPosters"')); assert(html.includes('name="scheduleColor"'));
+  const realGetConfig=cinema.getConfig;
+  cinema.getConfig=()=>({shows,scheduleAppearance:appearance});
+  try {
+    const schedule=await run([sample],'lich'); assert.equal(schedule.reply.embeds.length,9);
+    let next;
+    await schedule.callbacks.collect({customId:'cinemalist:next',update:async p=>{next=p}});
+    assert.equal(next.embeds[1].data.title,'5. 🎞️ Phim 4');
+    await schedule.callbacks.collect({customId:'cinemalist:tab:kho',update:async p=>{next=p}});
+    assert.equal(next.embeds.length,1); assert.equal(next.embeds[0].data.fields[0].name,'1. 🎞️ Bẫy Tiền');
+  } finally { cinema.getConfig=realGetConfig; }
   cinema.listUploadedMovies = origListUploadedMovies;
-  console.log('cinemaList: titles, measured durations, member-safe content, empty state and pagination passed');
+  console.log('PASS cinemaList: persisted appearance, validation, title/poster/details order, image fallback, Discord limits, tab switching and pagination.');
 })().catch(error => { cinema.listUploadedMovies = origListUploadedMovies; console.error(error); process.exitCode = 1; });

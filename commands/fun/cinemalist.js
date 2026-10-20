@@ -8,6 +8,8 @@ const {
   ButtonStyle,
 } = require('discord.js');
 const cinema = require('../../utils/cinema');
+const { withPoster } = require('../../utils/cinemaPresentation');
+const SCHEDULE_PAGE_SIZE = 4;
 const { formatDuration } = require('../../utils/movieCatalog');
 
 const data = new SlashCommandBuilder()
@@ -98,22 +100,22 @@ function buildKhoEmbed(movies, page, totalPages, upcomingShows) {
   return embed;
 }
 
-function buildScheduleEmbed(shows, page, totalPages, khoCount) {
-  const pageSize = 5;
+function buildScheduleEmbed(shows, page, totalPages, khoCount, appearance = {}) {
+  const pageSize = SCHEDULE_PAGE_SIZE;
   const startIdx = page * pageSize;
   const pageShows = shows.slice(startIdx, startIdx + pageSize);
   const now = Date.now();
 
   const embed = new EmbedBuilder()
-    .setColor(0x5865F2) // Discord Blurple
-    .setTitle('⏳ VNL CINEMA · LỊCH CHIẾU SẮP TỚI')
+    .setColor(appearance.color || '#5865f2')
+    .setTitle(appearance.title || '⏳ VNL CINEMA · LỊCH CHIẾU SẮP TỚI')
     .setDescription(
-      `Hiện có **${shows.length}** suất chiếu đã được lên lịch tại các phòng Cinema.\n` +
+      appearance.description || `Hiện có **${shows.length}** suất chiếu đã được lên lịch tại các phòng Cinema.\n` +
       `🍿 Khi đến giờ chiếu, bot sẽ tự động gửi thông báo và mở rạp xem phim.\n\n` +
       `👉 *Bấm nút **[ 📁 Kho Phim Có Sẵn (${khoCount}) ]** bên dưới để xem toàn bộ phim có sẵn trong kho.*`
     )
     .setFooter({
-      text: `VNL Cinema • Lịch chiếu (Trang ${page + 1}/${totalPages}) • Cùng xem, cùng một khoảnh khắc`,
+      text: `${appearance.footer || 'VNL Cinema • Cùng xem, cùng một khoảnh khắc'} • Trang ${page + 1}/${totalPages}`,
     })
     .setTimestamp();
 
@@ -160,6 +162,21 @@ function buildScheduleEmbed(shows, page, totalPages, khoCount) {
   }
 
   return embed;
+}
+
+// At most 4 films: header + title/poster + details = 9 embeds, within Discord's limit.
+function buildScheduleEmbeds(shows, page, totalPages, khoCount, appearance = {}) {
+  const base = buildScheduleEmbed(shows, page, totalPages, khoCount, appearance).toJSON();
+  const pageShows = shows.slice(page * SCHEDULE_PAGE_SIZE, (page + 1) * SCHEDULE_PAGE_SIZE);
+  if (!pageShows.length) return [new EmbedBuilder(base)];
+  const { fields, footer, timestamp, ...header } = base;
+  const embeds = [new EmbedBuilder(header)];
+  for (let i = 0; i < pageShows.length; i++) {
+    const detail = new EmbedBuilder().setColor(base.color).setTitle(fields[i].name).setDescription(fields[i].value);
+    embeds.push(...withPoster(detail, appearance.showPosters === false ? null : pageShows[i]));
+  }
+  embeds[embeds.length - 1].setFooter(footer).setTimestamp(new Date(timestamp));
+  return embeds;
 }
 
 function buildActionRows(currentTab, page, totalPages, khoCount, upcomingCount) {
@@ -233,19 +250,20 @@ async function execute(interaction) {
 
     const pageSize = 5;
     const totalKhoPages = Math.max(1, Math.ceil(movies.length / pageSize));
-    const totalLichPages = Math.max(1, Math.ceil(upcomingShows.length / pageSize));
+    const totalLichPages = Math.max(1, Math.ceil(upcomingShows.length / SCHEDULE_PAGE_SIZE));
     let currentPage = 0;
 
     const isKho = currentTab === 'kho';
     const totalPages = isKho ? totalKhoPages : totalLichPages;
 
-    const initialEmbed = isKho
-      ? buildKhoEmbed(movies, currentPage, totalKhoPages, upcomingShows)
-      : buildScheduleEmbed(upcomingShows, currentPage, totalLichPages, movies.length);
+    const initialEmbeds = isKho
+      ? [buildKhoEmbed(movies, currentPage, totalKhoPages, upcomingShows)]
+      : buildScheduleEmbeds(upcomingShows, currentPage, totalLichPages, movies.length, config.scheduleAppearance);
     const initialRows = buildActionRows(currentTab, currentPage, totalPages, movies.length, upcomingShows.length);
 
     const response = await interaction.editReply({
-      embeds: [initialEmbed],
+      embeds: initialEmbeds,
+      allowedMentions: { parse: [] },
       components: initialRows,
     });
 
@@ -270,13 +288,14 @@ async function execute(interaction) {
 
       const activeKho = currentTab === 'kho';
       const activeTotalPages = activeKho ? totalKhoPages : totalLichPages;
-      const newEmbed = activeKho
-        ? buildKhoEmbed(movies, currentPage, activeTotalPages, upcomingShows)
-        : buildScheduleEmbed(upcomingShows, currentPage, activeTotalPages, movies.length);
+      const newEmbeds = activeKho
+        ? [buildKhoEmbed(movies, currentPage, activeTotalPages, upcomingShows)]
+        : buildScheduleEmbeds(upcomingShows, currentPage, activeTotalPages, movies.length, config.scheduleAppearance);
       const newRows = buildActionRows(currentTab, currentPage, activeTotalPages, movies.length, upcomingShows.length);
 
       await i.update({
-        embeds: [newEmbed],
+        embeds: newEmbeds,
+        allowedMentions: { parse: [] },
         components: newRows,
       });
     });
@@ -307,5 +326,6 @@ module.exports = {
   execute,
   buildKhoEmbed,
   buildScheduleEmbed,
+  buildScheduleEmbeds,
   buildActionRows,
 };
