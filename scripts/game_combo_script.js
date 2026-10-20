@@ -386,11 +386,11 @@
         bottom: 24px;
         right: 24px;
         width: 390px;
-        background: rgba(18, 19, 26, 0.96);
+        background: #000000;
         backdrop-filter: blur(14px);
-        border: 1px solid rgba(88, 101, 242, 0.5);
+        border: 1px solid rgba(255, 255, 255, 0.15);
         border-radius: 14px;
-        box-shadow: 0 10px 35px rgba(0, 0, 0, 0.7), 0 0 20px rgba(88, 101, 242, 0.3);
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.95), 0 0 1px rgba(255, 255, 255, 0.3);
         color: #ffffff;
         font-family: 'gg sans', 'Noto Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
         font-size: 13px;
@@ -401,22 +401,24 @@
 
     hud.innerHTML = `
         <div id="${HUD_ID}-header" style="
-            background: linear-gradient(135deg, #5865f2 0%, #eb459e 100%);
+            background: #000000;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.12);
             padding: 10px 14px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             cursor: move;
             font-weight: 700;
-            font-size: 14px;
+            font-size: 13px;
+            letter-spacing: 0.5px;
         ">
             <div style="display: flex; align-items: center; gap: 8px;">
-                <span>⚡ CÀY COMBO 2 HUY HIỆU CÙNG LÚC</span>
+                <span style="color: #ffffff;">CÀY COMBO 2 HUY HIỆU CÙNG LÚC</span>
             </div>
             <div style="display: flex; align-items: center; gap: 6px;">
                 <button id="${HUD_ID}-min-btn" style="
-                    background: rgba(255, 255, 255, 0.2);
-                    border: none;
+                    background: rgba(255, 255, 255, 0.1);
+                    border: 1px solid rgba(255, 255, 255, 0.15);
                     color: #fff;
                     width: 22px;
                     height: 22px;
@@ -444,9 +446,9 @@
             </div>
         </div>
 
-        <div id="${HUD_ID}-body" style="padding: 14px; display: flex; flex-direction: column; gap: 12px;">
+        <div id="${HUD_ID}-body" style="padding: 14px; display: flex; flex-direction: column; gap: 12px; background: #0a0b0d;">
             <!-- Phần 1: Huy hiệu Thời gian chơi -->
-            <div style="background: rgba(88, 101, 242, 0.12); border: 1px solid rgba(88, 101, 242, 0.3); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="background: #121318; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <span style="font-weight: 700; color: #5865f2; font-size: 12px;">⏱️ 1. THỜI GIAN CHƠI (TÂM HUYẾT)</span>
                     <span id="${HUD_ID}-gt-timer" style="font-family: monospace; font-weight: 700; color: #fff;">00m 00s</span>
@@ -461,7 +463,7 @@
             </div>
 
             <!-- Phần 2: Huy hiệu Trò chơi đa dạng -->
-            <div style="background: rgba(235, 69, 158, 0.12); border: 1px solid rgba(235, 69, 158, 0.3); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="background: #121318; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <span style="font-weight: 700; color: #eb459e; font-size: 12px;">🎮 2. TRÒ CHƠI ĐA DẠNG (100 GAMES)</span>
                     <span id="${HUD_ID}-var-count" style="font-weight: 700; color: #fff;">0 / 100</span>
@@ -481,9 +483,9 @@
                 <!-- Thanh chọn tốc độ đổi game -->
                 <div style="display: flex; gap: 4px; margin-top: 2px;">
                     <button class="${HUD_ID}-spd-btn" data-sec="360" style="flex: 1; padding: 4px; font-size: 10px; font-weight: 700; background: #57f287; color: #000; border: none; border-radius: 4px; cursor: pointer;">⭐ 6 Phút</button>
-                    <button class="${HUD_ID}-spd-btn" data-sec="600" style="flex: 1; padding: 4px; font-size: 10px; font-weight: 600; background: rgba(255,255,255,0.1); color: #fff; border: none; border-radius: 4px; cursor: pointer;">10 Phút</button>
-                    <button class="${HUD_ID}-spd-btn" data-sec="120" style="flex: 1; padding: 4px; font-size: 10px; font-weight: 600; background: rgba(255,255,255,0.1); color: #fff; border: none; border-radius: 4px; cursor: pointer;">2 Phút</button>
-                    <button class="${HUD_ID}-spd-btn" data-sec="20" style="flex: 1; padding: 4px; font-size: 10px; font-weight: 600; background: rgba(255,255,255,0.1); color: #fff; border: none; border-radius: 4px; cursor: pointer;">20 Giây</button>
+                    <button class="${HUD_ID}-spd-btn" data-sec="600" style="flex: 1; padding: 4px; font-size: 10px; font-weight: 600; background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; cursor: pointer;">10 Phút</button>
+                    <button class="${HUD_ID}-spd-btn" data-sec="120" style="flex: 1; padding: 4px; font-size: 10px; font-weight: 600; background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; cursor: pointer;">2 Phút</button>
+                    <button class="${HUD_ID}-spd-btn" data-sec="20" style="flex: 1; padding: 4px; font-size: 10px; font-weight: 600; background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; cursor: pointer;">20 Giây</button>
                 </div>
             </div>
 
@@ -491,7 +493,7 @@
                 <button id="${HUD_ID}-next-btn" style="
                     flex: 1;
                     padding: 8px;
-                    background: rgba(255, 255, 255, 0.08);
+                    background: #18191f;
                     border: 1px solid rgba(255, 255, 255, 0.15);
                     border-radius: 8px;
                     color: #fff;
@@ -502,8 +504,8 @@
                 <button id="${HUD_ID}-stop-btn" style="
                     flex: 1;
                     padding: 8px;
-                    background: rgba(237, 66, 69, 0.2);
-                    border: 1px solid rgba(237, 66, 69, 0.4);
+                    background: rgba(237, 66, 69, 0.15);
+                    border: 1px solid rgba(237, 66, 69, 0.35);
                     border-radius: 8px;
                     color: #ff7b7b;
                     cursor: pointer;
@@ -512,7 +514,7 @@
                 ">⏹️ Dừng Combo</button>
             </div>
 
-            <div style="font-size: 11px; color: #949ba4; text-align: center; line-height: 1.4;">
+            <div style="font-size: 11px; color: #72767d; text-align: center; line-height: 1.4;">
                 🛡️ <b>Chế độ 6 Phút:</b> Giữ mỗi game 6 phút để máy chủ Discord ghi nhận 100% Heartbeat Telemetry hợp lệ!
             </div>
         </div>
