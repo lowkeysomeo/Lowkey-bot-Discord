@@ -8,7 +8,6 @@ const {
   ButtonStyle,
 } = require('discord.js');
 const cinema = require('../../utils/cinema');
-const { withPoster } = require('../../utils/cinemaPresentation');
 const SCHEDULE_PAGE_SIZE = 4;
 const { formatDuration } = require('../../utils/movieCatalog');
 
@@ -110,12 +109,10 @@ function buildScheduleEmbed(shows, page, totalPages, khoCount, appearance = {}) 
     .setColor(appearance.color || '#5865f2')
     .setTitle(appearance.title || '⏳ VNL CINEMA · LỊCH CHIẾU SẮP TỚI')
     .setDescription(
-      appearance.description || `Hiện có **${shows.length}** suất chiếu đã được lên lịch tại các phòng Cinema.\n` +
-      `🍿 Khi đến giờ chiếu, bot sẽ tự động gửi thông báo và mở rạp xem phim.\n\n` +
-      `👉 *Bấm nút **[ 📁 Kho Phim Có Sẵn (${khoCount}) ]** bên dưới để xem toàn bộ phim có sẵn trong kho.*`
+      appearance.description || `**${shows.length} suất chiếu** • Bot sẽ thông báo khi đến giờ.`
     )
     .setFooter({
-      text: `${appearance.footer || 'VNL Cinema • Cùng xem, cùng một khoảnh khắc'} • Trang ${page + 1}/${totalPages}`,
+      text: `${appearance.footer || 'VNL Cinema'} • Trang ${page + 1}/${totalPages}`,
     })
     .setTimestamp();
 
@@ -140,18 +137,17 @@ function buildScheduleEmbed(shows, page, totalPages, khoCount, appearance = {}) 
     let statusText = '';
     if (isOngoing) {
       statusText = `🔴 **Đang chiếu trực tiếp**`;
-      timeText = `⏰ **Thời gian:** <t:${startUnix}:t> - <t:${endUnix}:t> (Kết thúc <t:${endUnix}:R>)`;
+      timeText = `📅 <t:${startUnix}:d> • <t:${startUnix}:t>–<t:${endUnix}:t>\nKết thúc <t:${endUnix}:R>`;
     } else {
-      statusText = `⏳ **Sắp công chiếu** (<t:${startUnix}:R>)`;
-      timeText = `⏰ **Bắt đầu:** <t:${startUnix}:F> (<t:${startUnix}:t> - <t:${endUnix}:t>)`;
+      statusText = `⏳ Bắt đầu <t:${startUnix}:R>`;
+      timeText = `📅 <t:${startUnix}:d> • <t:${startUnix}:t>–<t:${endUnix}:t>`;
     }
 
     const fieldContent = [
-      `📍 **Phòng chiếu:** 🎬 **Cinema ${roomNum}** (Phòng ${roomNum})`,
-      `🎬 **Trạng thái:** ${statusText}`,
+      statusText,
       timeText,
-      `⏱️ **Thời lượng:** ~${durMins} phút`,
-      `🍿 **Lệnh xem:** \`/cinema${roomNum}\``,
+      `📍 **Cinema ${roomNum}** • ⏱ ${durMins} phút`,
+      `🍿 Vào xem: \`/cinema${roomNum}\``,
     ].join('\n');
 
     embed.addFields({
@@ -164,16 +160,23 @@ function buildScheduleEmbed(shows, page, totalPages, khoCount, appearance = {}) 
   return embed;
 }
 
-// At most 4 films: header + title/poster + details = 9 embeds, within Discord's limit.
+// One compact card per movie; a single screening shares the header card.
 function buildScheduleEmbeds(shows, page, totalPages, khoCount, appearance = {}) {
   const base = buildScheduleEmbed(shows, page, totalPages, khoCount, appearance).toJSON();
   const pageShows = shows.slice(page * SCHEDULE_PAGE_SIZE, (page + 1) * SCHEDULE_PAGE_SIZE);
   if (!pageShows.length) return [new EmbedBuilder(base)];
+  const addThumbnail = (embed, show) => {
+    if (appearance.showPosters !== false && show.imageUrl) {
+      try { embed.setThumbnail(cinema.imageUrl(show.imageUrl)); } catch {}
+    }
+    return embed;
+  };
+  if (pageShows.length === 1) return [addThumbnail(new EmbedBuilder(base), pageShows[0])];
   const { fields, footer, timestamp, ...header } = base;
   const embeds = [new EmbedBuilder(header)];
   for (let i = 0; i < pageShows.length; i++) {
     const detail = new EmbedBuilder().setColor(base.color).setTitle(fields[i].name).setDescription(fields[i].value);
-    embeds.push(...withPoster(detail, appearance.showPosters === false ? null : pageShows[i]));
+    embeds.push(addThumbnail(detail, pageShows[i]));
   }
   embeds[embeds.length - 1].setFooter(footer).setTimestamp(new Date(timestamp));
   return embeds;
