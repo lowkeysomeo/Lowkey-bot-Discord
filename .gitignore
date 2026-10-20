@@ -72,3 +72,4 @@ node_modules
 data/*.sqlite*
 data/*.txt
 *.token*
+data/gametime_progress.json

@@ -20,7 +20,7 @@
     const SUPPORTED_GAMES = [
         {
             name: "Counter-Strike 2",
-            appId: "730",
+            appId: "1158877933042143272",
             winExe: "cs2.exe",
             winPath: "c:/program files (x86)/steam/steamapps/common/counter-strike global offensive/game/bin/win64/cs2.exe",
             linuxExe: "cs2",
@@ -44,7 +44,7 @@
         },
         {
             name: "Dota 2",
-            appId: "570",
+            appId: "356875988589740042",
             winExe: "dota2.exe",
             winPath: "c:/program files (x86)/steam/steamapps/common/dota 2 beta/game/bin/win64/dota2.exe",
             linuxExe: "dota2",
@@ -52,7 +52,7 @@
         },
         {
             name: "League of Legends",
-            appId: "401518656763592704",
+            appId: "1402418696126992445",
             winExe: "League of Legends.exe",
             winPath: "c:/riot games/league of legends/league of legends.exe",
             linuxExe: "League of Legends.exe",

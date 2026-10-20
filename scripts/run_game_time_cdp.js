@@ -109,7 +109,8 @@ async function main() {
   log(`${C.cyan}${C.bold}========================================================================${C.reset}`);
   log(`${C.cyan}${C.bold}⏱️ LOWKEY DISCORD AUTO GAME TIME BADGE (1-CLICK RUNNER)${C.reset}`);
   log(`${C.cyan}${C.bold}🏆 TỰ ĐỘNG CÀY TÍCH LŨY GIỜ CHƠI CHO HUY HIỆU "THỜI GIAN CHƠI" (DEDICATED)${C.reset}`);
-  log(`${C.cyan}${C.bold}========================================================================${C.reset}\n`);
+  log(`${C.cyan}${C.bold}========================================================================${C.reset}`);
+  log(`${C.green}💡 CÀY 24/7 KHÔNG CẦN BẬT MÁY: Bạn có thể dùng lệnh /quest action:gametime_start trên Discord để bot cày ngầm 24/7 trên Cloud, tắt máy tính vẫn tiếp tục cày!${C.reset}\n`);
 
   const discordExe = findDiscordExe();
   if (!discordExe) {

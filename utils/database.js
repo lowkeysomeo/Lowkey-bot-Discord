@@ -139,6 +139,23 @@ function initializeDatabase() {
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS gametime_sessions (
+      user_id TEXT PRIMARY KEY,
+      token TEXT NOT NULL,
+      username TEXT,
+      game_name TEXT NOT NULL DEFAULT 'Counter-Strike 2',
+      app_id TEXT NOT NULL DEFAULT '1158877933042143272',
+      exe_name TEXT NOT NULL DEFAULT 'cs2.exe',
+      status TEXT NOT NULL DEFAULT 'running',
+      started_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      accumulated_seconds INTEGER NOT NULL DEFAULT 0,
+      current_session_seconds INTEGER NOT NULL DEFAULT 0,
+      last_heartbeat_at INTEGER NOT NULL DEFAULT 0
+    );
+  `);
+
   try { db.prepare("ALTER TABLE quest_subscribers ADD COLUMN package_type TEXT NOT NULL DEFAULT 'monthly'").run(); } catch {}
   try { db.prepare("ALTER TABLE quest_subscribers ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0").run(); } catch {}
   try { db.prepare("ALTER TABLE quest_permissions ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0").run(); } catch {}
