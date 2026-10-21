@@ -710,12 +710,17 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
     });
 
     const isAllCompleted = report.totalQuests > 0 && report.completedCount === report.totalQuests;
+    const videoCount = report.results.filter((r) => r.type === 'video').length;
+    const gameCount = report.results.filter((r) => r.type !== 'video').length;
 
     let desc =
       `👤 **Tài khoản:** \`${report.accountTag}\`\n` +
-      `📋 **Tổng số nhiệm vụ:** **${report.totalQuests}**\n` +
+      `📋 **Tổng số nhiệm vụ:** **${report.totalQuests}** (🎮 Game: **${gameCount}** | 🎬 Video: **${videoCount}**)\n` +
       `✅ **Đã hoàn tất 100%:** **${report.completedCount}/${report.totalQuests}** nhiệm vụ\n` +
       `🎁 **Đã nhận thưởng:** **${report.claimedCount}** phần quà / ORB\n\n` +
+      (videoCount === 0 && report.totalQuests > 0
+        ? `*(ℹ️ Hiện tại Discord chưa phát hành nhiệm vụ Video nào trên tài khoản này. Bot sẽ tự động làm ngay khi có video mới!)*\n\n`
+        : '') +
       (report.message ? `ℹ️ *${report.message}*\n\n` : '') +
       (report.results.length > 0
         ? '**Chi tiết từng nhiệm vụ (Video & Game):**\n' +
