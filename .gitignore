@@ -76,3 +76,6 @@ data/gametime_progress.json
 data/variety_progress.json
 data/stream_progress.json
 dashboard/public/uploads/
+__pycache__/
+*.pyc
+science_state.json
