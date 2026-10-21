@@ -107,8 +107,27 @@ function getUserIdFromToken(token) {
   return null;
 }
 
+function isExcludedQuest(q) {
+  if (!q) return true;
+  const name = (
+    q.config?.messages?.quest_name ||
+    q.config?.messages?.questName ||
+    q.config?.messages?.game_title ||
+    q.config?.messages?.game_name ||
+    q.messages?.quest_name ||
+    q.messages?.questName ||
+    q.messages?.game_title ||
+    q.name ||
+    q.title ||
+    ''
+  ).toLowerCase();
+  if (name.includes('fanduel') || name.includes('draftkings')) return true;
+  return false;
+}
+
 function isQuestActive(q) {
   if (!q?.id) return false;
+  if (isExcludedQuest(q)) return false;
   const exp = q.config?.expires_at || q.config?.expiresAt || q.expires_at || q.expiresAt;
   if (!exp) return true;
   const expMs = new Date(exp).getTime();
@@ -153,7 +172,7 @@ function collectQuestsFromPayload(data) {
     const rawId = candidate.id || candidate.quest_id || candidate.questId || fallbackId;
     if (!rawId) return false;
     const sId = String(rawId);
-    if (excludedIds.has(sId)) return false; // Tuyệt đối bỏ qua nhiệm vụ bị Discord exclude
+    if (excludedIds.has(sId) || isExcludedQuest(candidate)) return false; // Tuyệt đối bỏ qua nhiệm vụ bị Discord exclude hoặc quảng cáo rác
     if (seen.has(sId)) return true;
 
     let config = null;
@@ -316,33 +335,12 @@ async function fetchQuests(token) {
   const adSessionId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'e6f7a8b9-c0d1-4a5b-8c7d-c9a1b2c3d4e5';
 
   const discoveryUrls = [
-    // Placement 0: USER_SETTINGS / QUEST_HOME (Khu vực Cài đặt người dùng -> Quests trên Desktop/Web)
-    `https://discord.com/api/v9/quests/get-decisions?placement=0&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     // Placement 3: QUEST_HOME_BANNER_DESKTOP (Nơi các chiến dịch lớn như Magic: Star Trek hiển thị trên Desktop Quest Home)
-    `https://discord.com/api/v9/quests/get-decisions?placement=3&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    `https://discord.com/api/v9/quests/get-decisions?placement=3&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     // Placement 11: QUEST_HOME_DESKTOP (Tab Tất Cả Nhiệm Vụ)
-    `https://discord.com/api/v9/quests/get-decisions?placement=11&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-    // Placement 1: DESKTOP_ACCOUNT_PANEL_AREA (Quest Bar / User Settings)
-    `https://discord.com/api/v9/quests/get-decisions?placement=1&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-    // Placement 4: QUEST_HOME_MOBILE_CAROUSEL
-    `https://discord.com/api/v9/quests/get-decisions?placement=4&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-    // Placement 5: VIDEO_MODAL_MOBILE (Khu vực phân phối Video Quests)
-    `https://discord.com/api/v9/quests/get-decisions?placement=5&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-    // Placement 2: MOBILE_HOME_DOCK_AREA
-    `https://discord.com/api/v9/quests/get-decisions?placement=2&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-    // Route đơn lẻ: decision
-    `https://discord.com/api/v9/quests/decision?placement=0&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-    `https://discord.com/api/v9/quests/decision?placement=3&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-    `https://discord.com/api/v9/quests/decision?placement=11&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-    `https://discord.com/api/v9/quests/decision?placement=1&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-    `https://discord.com/api/v9/quests/decision?placement=5&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    `https://discord.com/api/v9/quests/get-decisions?placement=11&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     // Quests đã nhận / đã hoàn tất
     'https://discord.com/api/v9/quests/@me/claimed',
-    // Fallback không truyền UUID
-    'https://discord.com/api/v9/quests/get-decisions?placement=0&num_decisions_requested=15',
-    'https://discord.com/api/v9/quests/get-decisions?placement=3&num_decisions_requested=15',
-    'https://discord.com/api/v9/quests/get-decisions?placement=11&num_decisions_requested=15',
-    'https://discord.com/api/v9/quests/decision?placement=0',
     'https://discord.com/api/v9/quests/decision?placement=3',
     'https://discord.com/api/v9/quests/decision?placement=11',
   ];
@@ -403,7 +401,7 @@ async function fetchQuests(token) {
 
   const seen = new Set();
   const dedupedQuests = allQuests.filter((q) => {
-    if (!q?.id || allExcludedIds.has(String(q.id)) || seen.has(String(q.id))) return false;
+    if (!q?.id || allExcludedIds.has(String(q.id)) || isExcludedQuest(q) || seen.has(String(q.id))) return false;
     seen.add(String(q.id));
     return true;
   });
@@ -1870,15 +1868,30 @@ async function runAutoQuestForToken(token, options = {}) {
   let claimedCount = 0;
   let readyToClaimCount = 0;
 
-  // Ưu tiên hoàn thành nhiệm vụ Video trước (chỉ ~30-45s) để người dùng có kết quả ngay lập tức
-  quests.sort((a, b) => {
+  // 1. Phân loại các nhiệm vụ:
+  // - Những nhiệm vụ cần làm hoặc cần nhận thưởng (claimed_at == null): Đưa vào pendingQuests
+  // - Những nhiệm vụ đã nhận thưởng trước đó (claimed_at != null): Đưa vào alreadyDoneQuests
+  const pendingQuests = [];
+  const alreadyDoneQuests = [];
+
+  for (const quest of quests) {
+    if (quest.user_status?.claimed_at) {
+      alreadyDoneQuests.push(quest);
+    } else {
+      pendingQuests.push(quest);
+    }
+  }
+
+  // 2. Ưu tiên hoàn thành nhiệm vụ Video trước (chỉ ~30s-120s) để người dùng có kết quả ngay lập tức
+  pendingQuests.sort((a, b) => {
     const aVid = isVideoQuest(a) ? 1 : 0;
     const bVid = isVideoQuest(b) ? 1 : 0;
     return bVid - aVid;
   });
 
-  for (let i = 0; i < quests.length; i++) {
-    const quest = quests[i];
+  // 3. Thực hiện tuần tự các nhiệm vụ chưa hoàn thành
+  for (let i = 0; i < pendingQuests.length; i++) {
+    const quest = pendingQuests[i];
     const questName =
       quest.config?.messages?.quest_name ||
       quest.config?.messages?.game_title ||
@@ -1891,10 +1904,10 @@ async function runAutoQuestForToken(token, options = {}) {
     onProgress({
       step: 'quest_start',
       index: i + 1,
-      total: quests.length,
+      total: pendingQuests.length,
       questName,
       type: defaultType,
-      message: `[${i + 1}/${quests.length}] Đang xử lý: **${questName}**...`,
+      message: `[${i + 1}/${pendingQuests.length}] Đang xử lý: **${questName}**...`,
     });
 
     try {
@@ -1905,7 +1918,7 @@ async function runAutoQuestForToken(token, options = {}) {
           onProgress({
             step: 'progress',
             index: i + 1,
-            total: quests.length,
+            total: pendingQuests.length,
             type: p.type || defaultType,
             ...p,
           }),
@@ -1930,6 +1943,29 @@ async function runAutoQuestForToken(token, options = {}) {
         error: err.message,
       });
     }
+  }
+
+  // 4. Bổ sung các nhiệm vụ đã hoàn tất và nhận thưởng từ trước vào danh sách kết quả
+  for (const quest of alreadyDoneQuests) {
+    const questName =
+      quest.config?.messages?.quest_name ||
+      quest.config?.messages?.game_title ||
+      quest.config?.messages?.game_name ||
+      `Nhiệm vụ #${quest.id}`;
+    const isVid = isVideoQuest(quest);
+    results.push({
+      success: true,
+      questId: quest.id,
+      questName,
+      type: isVid ? 'video' : 'game',
+      alreadyDone: true,
+      completed: true,
+      claimed: false,
+      readyToClaim: false,
+      progressPercent: 100,
+      message: isVid ? 'Nhiệm vụ video này đã nhận thưởng trước đó.' : 'Nhiệm vụ này đã nhận thưởng trước đó.',
+    });
+    completedCount++;
   }
 
   // Sau khi hoàn thành các nhiệm vụ (đặc biệt sau khi chơi game), quét lại xem có video quest mới nào mở khóa không
