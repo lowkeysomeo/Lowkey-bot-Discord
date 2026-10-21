@@ -25,131 +25,131 @@ const PROGRESS_FILE = resolveProgressFilePath();
 
 // Danh mục 130 tựa game PC Detectable của Discord kèm Application ID chính thức
 const GAME_CATALOG = Object.freeze([
-  { name: 'Counter-Strike 2', appId: '730', exe: 'cs2.exe' },
-  { name: 'Dota 2', appId: '570', exe: 'dota2.exe' },
-  { name: 'Team Fortress 2', appId: '440', exe: 'hl2.exe' },
-  { name: 'Half-Life 2', appId: '220', exe: 'hl2.exe' },
-  { name: 'Portal 2', appId: '620', exe: 'portal2.exe' },
-  { name: 'Left 4 Dead 2', appId: '550', exe: 'left4dead2.exe' },
-  { name: 'VALORANT', appId: '700136079562375258', exe: 'VALORANT-Win64-Shipping.exe' },
-  { name: 'League of Legends', appId: '401518656763592704', exe: 'League of Legends.exe' },
-  { name: 'Apex Legends', appId: '542786198303866880', exe: 'r5apex.exe' },
-  { name: 'Fortnite', appId: '432980957394370572', exe: 'FortniteClient-Win64-Shipping.exe' },
-  { name: 'Overwatch 2', appId: '356875221077819392', exe: 'Overwatch.exe' },
-  { name: 'Minecraft', appId: '436224161702805514', exe: 'Minecraft.exe' },
-  { name: 'Roblox', appId: '439223656200077313', exe: 'RobloxPlayerBeta.exe' },
-  { name: 'Genshin Impact', appId: '762434991303950386', exe: 'GenshinImpact.exe' },
-  { name: 'Honkai: Star Rail', appId: '1095982855111872582', exe: 'StarRail.exe' },
-  { name: 'Zenless Zone Zero', appId: '1236894541577977937', exe: 'ZenlessZoneZero.exe' },
-  { name: 'Grand Theft Auto V', appId: '423646631248461825', exe: 'GTA5.exe' },
-  { name: 'Red Dead Redemption 2', appId: '552467140882661376', exe: 'RDR2.exe' },
-  { name: 'Cyberpunk 2077', appId: '438122941394255882', exe: 'Cyberpunk2077.exe' },
-  { name: 'The Witcher 3: Wild Hunt', appId: '292030', exe: 'witcher3.exe' },
-  { name: 'Elden Ring', appId: '1245620', exe: 'eldenring.exe' },
-  { name: 'Dark Souls III', appId: '374320', exe: 'DarkSoulsIII.exe' },
-  { name: 'Sekiro: Shadows Die Twice', appId: '814380', exe: 'sekiro.exe' },
-  { name: 'Baldur\'s Gate 3', appId: '1086940', exe: 'bg3_dx11.exe' },
-  { name: 'Black Myth: Wukong', appId: '2358720', exe: 'b1-Win64-Shipping.exe' },
-  { name: 'PUBG: BATTLEGROUNDS', appId: '578080', exe: 'TslGame.exe' },
-  { name: 'Rust', appId: '252490', exe: 'RustClient.exe' },
-  { name: 'Palworld', appId: '1623730', exe: 'Palworld-Win64-Shipping.exe' },
-  { name: 'Terraria', appId: '105600', exe: 'Terraria.exe' },
-  { name: 'Stardew Valley', appId: '413150', exe: 'Stardew Valley.exe' },
-  { name: 'Helldivers 2', appId: '553850', exe: 'helldivers2.exe' },
-  { name: 'Warframe', appId: '230410', exe: 'Warframe.x64.exe' },
-  { name: 'Destiny 2', appId: '1085660', exe: 'destiny2.exe' },
-  { name: 'Diablo IV', appId: '1157147775986872361', exe: 'Diablo IV.exe' },
-  { name: 'Path of Exile', appId: '238960', exe: 'PathOfExile.exe' },
-  { name: 'World of Warcraft', appId: '356875502041792512', exe: 'Wow.exe' },
-  { name: 'FINAL FANTASY XIV', appId: '392130', exe: 'ffxiv_dx11.exe' },
-  { name: 'Tom Clancy\'s Rainbow Six Siege', appId: '359576595561578497', exe: 'RainbowSix.exe' },
-  { name: 'Escape from Tarkov', appId: '440263300891082752', exe: 'EscapeFromTarkov.exe' },
-  { name: 'Lethal Company', appId: '1966720', exe: 'Lethal Company.exe' },
-  { name: 'Among Us', appId: '945360', exe: 'Among Us.exe' },
-  { name: 'Fall Guys', appId: '1097150', exe: 'FallGuys_client.exe' },
-  { name: 'Rocket League', appId: '252950', exe: 'RocketLeague.exe' },
-  { name: 'Garry\'s Mod', appId: '4000', exe: 'gmod.exe' },
-  { name: 'osu!', appId: '367827983903031296', exe: 'osu!.exe' },
-  { name: 'EA SPORTS FC 25', appId: '2195250', exe: 'FC25.exe' },
-  { name: 'Forza Horizon 5', appId: '1551360', exe: 'ForzaHorizon5.exe' },
-  { name: 'Euro Truck Simulator 2', appId: '227300', exe: 'eurotrucks2.exe' },
-  { name: 'American Truck Simulator', appId: '270880', exe: 'amtrucks.exe' },
-  { name: 'BeamNG.drive', appId: '284160', exe: 'BeamNG.drive.x64.exe' },
-  { name: 'Assetto Corsa', appId: '244210', exe: 'acs.exe' },
-  { name: 'Need for Speed Unbound', appId: '1846380', exe: 'NeedForSpeedUnbound.exe' },
-  { name: 'Cities: Skylines II', appId: '949230', exe: 'Cities2.exe' },
-  { name: 'Factorio', appId: '427520', exe: 'factorio.exe' },
-  { name: 'Satisfactory', appId: '526870', exe: 'FactoryGame.exe' },
-  { name: 'RimWorld', appId: '294100', exe: 'RimWorldWin64.exe' },
-  { name: 'Frostpunk 2', appId: '1601580', exe: 'Frostpunk2.exe' },
-  { name: 'Sid Meier\'s Civilization VI', appId: '289070', exe: 'CivilizationVI.exe' },
-  { name: 'Age of Empires IV', appId: '1466860', exe: 'RelicCardinal.exe' },
-  { name: 'Total War: WARHAMMER III', appId: '1142710', exe: 'Warhammer3.exe' },
-  { name: 'Crusader Kings III', appId: '1158310', exe: 'ck3.exe' },
-  { name: 'Europa Universalis IV', appId: '236850', exe: 'eu4.exe' },
-  { name: 'Hearts of Iron IV', appId: '394360', exe: 'hoi4.exe' },
-  { name: 'Stellaris', appId: '281990', exe: 'stellaris.exe' },
-  { name: 'Deep Rock Galactic', appId: '548430', exe: 'FSD-Win64-Shipping.exe' },
-  { name: 'War Thunder', appId: '236390', exe: 'aces.exe' },
-  { name: 'World of Tanks', appId: '140720', exe: 'WorldOfTanks.exe' },
-  { name: 'World of Warships', appId: '552990', exe: 'WorldOfWarships64.exe' },
-  { name: 'Call of Duty', appId: '1938090', exe: 'cod.exe' },
-  { name: 'Battlefield 2042', appId: '1517290', exe: 'BF2042.exe' },
-  { name: 'Halo Infinite', appId: '1240440', exe: 'HaloInfinite.exe' },
-  { name: 'DOOM Eternal', appId: '782330', exe: 'DOOMEternalx64vk.exe' },
-  { name: 'PAYDAY 2', appId: '218620', exe: 'payday2_win32_release.exe' },
-  { name: 'Ready or Not', appId: '1144200', exe: 'ReadyOrNot-Win64-Shipping.exe' },
-  { name: 'Squad', appId: '393380', exe: 'SquadGame.exe' },
-  { name: 'Arma 3', appId: '107410', exe: 'arma3_x64.exe' },
-  { name: 'Hell Let Loose', appId: '686810', exe: 'HLL-Win64-Shipping.exe' },
-  { name: 'Dead by Daylight', appId: '381210', exe: 'DeadByDaylight-Win64-Shipping.exe' },
-  { name: 'Phasmophobia', appId: '739630', exe: 'Phasmophobia.exe' },
-  { name: 'Hades II', appId: '1145350', exe: 'Hades2.exe' },
-  { name: 'Dead Cells', appId: '588650', exe: 'deadcells.exe' },
-  { name: 'Hollow Knight', appId: '367520', exe: 'hollow_knight.exe' },
-  { name: 'Celeste', appId: '504230', exe: 'Celeste.exe' },
-  { name: 'Cuphead', appId: '268910', exe: 'Cuphead.exe' },
-  { name: 'The Binding of Isaac: Rebirth', appId: '250900', exe: 'isaac-ng.exe' },
-  { name: 'Vampire Survivors', appId: '1794680', exe: 'VampireSurvivors.exe' },
-  { name: 'Risk of Rain 2', appId: '632360', exe: 'Risk of Rain 2.exe' },
-  { name: 'Slay the Spire', appId: '646570', exe: 'SlayTheSpire.exe' },
-  { name: 'Balatro', appId: '2379780', exe: 'Balatro.exe' },
-  { name: 'Dave the Diver', appId: '1868140', exe: 'DaveTheDiver.exe' },
-  { name: 'Disco Elysium', appId: '632470', exe: 'disco.exe' },
-  { name: 'Undertale', appId: '391540', exe: 'UNDERTALE.exe' },
-  { name: 'Resident Evil 4', appId: '2050650', exe: 're4.exe' },
-  { name: 'Silent Hill 2', appId: '2124490', exe: 'SHProto-Win64-Shipping.exe' },
-  { name: 'Dead Space', appId: '1693980', exe: 'DeadSpace.exe' },
-  { name: 'Alan Wake 2', appId: '1172935293478940732', exe: 'AlanWake2.exe' },
-  { name: 'The Last of Us Part I', appId: '1888930', exe: 'tlou-i.exe' },
-  { name: 'God of War Ragnarök', appId: '2322010', exe: 'GoWR.exe' },
-  { name: 'Horizon Forbidden West', appId: '2420110', exe: 'HorizonForbiddenWest.exe' },
-  { name: 'Ghost of Tsushima', appId: '2215430', exe: 'GhostOfTsushima.exe' },
-  { name: 'Marvel\'s Spider-Man Remastered', appId: '1817070', exe: 'Spider-Man.exe' },
-  { name: 'Death Stranding', appId: '1190460', exe: 'ds.exe' },
-  { name: 'No Man\'s Sky', appId: '275850', exe: 'NMS.exe' },
-  { name: 'Subnautica', appId: '264710', exe: 'Subnautica.exe' },
-  { name: 'Sea of Thieves', appId: '1172620', exe: 'SoTGame.exe' },
-  { name: 'Monster Hunter: World', appId: '582010', exe: 'MonsterHunterWorld.exe' },
-  { name: 'Hogwarts Legacy', appId: '990080', exe: 'HogwartsLegacy.exe' },
-  { name: 'PAYDAY 3', appId: '1272080', exe: 'PAYDAY3Client-Win64-Shipping.exe' },
-  { name: 'The Finals', appId: '2073850', exe: 'Discovery.exe' },
-  { name: 'Brawlhalla', appId: '291550', exe: 'Brawlhalla.exe' },
-  { name: 'Smite 2', appId: '2437170', exe: 'Smite2.exe' },
-  { name: 'Trackmania', appId: '2225070', exe: 'Trackmania.exe' },
-  { name: 'Hunt: Showdown 1896', appId: '594650', exe: 'HuntGame.exe' },
-  { name: 'StarCraft II', appId: '356875932598829056', exe: 'SC2_x64.exe' },
-  { name: 'Warcraft III', appId: '356876115998965760', exe: 'Warcraft III.exe' },
-  { name: 'Oxygen Not Included', appId: '457140', exe: 'OxygenNotIncluded.exe' },
-  { name: 'Foxhole', appId: '505460', exe: 'War-Win64-Shipping.exe' },
-  { name: 'Insurgency: Sandstorm', appId: '581320', exe: 'InsurgencyClient-Win64-Shipping.exe' },
-  { name: 'Assetto Corsa Competizione', appId: '805550', exe: 'acc.exe' },
-  { name: 'DayZ', appId: '221100', exe: 'DayZ_x64.exe' },
-  { name: 'ARK: Survival Ascended', appId: '2399830', exe: 'ArkAscended.exe' },
-  { name: 'Divinity: Original Sin 2', appId: '435150', exe: 'EoCApp.exe' },
-  { name: 'Guild Wars 2', appId: '1284210', exe: 'Gw2-64.exe' },
-  { name: 'The Elder Scrolls Online', appId: '306130', exe: 'eso64.exe' },
-  { name: 'Lost Ark', appId: '1599340', exe: 'LOSTARK.exe' }
+  { name: "Counter-Strike 2", appId: "1158877933042143272", exe: "cs2.exe" },
+  { name: "Dota 2", appId: "356875988589740042", exe: "dota2.exe" },
+  { name: "Team Fortress 2", appId: "356888577310851072", exe: "hl2.exe" },
+  { name: "Half-Life 2", appId: "359510373361254400", exe: "hl2.exe" },
+  { name: "Portal 2", appId: "359508941782122496", exe: "portal2.exe" },
+  { name: "Left 4 Dead 2", appId: "356954277803065354", exe: "left4dead2.exe" },
+  { name: "VALORANT", appId: "700136079562375258", exe: "VALORANT-Win64-Shipping.exe" },
+  { name: "League of Legends", appId: "1402418696126992445", exe: "League of Legends.exe" },
+  { name: "Apex Legends", appId: "542075586886107149", exe: "r5apex.exe" },
+  { name: "Fortnite", appId: "1402418703554842694", exe: "FortniteClient-Win64-Shipping.exe" },
+  { name: "Overwatch 2", appId: "356875221078245376", exe: "Overwatch.exe" },
+  { name: "Minecraft", appId: "1402418491272986635", exe: "Minecraft.exe" },
+  { name: "Roblox", appId: "363445589247131668", exe: "RobloxPlayerBeta.exe" },
+  { name: "Genshin Impact", appId: "762434991303950386", exe: "GenshinImpact.exe" },
+  { name: "Honkai: Star Rail", appId: "1121201675240210523", exe: "StarRail.exe" },
+  { name: "Zenless Zone Zero", appId: "1257819671114289184", exe: "ZenlessZoneZero.exe" },
+  { name: "Grand Theft Auto V", appId: "1402418714716143646", exe: "GTA5.exe" },
+  { name: "Red Dead Redemption 2", appId: "1402418648332898466", exe: "RDR2.exe" },
+  { name: "Cyberpunk 2077", appId: "787443973538971748", exe: "Cyberpunk2077.exe" },
+  { name: "The Witcher 3: Wild Hunt", appId: "359510249486417920", exe: "witcher3.exe" },
+  { name: "Elden Ring", appId: "1402418436809953330", exe: "eldenring.exe" },
+  { name: "Dark Souls III", appId: "359509500199436288", exe: "DarkSoulsIII.exe" },
+  { name: "Sekiro: Shadows Die Twice", appId: "1402416796874834143", exe: "sekiro.exe" },
+  { name: "Baldur's Gate 3", appId: "1137125502985961543", exe: "bg3_dx11.exe" },
+  { name: "Black Myth: Wukong", appId: "1272842103910699040", exe: "b1-Win64-Shipping.exe" },
+  { name: "PUBG: BATTLEGROUNDS", appId: "1402418717781921935", exe: "TslGame.exe" },
+  { name: "Rust", appId: "1402418594532298837", exe: "RustClient.exe" },
+  { name: "Palworld", appId: "1197827812623650866", exe: "Palworld-Win64-Shipping.exe" },
+  { name: "Terraria", appId: "1402418344912752671", exe: "Terraria.exe" },
+  { name: "Stardew Valley", appId: "359509387670192128", exe: "Stardew Valley.exe" },
+  { name: "Helldivers 2", appId: "1205090671527071784", exe: "helldivers2.exe" },
+  { name: "Warframe", appId: "1402418586244612216", exe: "Warframe.x64.exe" },
+  { name: "Destiny 2", appId: "372438022647578634", exe: "destiny2.exe" },
+  { name: "Diablo IV", appId: "1113966530531704943", exe: "Diablo IV.exe" },
+  { name: "Path of Exile", appId: "356888453796986880", exe: "PathOfExile.exe" },
+  { name: "World of Warcraft", appId: "356875762940379136", exe: "Wow.exe" },
+  { name: "FINAL FANTASY XIV", appId: "356889262362329098", exe: "ffxiv_dx11.exe" },
+  { name: "Tom Clancy's Rainbow Six Siege", appId: "356876590342340608", exe: "RainbowSix.exe" },
+  { name: "Escape from Tarkov", appId: "406637848297472017", exe: "EscapeFromTarkov.exe" },
+  { name: "Lethal Company", appId: "1167674267748540516", exe: "Lethal Company.exe" },
+  { name: "Among Us", appId: "1402418440685486130", exe: "Among Us.exe" },
+  { name: "Fall Guys", appId: "742897755160313986", exe: "FallGuys_client.exe" },
+  { name: "Rocket League", appId: "356877880938070016", exe: "RocketLeague.exe" },
+  { name: "Garry's Mod", appId: "356879032584896512", exe: "gmod.exe" },
+  { name: "osu!", appId: "1402418239342120960", exe: "osu!.exe" },
+  { name: "EA SPORTS FC 25", appId: "1334672060328443984", exe: "FC25.exe" },
+  { name: "Forza Horizon 5", appId: "905961880789590076", exe: "ForzaHorizon5.exe" },
+  { name: "Euro Truck Simulator 2", appId: "1402418075726254102", exe: "eurotrucks2.exe" },
+  { name: "American Truck Simulator", appId: "1402416710023123044", exe: "amtrucks.exe" },
+  { name: "BeamNG.drive", appId: "363413743335374859", exe: "BeamNG.drive.x64.exe" },
+  { name: "Assetto Corsa", appId: "425778010222886912", exe: "acs.exe" },
+  { name: "Need for Speed Unbound", appId: "444540143890726940", exe: "NeedForSpeedUnbound.exe" },
+  { name: "Cities: Skylines II", appId: "1166420945016201326", exe: "Cities2.exe" },
+  { name: "Factorio", appId: "358422126602223616", exe: "factorio.exe" },
+  { name: "Satisfactory", appId: "1402416959819350078", exe: "FactoryGame.exe" },
+  { name: "RimWorld", appId: "363413465584500737", exe: "RimWorldWin64.exe" },
+  { name: "Frostpunk 2", appId: "1229808543335714816", exe: "Frostpunk2.exe" },
+  { name: "Sid Meier's Civilization VI", appId: "363413834301571072", exe: "CivilizationVI.exe" },
+  { name: "Age of Empires IV", appId: "1129504181414273136", exe: "RelicCardinal.exe" },
+  { name: "Total War: WARHAMMER III", appId: "1124353392672780388", exe: "Warhammer3.exe" },
+  { name: "Crusader Kings III", appId: "1124351691123343500", exe: "ck3.exe" },
+  { name: "Europa Universalis IV", appId: "363409417632481280", exe: "eu4.exe" },
+  { name: "Hearts of Iron IV", appId: "358421669603311616", exe: "hoi4.exe" },
+  { name: "Stellaris", appId: "363408909962182683", exe: "stellaris.exe" },
+  { name: "Deep Rock Galactic", appId: "428054228511227914", exe: "FSD-Win64-Shipping.exe" },
+  { name: "War Thunder", appId: "357607478105604096", exe: "aces.exe" },
+  { name: "World of Tanks", appId: "1402418078813523999", exe: "WorldOfTanks.exe" },
+  { name: "World of Warships", appId: "1402416956476493935", exe: "WorldOfWarships64.exe" },
+  { name: "Call of Duty", appId: "1539812812854132867", exe: "cod.exe" },
+  { name: "Battlefield 2042", appId: "1162076274622222346", exe: "BF2042.exe" },
+  { name: "Halo Infinite", appId: "1402416946796036258", exe: "HaloInfinite.exe" },
+  { name: "DOOM Eternal", appId: "693016355007496202", exe: "DOOMEternalx64vk.exe" },
+  { name: "PAYDAY 2", appId: "1402417752404394125", exe: "payday2_win32_release.exe" },
+  { name: "Ready or Not", appId: "1174041358995042375", exe: "ReadyOrNot-Win64-Shipping.exe" },
+  { name: "Squad", appId: "363428011980357632", exe: "SquadGame.exe" },
+  { name: "Arma 3", appId: "356954176338788352", exe: "arma3_x64.exe" },
+  { name: "Hell Let Loose", appId: "1161772875901051042", exe: "HLL-Win64-Shipping.exe" },
+  { name: "Dead by Daylight", appId: "357607133254254632", exe: "DeadByDaylight-Win64-Shipping.exe" },
+  { name: "Phasmophobia", appId: "1402418103702524046", exe: "Phasmophobia.exe" },
+  { name: "Hades II", appId: "1237101681695522867", exe: "Hades2.exe" },
+  { name: "Dead Cells", appId: "1402418233633669170", exe: "deadcells.exe" },
+  { name: "Hollow Knight", appId: "363431029484027904", exe: "hollow_knight.exe" },
+  { name: "Celeste", appId: "1402416901551816837", exe: "Celeste.exe" },
+  { name: "Cuphead", appId: "363430002181668864", exe: "Cuphead.exe" },
+  { name: "The Binding of Isaac: Rebirth", appId: "358420454764969994", exe: "isaac-ng.exe" },
+  { name: "Vampire Survivors", appId: "1334673895453884566", exe: "VampireSurvivors.exe" },
+  { name: "Risk of Rain 2", appId: "1402418087793528862", exe: "Risk of Rain 2.exe" },
+  { name: "Slay the Spire", appId: "1402418606364688549", exe: "SlayTheSpire.exe" },
+  { name: "Balatro", appId: "1209665818464358430", exe: "Balatro.exe" },
+  { name: "Dave the Diver", appId: "1126960184024104980", exe: "DaveTheDiver.exe" },
+  { name: "Disco Elysium", appId: "876570707306381342", exe: "disco.exe" },
+  { name: "Undertale", appId: "363409849859571722", exe: "UNDERTALE.exe" },
+  { name: "Resident Evil 4", appId: "1129504209226711190", exe: "re4.exe" },
+  { name: "Silent Hill 2", appId: "1411968834306576394", exe: "SHProto-Win64-Shipping.exe" },
+  { name: "Dead Space", appId: "426525408666583050", exe: "DeadSpace.exe" },
+  { name: "Alan Wake 2", appId: "504423339104796672", exe: "AlanWake2.exe" },
+  { name: "The Last of Us Part I", appId: "1129504517474504826", exe: "tlou-i.exe" },
+  { name: "God of War Ragnarök", appId: "1286371274003841115", exe: "GoWR.exe" },
+  { name: "Horizon Forbidden West", appId: "1440143201573929042", exe: "HorizonForbiddenWest.exe" },
+  { name: "Ghost of Tsushima", appId: "1440141722167279687", exe: "GhostOfTsushima.exe" },
+  { name: "Marvel's Spider-Man Remastered", appId: "1124351769175150702", exe: "Spider-Man.exe" },
+  { name: "Death Stranding", appId: "1402418429973233786", exe: "ds.exe" },
+  { name: "No Man's Sky", appId: "443159611479031808", exe: "NMS.exe" },
+  { name: "Subnautica", appId: "1402418337052622949", exe: "Subnautica.exe" },
+  { name: "Sea of Thieves", appId: "1505323737749127248", exe: "SoTGame.exe" },
+  { name: "Monster Hunter: World", appId: "477152881196269569", exe: "MonsterHunterWorld.exe" },
+  { name: "Hogwarts Legacy", appId: "1080277149623271444", exe: "HogwartsLegacy.exe" },
+  { name: "PAYDAY 3", appId: "1153359932255654019", exe: "PAYDAY3Client-Win64-Shipping.exe" },
+  { name: "The Finals", appId: "1182713227491147776", exe: "Discovery.exe" },
+  { name: "Brawlhalla", appId: "356944273133928458", exe: "Brawlhalla.exe" },
+  { name: "Smite 2", appId: "1334654007884517509", exe: "Smite2.exe" },
+  { name: "Trackmania", appId: "1129504266848051290", exe: "Trackmania.exe" },
+  { name: "Hunt: Showdown 1896", appId: "1440131866962165860", exe: "HuntGame.exe" },
+  { name: "StarCraft II", appId: "358425800766128128", exe: "SC2_x64.exe" },
+  { name: "Warcraft III", appId: "424719708785344525", exe: "Warcraft III.exe" },
+  { name: "Oxygen Not Included", appId: "363430471322828800", exe: "OxygenNotIncluded.exe" },
+  { name: "Foxhole", appId: "1402418331717472317", exe: "War-Win64-Shipping.exe" },
+  { name: "Insurgency: Sandstorm", appId: "484892481452769290", exe: "InsurgencyClient-Win64-Shipping.exe" },
+  { name: "Assetto Corsa Competizione", appId: "1124351838666375228", exe: "acc.exe" },
+  { name: "DayZ", appId: "385538724592746496", exe: "DayZ_x64.exe" },
+  { name: "ARK: Survival Ascended", appId: "1166979555806949406", exe: "ArkAscended.exe" },
+  { name: "Divinity: Original Sin 2", appId: "1124355208395358328", exe: "EoCApp.exe" },
+  { name: "Guild Wars 2", appId: "359511228445491200", exe: "Gw2-64.exe" },
+  { name: "The Elder Scrolls Online", appId: "363413894602948608", exe: "eso64.exe" },
+  { name: "Lost Ark", appId: "940810636273795162", exe: "LOSTARK.exe" }
 ]);
 
 const TIERS = [
@@ -309,6 +309,7 @@ class VarietyGatewayClient {
     this.token = token.trim().replace(/^['"]|['"]$/g, '');
     this.ws = null;
     this.heartbeatTimer = null;
+    this.presenceTimer = null;
     this.reconnectTimer = null;
     this.sequence = null;
     this.sessionId = null;
@@ -319,6 +320,7 @@ class VarietyGatewayClient {
     this.reconnectAttempts = 0;
     this.lastHeartbeatAck = Date.now();
     this.currentGame = null;
+    this.gameStartTime = null;
     this.onReadyCallback = null;
     this.onCloseCallback = null;
   }
@@ -445,6 +447,7 @@ class VarietyGatewayClient {
             if (this.currentGame) {
               this.setGame(this.currentGame);
             }
+            this.startPresenceRefresh();
             if (typeof this.onReadyCallback === 'function') {
               this.onReadyCallback(d?.user);
             }
@@ -459,6 +462,7 @@ class VarietyGatewayClient {
             if (this.currentGame) {
               this.setGame(this.currentGame);
             }
+            this.startPresenceRefresh();
             if (isInitialConnect) {
               isInitialConnect = false;
               resolve({ resumed: true });
@@ -477,6 +481,7 @@ class VarietyGatewayClient {
 
       this.ws.on('close', (code) => {
         this.stopHeartbeat();
+        this.stopPresenceRefresh();
         this.connected = false;
         this.isReady = false;
 
@@ -507,25 +512,48 @@ class VarietyGatewayClient {
       type: 0, // Playing
       application_id: String(game.appId),
       timestamps: {
-        start: Date.now()
+        start: this.gameStartTime || Date.now()
       },
       flags: 1
     };
   }
 
-  setGame(game) {
-    this.currentGame = game;
-    if (!this.isReady) return;
-
+  sendPresence() {
+    if (!this.isReady || !this.currentGame) return;
     this.send({
       op: 3,
       d: {
         since: 0,
-        activities: [this.buildActivity(game)],
+        activities: [this.buildActivity(this.currentGame)],
         status: 'online',
         afk: false
       }
     });
+  }
+
+  startPresenceRefresh() {
+    this.stopPresenceRefresh();
+    // Gửi lại Presence mỗi 60s để Discord ghi nhận Heartbeat Telemetry liên tục và không bị timeout
+    this.presenceTimer = setInterval(() => {
+      this.sendPresence();
+    }, 60 * 1000);
+    if (this.presenceTimer && typeof this.presenceTimer.unref === 'function') {
+      this.presenceTimer.unref();
+    }
+  }
+
+  stopPresenceRefresh() {
+    if (this.presenceTimer) {
+      clearInterval(this.presenceTimer);
+      this.presenceTimer = null;
+    }
+  }
+
+  setGame(game) {
+    this.currentGame = game;
+    this.gameStartTime = Date.now();
+    if (!this.isReady) return;
+    this.sendPresence();
   }
 
   startHeartbeat(interval) {
@@ -601,6 +629,7 @@ class VarietyGatewayClient {
     }
     this.clearReconnectTimer();
     this.stopHeartbeat();
+    this.stopPresenceRefresh();
     if (this.ws) {
       try {
         this.ws.close(1000, 'Normal closure');

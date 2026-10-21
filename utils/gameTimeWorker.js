@@ -427,10 +427,10 @@ class GametimeGatewayClient {
 
   startPresenceRefresh() {
     this.stopPresenceRefresh();
-    // Gửi lại Presence mỗi 5 phút để giữ kết nối trạng thái game không bị Discord dọn dẹp cache
+    // Gửi lại Presence mỗi 60s để Discord liên tục nhận diện giờ chơi và không bị timeout/xóa session
     this.presenceTimer = setInterval(() => {
       this.sendPresence();
-    }, 5 * 60 * 1000);
+    }, 60 * 1000);
     if (this.presenceTimer && typeof this.presenceTimer.unref === 'function') {
       this.presenceTimer.unref();
     }

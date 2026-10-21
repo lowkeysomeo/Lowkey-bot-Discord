@@ -31,7 +31,7 @@ async function runTests() {
   assert.ok(GAME_CATALOG.length >= 100, `GAME_CATALOG must contain at least 100 games, found ${GAME_CATALOG.length}`);
   for (const g of GAME_CATALOG) {
     assert.ok(g.name && g.name.length > 0, 'Every game must have a name');
-    assert.ok(g.appId && /^\d+$/.test(g.appId), `Every game must have valid appId: ${g.name} (${g.appId})`);
+    assert.ok(g.appId && /^\d{17,20}$/.test(g.appId), `Every game must have valid Discord Snowflake appId (not Steam ID): ${g.name} (${g.appId})`);
   }
   console.log(`✅ 1. Game Catalog integrity verified (${GAME_CATALOG.length} games).`);
 

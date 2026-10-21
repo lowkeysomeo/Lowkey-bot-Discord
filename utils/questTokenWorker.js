@@ -1415,6 +1415,22 @@ async function completeSingleQuest(token, quest, options = {}) {
         await sendHeartbeat(token, questId, { streamKey, applicationId: appId, terminal: true, userId });
       } catch {}
 
+      // Nếu quest này có task Video kèm theo (multi-task hoặc hybrid quest), tự động hoàn thành luôn task video
+      const remainingTasks = extractQuestTasks(quest);
+      const hasVideoTask = Object.keys(remainingTasks).some((k) => {
+        const upper = k.toUpperCase();
+        return upper.includes('VIDEO') || upper.startsWith('WATCH_') || upper.includes('TRAILER');
+      });
+
+      if (hasVideoTask) {
+        try {
+          console.log(`[QUEST WORKER] Quest ${questId} có video task kèm theo. Đang tự động hoàn tất video...`);
+          await completeVideoQuest(token, quest, options);
+        } catch (vidErr) {
+          console.warn(`[QUEST WORKER] Lỗi hoàn thành video task kèm theo (${questId}):`, vidErr.message);
+        }
+      }
+
       let reward = null;
       let claimed = false;
       if (options.autoClaim === true) {
@@ -1600,6 +1616,70 @@ async function runAutoQuestForToken(token, options = {}) {
         error: err.message,
       });
     }
+  }
+
+  // Sau khi hoàn thành các nhiệm vụ (đặc biệt sau khi chơi game), quét lại xem có video quest mới nào mở khóa không
+  try {
+    const postGamePause = options.heartbeatDelayMs && options.heartbeatDelayMs < 1000 ? 50 : 2500;
+    await new Promise((r) => setTimeout(r, postGamePause));
+
+    const freshQuests = await fetchQuests(token);
+    const remainingVideoQuests = (freshQuests || [])
+      .filter(isQuestActive)
+      .filter((q) => !q.user_status?.claimed_at && !q.user_status?.completed_at)
+      .filter(isVideoQuest)
+      .filter((q) => !results.some((r) => r.questId === q.id && r.completed));
+
+    if (remainingVideoQuests.length > 0) {
+      onProgress({
+        step: 'post_game_video',
+        message: `Đang tự động hoàn tất ${remainingVideoQuests.length} nhiệm vụ Video sau khi hoàn thành chơi game...`,
+      });
+
+      for (const vq of remainingVideoQuests) {
+        const questName =
+          vq.config?.messages?.quest_name ||
+          vq.config?.messages?.game_title ||
+          vq.config?.messages?.game_name ||
+          `Nhiệm vụ #${vq.id}`;
+
+        try {
+          const res = await completeSingleQuest(token, vq, {
+            autoClaim: options.autoClaim === true,
+            heartbeatDelayMs: options.heartbeatDelayMs,
+            onProgress: (p) =>
+              onProgress({
+                step: 'progress',
+                index: results.length + 1,
+                total: quests.length + remainingVideoQuests.length,
+                type: 'video',
+                ...p,
+              }),
+          });
+
+          const isSuccess = !!(res.completed || res.alreadyDone);
+          results.push({
+            success: isSuccess,
+            type: 'video',
+            ...res,
+          });
+          if (res.enrolled || res.completed || res.alreadyDone) enrolledCount++;
+          if (res.completed || res.alreadyDone) completedCount++;
+          if (res.claimed) claimedCount++;
+          if (res.readyToClaim) readyToClaimCount++;
+        } catch (err) {
+          results.push({
+            success: false,
+            questId: vq.id,
+            questName,
+            type: 'video',
+            error: err.message,
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[QUEST WORKER] Không thể quét lại video quests sau khi làm quest:', e.message);
   }
 
   return {

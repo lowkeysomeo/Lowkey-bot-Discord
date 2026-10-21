@@ -453,6 +453,58 @@ async function scanUserQuests(subscriber, client, options = {}) {
         }
       }
     }
+
+    // 3. TỰ ĐỘNG LÀM TIẾP CÁC NHIỆM VỤ XEM VIDEO SAU KHI ĐÃ CÀY XONG GAME
+    // (Xử lý dứt điểm các video quest mở khóa sau khi xong game hoặc còn tồn đọng)
+    try {
+      const waitPause = opts.heartbeatDelayMs && opts.heartbeatDelayMs < 1000 ? 50 : 2500;
+      await new Promise((r) => setTimeout(r, waitPause));
+
+      const refreshedQuests = await fetchQuests(token);
+      const postGameActive = (refreshedQuests || []).filter(isQuestActive);
+      const postGamePending = postGameActive.filter((q) => !q.user_status?.claimed_at);
+      const postGameVideos = postGamePending.filter(isVideoQuest);
+
+      if (postGameVideos.length > 0) {
+        console.log(`[QUEST SCHEDULER] User ${userId}: Tự động làm tiếp ${postGameVideos.length} nhiệm vụ Video sau khi cày Game...`);
+        for (const vq of postGameVideos) {
+          if (actions.some((a) => a.questId === vq.id && a.completed)) continue;
+
+          const questName =
+            vq.config?.messages?.quest_name ||
+            vq.config?.messages?.game_title ||
+            vq.config?.messages?.game_name ||
+            vq.config?.application?.name ||
+            `Nhiệm vụ #${vq.id}`;
+
+          try {
+            const res = await completeSingleQuest(token, vq, { autoClaim: true, ...opts });
+            const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
+            actions.push({
+              questId: vq.id,
+              questName,
+              type: 'video',
+              completed: !!res.completed,
+              claimed: !!res.claimed,
+              progressPercent,
+              message: res.message || (res.completed ? 'Hoàn thành 100% Video sau khi cày Game & Đã nhận thưởng ORB' : 'Tiến độ cập nhật'),
+            });
+          } catch (err) {
+            actions.push({
+              questId: vq.id,
+              questName,
+              type: 'video',
+              completed: false,
+              claimed: false,
+              error: err.message,
+              message: `Lỗi Video sau khi cày game: ${err.message}`,
+            });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[QUEST SCHEDULER] Lỗi quét video quest sau khi làm game cho User ${userId}:`, e.message);
+    }
   } finally {
     activeUserJobs.delete(userId);
   }
