@@ -771,7 +771,39 @@ function buildQuestSelectionPayload(orderId, pendingQuests, username) {
 /**
  * Tạo màn hình thanh toán VietQR cho đơn hàng
  */
-function buildPaymentPayload(order) {
+
+function fetchQrBuffer(url, timeoutMs = 2500) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), timeoutMs);
+    try {
+      const https = require('node:https');
+      https.get(url, (res) => {
+        if (res.statusCode !== 200) {
+          clearTimeout(timer);
+          return resolve(null);
+        }
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          clearTimeout(timer);
+          resolve(Buffer.concat(chunks));
+        });
+        res.on('error', () => {
+          clearTimeout(timer);
+          resolve(null);
+        });
+      }).on('error', () => {
+        clearTimeout(timer);
+        resolve(null);
+      });
+    } catch (_) {
+      clearTimeout(timer);
+      resolve(null);
+    }
+  });
+}
+
+async function buildPaymentPayload(order) {
   const ORDER_EXPIRE_MS = 10 * 60 * 1000; // 10 phút
   const createdAt = order.created_at || Date.now();
   const expiresAt = createdAt + ORDER_EXPIRE_MS;
@@ -800,7 +832,7 @@ function buildPaymentPayload(order) {
         .setStyle(ButtonStyle.Secondary)
     );
 
-    return { embeds: [completeEmbed], components: [closeRow] };
+    return { embeds: [completeEmbed], components: [closeRow], files: [] };
   }
 
   // Đơn hàng quá 10 phút hoặc đã bị hủy
@@ -813,7 +845,7 @@ function buildPaymentPayload(order) {
         `• Bạn vui lòng quay lại **Bảng Dịch Vụ Quest Shop** để tạo lại đơn hàng mới nhé!`
       )
       .setFooter({ text: 'Lowkey Quest Shop • Tự động hủy sau 10 phút' });
-    return { embeds: [expiredEmbed], components: [] };
+    return { embeds: [expiredEmbed], components: [], files: [] };
   }
 
   const bank = getBankConfig();
@@ -837,19 +869,32 @@ function buildPaymentPayload(order) {
       `• **Chủ tài khoản:** **${bank.bankName || '(Chưa cấu hình)'}**\n` +
       `• **Nội dung chuyển khoản (BẮT BUỘC):** \`${transferMemo}\`\n` +
       `👉 *Bấm giữ để sao chép nội dung CK:*\n\`\`\`\n${transferMemo}\n\`\`\`\n` +
-      `• 🖼️ **[Bấm vào đây để xem ảnh mã QR](${qrUrl})**\n` +
+      `• 🖼️ **[Bấm vào đây để mở ảnh mã QR nếu không thấy ảnh](${qrUrl})**\n` +
       `• ⏳ **Hạn thanh toán (10 phút):** Hết hạn <t:${Math.floor(expiresAt / 1000)}:R> lúc <t:${Math.floor(expiresAt / 1000)}:T>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `⚠️ **Lưu ý quan trọng:** Ghi đúng nội dung \`${transferMemo}\`. Sau 10 phút chưa thanh toán, đơn sẽ tự động hủy!` +
       (isChecking ? `\n\n⏳ *Hệ thống đang tự động kiểm tra SePay mỗi 15 giây... Vui lòng không bấm liên tục.*` : '')
     )
-    .setImage(qrUrl)
     .setFooter({
       text: isChecking
         ? 'Đã ghi nhận yêu cầu! Đang đợi SePay duyệt tự động...'
         : 'Chuyển xong hãy bấm nút "Đã Chuyển Tiền" (chỉ cần bấm 1 lần)!'
     })
     .setTimestamp();
+
+  // Tải buffer ảnh để upload trực tiếp dưới dạng Attachment của Discord (chống 100% lỗi proxy ảnh của Discord)
+  const files = [];
+  try {
+    const qrBuffer = await fetchQrBuffer(qrUrl);
+    if (qrBuffer && qrBuffer.length > 500) {
+      files.push(new AttachmentBuilder(qrBuffer, { name: 'vietqr.png' }));
+      embed.setImage('attachment://vietqr.png');
+    } else {
+      embed.setImage(qrUrl);
+    }
+  } catch (_) {
+    embed.setImage(qrUrl);
+  }
 
   const checkBtn = new ButtonBuilder()
     .setCustomId(`qshop:check_pay:${order.order_id}`)
@@ -862,8 +907,14 @@ function buildPaymentPayload(order) {
     .setLabel('❌ Hủy Đơn')
     .setStyle(ButtonStyle.Danger);
 
-  const row = new ActionRowBuilder().addComponents(checkBtn, cancelBtn);
-  return { embeds: [embed], components: [row] };
+  const qrLinkBtn = new ButtonBuilder()
+    .setLabel('Mở Mã QR (Trình Duyệt)')
+    .setStyle(ButtonStyle.Link)
+    .setURL(qrUrl)
+    .setEmoji('🖼️');
+
+  const row = new ActionRowBuilder().addComponents(checkBtn, cancelBtn, qrLinkBtn);
+  return { embeds: [embed], components: [row], files };
 }
 
 /**
@@ -1088,7 +1139,7 @@ async function handleShopInteraction(interaction, client) {
         amount: cfg.monthlyPackagePrice,
       });
 
-      const payload = buildPaymentPayload(order);
+      const payload = await buildPaymentPayload(order);
       return interaction.editReply(payload);
     }
   }
@@ -1209,7 +1260,7 @@ async function handleShopInteraction(interaction, client) {
         amount: cfg.monthlyPackagePrice,
       });
 
-      const payload = buildPaymentPayload(order);
+      const payload = await buildPaymentPayload(order);
       return interaction.editReply(payload);
     }
   }
@@ -1253,7 +1304,7 @@ async function handleShopInteraction(interaction, client) {
     `).run(JSON.stringify(selectedIds), JSON.stringify(questNames), questCount, totalAmount, orderId);
 
     const updatedOrder = getOrder(orderId);
-    const payload = buildPaymentPayload(updatedOrder);
+    const payload = await buildPaymentPayload(updatedOrder);
     return interaction.editReply(payload);
   }
 
@@ -1267,7 +1318,7 @@ async function handleShopInteraction(interaction, client) {
     }
 
     if (order.status === 'completed') {
-      const payload = buildPaymentPayload(order);
+      const payload = await buildPaymentPayload(order);
       if (typeof interaction.update === 'function') {
         return interaction.update(payload);
       }
@@ -1279,7 +1330,7 @@ async function handleShopInteraction(interaction, client) {
       if (order.status !== 'cancelled') {
         updateOrderStatus(order.order_id, 'cancelled', { error: 'Hết hạn thanh toán (quá 10 phút)' });
       }
-      const expiredPayload = buildPaymentPayload({ ...order, status: 'cancelled' });
+      const expiredPayload = await buildPaymentPayload({ ...order, status: 'cancelled' });
       if (typeof interaction.update === 'function') {
         return interaction.update(expiredPayload);
       }
@@ -1411,7 +1462,7 @@ async function handleShopInteraction(interaction, client) {
       }
     }
 
-    const payload = buildPaymentPayload(order);
+    const payload = await buildPaymentPayload(order);
     payload.content =
       `⏳ **ĐÃ GHI NHẬN YÊU CẦU: Chưa thấy giao dịch chuyển khoản cho đơn #${order.order_id}!**\n` +
       `• Nếu bạn vừa chuyển tiền, vui lòng đợi 10-20 giây để ngân hàng chuyển tiếp qua SePay rồi bấm lại nút **Đã Chuyển Tiền / Kiểm Tra** nhé.\n` +

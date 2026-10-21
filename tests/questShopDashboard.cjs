@@ -309,7 +309,7 @@ async function loginAs(user, base, request) {
     `).run(elevenMinutesAgo);
 
     const expiredOrder = getOrder('LQEXP999');
-    const expiredPayload = buildPaymentPayload(expiredOrder);
+    const expiredPayload = await buildPaymentPayload(expiredOrder);
     assert.equal(expiredPayload.components.length, 0, 'Đơn hết hạn không được hiển thị nút thanh toán');
     assert.match(expiredPayload.embeds[0].data.title, /HẾT HẠN/i);
 
@@ -336,7 +336,7 @@ async function loginAs(user, base, request) {
     `).run(Date.now());
 
     let actOrder = getOrder('LQACT001');
-    const activePayload = buildPaymentPayload(actOrder);
+    const activePayload = await buildPaymentPayload(actOrder);
     assert.equal(activePayload.components.length, 1);
     const payBtn = activePayload.components[0].components[0];
     assert.equal(payBtn.data.disabled, false);
@@ -356,7 +356,7 @@ async function loginAs(user, base, request) {
     assert.equal(actOrder.check_count, 1, 'check_count phải được tăng lên 1');
 
     // Kiểm tra payload hiển thị sau khi đã bấm 1 lần: nút phải disabled
-    const checkingPayload = buildPaymentPayload(actOrder);
+    const checkingPayload = await buildPaymentPayload(actOrder);
     assert.equal(checkingPayload.components[0].components[0].data.disabled, true);
     assert.match(checkingPayload.components[0].components[0].data.label, /Đang Đợi SePay/i);
 
