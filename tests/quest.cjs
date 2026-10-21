@@ -972,7 +972,8 @@ setWebSocketImplementation(MockWebSocket);
     };
 
     const extractedQuests = collectQuestsFromPayload(realDiscordDecisionsPayload);
-    assert.equal(extractedQuests.length, 3, 'Phải bóc tách đủ 3 quest từ decision creative_content, hero quest_ids và excluded_quests');
+    assert.equal(extractedQuests.length, 2, 'Phải bóc tách 2 quest từ decision creative_content và hero quest_ids, và loại trừ excluded_quests');
+    assert(!extractedQuests.some((q) => q.id === '1342624440894361626'), 'Quest trong excluded_quests phải bị loại trừ hoàn toàn');
     const mtgExtracted = extractedQuests.find((q) => q.id === '1342624440894361624');
     assert(mtgExtracted, 'Phải tìm thấy quest Magic Star Trek');
     assert.equal(mtgExtracted.traffic_metadata_sealed, 'sealed-magic-jwt-xyz', 'Phải giữ nguyên traffic_metadata_sealed');

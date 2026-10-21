@@ -122,19 +122,38 @@ function isQuestActive(q) {
  * - Mảng quests bình thường / claimed quests
  * - Đối tượng decisions (creative_type = 1: quest config, creative_type = 2: hero quest_ids)
  * - Đối tượng { quest: ... } trong decision
- * - Danh sách excluded_quests
- * - Bản đồ map { quest_id: quest } trong earned-decision
  * - Bản thân đối tượng là Quest Config (chứa messages / task_config_v2)
+ *
+ * LƯU Ý SỐNG CÒN:
+ * Discord trả về danh sách excluded_quests cho những nhiệm vụ mà tài khoản KHÔNG THỂ LÀM
+ * (ví dụ: bị khóa vùng địa lý như FanDuel cá cược ở Mỹ, giới hạn độ tuổi 21+, v.v.).
+ * TUYỆT ĐỐI PHẢI LOẠI TRỪ 100% các quest này, không được đưa vào danh sách làm để tránh
+ * bot cố làm nhiệm vụ bị chặn, gây nghẽn và không thể hoàn thành các video quest thật!
  */
 function collectQuestsFromPayload(data) {
   const quests = [];
   const seen = new Set();
+  const excludedIds = new Set();
+
+  function registerExcluded(obj) {
+    if (!obj || typeof obj !== 'object') return;
+    const list = obj.excluded_quests || obj.excludedQuests;
+    if (Array.isArray(list)) {
+      for (const item of list) {
+        const qId = item?.id || item?.quest_id || item?.questId;
+        if (qId) excludedIds.add(String(qId));
+      }
+    }
+  }
+
+  registerExcluded(data);
 
   function addQuest(candidate, fallbackId = null, sealed = null) {
     if (!candidate || typeof candidate !== 'object') return false;
     const rawId = candidate.id || candidate.quest_id || candidate.questId || fallbackId;
     if (!rawId) return false;
     const sId = String(rawId);
+    if (excludedIds.has(sId)) return false; // Tuyệt đối bỏ qua nhiệm vụ bị Discord exclude
     if (seen.has(sId)) return true;
 
     let config = null;
@@ -183,6 +202,8 @@ function collectQuestsFromPayload(data) {
     }
 
     if (typeof obj === 'object') {
+      registerExcluded(obj);
+
       const currentSealed =
         obj.traffic_metadata_sealed ||
         obj.trafficMetadataSealed ||
@@ -193,10 +214,11 @@ function collectQuestsFromPayload(data) {
         const cc = obj.creative.creative_content || obj.creative.creativeContent;
         if (cc && typeof cc === 'object') {
           const ct = obj.creative.creative_type ?? obj.creative.creativeType;
+          const ccId = cc.id || cc.quest_id || cc.questId || obj.quest_id || obj.questId || obj.id;
           // creative_type 1 (QUEST): cc chính là quest config
           if (ct === 1 || (!ct && !cc.quest_ids && !cc.questIds)) {
-            if (cc.id) {
-              addQuest(cc, cc.id, currentSealed);
+            if (ccId) {
+              addQuest(cc, ccId, currentSealed);
             }
           }
           // creative_type 2 (QUEST_HOME_HERO): cc chứa mảng quest_ids
@@ -211,7 +233,6 @@ function collectQuestsFromPayload(data) {
             }
           }
         }
-        return;
       }
 
       // 2. Nếu obj có trường quest (như { quest: questObj } trong decision)
@@ -222,20 +243,9 @@ function collectQuestsFromPayload(data) {
         }
       }
 
-      // 3. Nếu obj có danh sách excluded_quests
-      if (Array.isArray(obj.excluded_quests) || Array.isArray(obj.excludedQuests)) {
-        const list = obj.excluded_quests || obj.excludedQuests;
-        for (const item of list) {
-          const qId = item?.id || item?.quest_id || item?.questId;
-          if (qId) {
-            addQuest(item, qId, currentSealed);
-          }
-        }
-      }
-
-      // 4. Nếu bản thân obj có id hoặc quest_id
+      // 3. Nếu bản thân obj có id hoặc quest_id
       const directId = obj.id || obj.quest_id || obj.questId;
-      if (directId) {
+      if (directId && !excludedIds.has(String(directId))) {
         if (
           obj.config ||
           obj.user_status ||
@@ -255,8 +265,9 @@ function collectQuestsFromPayload(data) {
         }
       }
 
-      // 5. Quét tiếp các thuộc tính con
-      for (const val of Object.values(obj)) {
+      // 4. Quét tiếp các thuộc tính con (tuyệt đối bỏ qua excluded_quests)
+      for (const [k, val] of Object.entries(obj)) {
+        if (k === 'excluded_quests' || k === 'excludedQuests') continue;
         if (val && typeof val === 'object') {
           scan(val, depth + 1, currentSealed);
         }
@@ -265,14 +276,14 @@ function collectQuestsFromPayload(data) {
   }
 
   scan(data);
-  return quests;
+  return quests.filter((q) => !excludedIds.has(String(q.id)));
 }
 
 /**
  * Lấy danh sách nhiệm vụ hiện tại của tài khoản từ tất cả nguồn:
  * 1. Quests hiện tại / đã nhận (@me)
- * 2. Khám phá / Quest Home decisions (placement=3: Banner Desktop, placement=11: Tab Tất Cả Nhiệm Vụ, placement=1: Account Panel, placement=5: Video Modal)
- * 3. Danh sách excluded_quests & claimed quests
+ * 2. Khám phá / Quest Home decisions (placement=0: User Settings, placement=3: Banner Desktop, placement=11: Tab Tất Cả Nhiệm Vụ, placement=1: Account Panel, placement=5: Video Modal)
+ * 3. Tuyệt đối loại bỏ toàn bộ ID xuất hiện trong excluded_quests của Discord
  */
 async function fetchQuests(token) {
   // 1. Endpoint chính: /quests/@me
@@ -289,15 +300,24 @@ async function fetchQuests(token) {
   }
 
   const data = await res.json();
+  const allExcludedIds = new Set();
+  if (Array.isArray(data.excluded_quests)) {
+    for (const eq of data.excluded_quests) {
+      if (eq?.id) allExcludedIds.add(String(eq.id));
+    }
+  }
+
   const allQuests = collectQuestsFromPayload(data);
 
-  // 2. Quét các vị trí quảng bá và khám phá nhiệm vụ từ Quest Home & Quest Bar
+  // 2. Quét các vị trí quảng bá và khám phá nhiệm vụ từ Quest Home, User Settings & Quest Bar
   // Chuẩn bị UUID telemetry bắt buộc
   const crypto = require('crypto');
   const hbSessionId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'c9a1b2c3-d4e5-4a5b-8c7d-e6f7a8b9c0d1';
   const adSessionId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'e6f7a8b9-c0d1-4a5b-8c7d-c9a1b2c3d4e5';
 
   const discoveryUrls = [
+    // Placement 0: USER_SETTINGS / QUEST_HOME (Khu vực Cài đặt người dùng -> Quests trên Desktop/Web)
+    `https://discord.com/api/v9/quests/get-decisions?placement=0&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     // Placement 3: QUEST_HOME_BANNER_DESKTOP (Nơi các chiến dịch lớn như Magic: Star Trek hiển thị trên Desktop Quest Home)
     `https://discord.com/api/v9/quests/get-decisions?placement=3&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     // Placement 11: QUEST_HOME_DESKTOP (Tab Tất Cả Nhiệm Vụ)
@@ -311,6 +331,7 @@ async function fetchQuests(token) {
     // Placement 2: MOBILE_HOME_DOCK_AREA
     `https://discord.com/api/v9/quests/get-decisions?placement=2&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     // Route đơn lẻ: decision
+    `https://discord.com/api/v9/quests/decision?placement=0&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     `https://discord.com/api/v9/quests/decision?placement=3&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     `https://discord.com/api/v9/quests/decision?placement=11&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     `https://discord.com/api/v9/quests/decision?placement=1&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
@@ -318,8 +339,10 @@ async function fetchQuests(token) {
     // Quests đã nhận / đã hoàn tất
     'https://discord.com/api/v9/quests/@me/claimed',
     // Fallback không truyền UUID
+    'https://discord.com/api/v9/quests/get-decisions?placement=0&num_decisions_requested=15',
     'https://discord.com/api/v9/quests/get-decisions?placement=3&num_decisions_requested=15',
     'https://discord.com/api/v9/quests/get-decisions?placement=11&num_decisions_requested=15',
+    'https://discord.com/api/v9/quests/decision?placement=0',
     'https://discord.com/api/v9/quests/decision?placement=3',
     'https://discord.com/api/v9/quests/decision?placement=11',
   ];
@@ -334,9 +357,14 @@ async function fetchQuests(token) {
         if (extraRes && extraRes.ok) {
           const extraData = await extraRes.json().catch(() => null);
           if (extraData) {
+            if (Array.isArray(extraData.excluded_quests)) {
+              for (const eq of extraData.excluded_quests) {
+                if (eq?.id) allExcludedIds.add(String(eq.id));
+              }
+            }
             const extraQuests = collectQuestsFromPayload(extraData);
             for (const eq of extraQuests) {
-              if (eq?.id && !allQuests.some((q) => q.id === eq.id)) {
+              if (eq?.id && !allExcludedIds.has(String(eq.id)) && !allQuests.some((q) => q.id === eq.id)) {
                 allQuests.push(eq);
               }
             }
@@ -347,8 +375,10 @@ async function fetchQuests(token) {
   );
 
   // 3. Nếu có quest nào chỉ có id mà chưa tải đủ config, bổ sung chi tiết từ endpoint /quests/{id}
+  // (Chỉ bổ sung cho những quest KHÔNG bị exclude)
   for (let i = 0; i < allQuests.length; i++) {
     const q = allQuests[i];
+    if (q?.id && allExcludedIds.has(String(q.id))) continue;
     if ((!q.config || !q.config.task_config_v2) && q.id) {
       try {
         const detailRes = await requestDiscord(`https://discord.com/api/v9/quests/${q.id}`, {
@@ -373,8 +403,8 @@ async function fetchQuests(token) {
 
   const seen = new Set();
   const dedupedQuests = allQuests.filter((q) => {
-    if (!q?.id || seen.has(q.id)) return false;
-    seen.add(q.id);
+    if (!q?.id || allExcludedIds.has(String(q.id)) || seen.has(String(q.id))) return false;
+    seen.add(String(q.id));
     return true;
   });
 
@@ -388,37 +418,44 @@ async function fetchQuests(token) {
 async function enrollQuest(token, questId, platform = 0, quest = null) {
   const isVideo = platform === -1 || platform === null || platform === false;
   const sealed = quest?.traffic_metadata_sealed || quest?.trafficMetadataSealed || null;
-  // Với Video Quests: Discord client gửi { location: 11 } (Quest Home), { location: 3 } (Banner), hoặc { location: 1 } (Quest Bar)
-  const enrollBodies = isVideo
-    ? [
-        { location: 11, is_targeted: false, traffic_metadata_sealed: sealed },
-        { location: 11, is_targeted: false },
-        { location: 3, is_targeted: false, traffic_metadata_sealed: sealed },
-        { location: 3, is_targeted: false },
-        { location: 1, traffic_metadata_sealed: sealed },
-        { location: 1 },
-        {},
-      ]
-    : [
-        { location: 1, platform, traffic_metadata_sealed: sealed },
-        { platform },
-        { location: 11, platform, traffic_metadata_sealed: sealed },
-        {},
-      ];
 
-  let lastRes = null;
+  // Với Video Quests & Promotional Quests (Magic: Star Trek): Discord client gửi { location: 11 }, { location: 3 }, hoặc { location: 0 }
+  const enrollBodies = [
+    ...(sealed
+      ? [
+          { location: 11, traffic_metadata_sealed: sealed },
+          { location: 3, traffic_metadata_sealed: sealed },
+          { location: 0, traffic_metadata_sealed: sealed },
+          { location: 1, traffic_metadata_sealed: sealed },
+        ]
+      : []),
+    { location: 11 },
+    { location: 3 },
+    { location: 0 },
+    { location: 1 },
+    ...(isVideo ? [] : [{ location: 1, platform }, { platform }]),
+    {},
+  ];
+
   for (const enrollBody of enrollBodies) {
     try {
       const res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/enroll`, {
         method: 'POST',
-        headers: getHeaders(token),
+        headers: getHeaders(token, 'https://discord.com/quest-home'),
         body: JSON.stringify(enrollBody),
       });
 
-      if (res.ok || res.status === 400) {
+      if (res.ok) {
         break;
       }
-      lastRes = res;
+
+      if (res.status === 400) {
+        const errJson = await res.json().catch(() => ({}));
+        if (errJson.code === 260002 || String(errJson?.message || '').toLowerCase().includes('already')) {
+          break; // Đã nhận nhiệm vụ này trước đó
+        }
+        // Nếu 400 do sai location/field, tiếp tục thử enrollBody tiếp theo
+      }
     } catch (e) {}
   }
 
@@ -550,6 +587,11 @@ async function sendVideoProgress(token, questId, timestamp = 30, retries = 3) {
 
     const status = res.status;
     const text = await res.text().catch(() => '');
+
+    // 404, 403, 401: Lỗi vĩnh viễn, không khả dụng trên tài khoản này -> throw ngay để abort
+    if (status === 404 || status === 403 || status === 401) {
+      throw new Error(`Video quest không khả dụng hoặc bị từ chối (${questId}): HTTP ${status} ${text}`);
+    }
 
     // 429 Rate limited
     if (status === 429 && attempt < retries) {
@@ -764,6 +806,9 @@ async function completeVideoQuest(token, quest, options = {}) {
       }
     } catch (err) {
       console.warn(`[QUEST WORKER] Lỗi gửi video progress loop=${calls} (${questId}): ${err.message}`);
+      if (err.message.includes('không khả dụng') || err.message.includes('HTTP 404') || err.message.includes('HTTP 403') || err.message.includes('HTTP 401')) {
+        throw err;
+      }
     }
 
     if (options.onProgress) {
@@ -800,8 +845,12 @@ async function completeVideoQuest(token, quest, options = {}) {
     serverConfirmed ||
     !!lastServerResponse?.completed_at ||
     !!lastServerResponse?.user_status?.completed_at ||
-    isFastTest ||
-    currentSeconds >= targetSeconds;
+    (isFastTest && currentSeconds >= targetSeconds) ||
+    (lastServerResponse && currentSeconds >= targetSeconds);
+
+  if (!isFinished) {
+    throw new Error('Máy chủ Discord không xác nhận hoàn thành video sau thời gian xem.');
+  }
 
   if (isFinished) {
     let reward = null;

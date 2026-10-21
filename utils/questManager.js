@@ -681,11 +681,25 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
   } catch (e) {}
 
   let lastUpdate = 0;
-  const updateProgress = async (text) => {
+  let pendingTimer = null;
+  const updateProgress = (text) => {
     const now = Date.now();
-    if (now - lastUpdate > 1200) {
-      lastUpdate = now;
+    const doUpdate = async () => {
+      lastUpdate = Date.now();
       await interaction.editReply({ content: text, embeds: [], components: [] }).catch(() => {});
+    };
+
+    if (now - lastUpdate >= 1200) {
+      if (pendingTimer) {
+        clearTimeout(pendingTimer);
+        pendingTimer = null;
+      }
+      doUpdate();
+    } else if (!pendingTimer) {
+      pendingTimer = setTimeout(() => {
+        pendingTimer = null;
+        doUpdate();
+      }, 1200 - (now - lastUpdate));
     }
   };
 
