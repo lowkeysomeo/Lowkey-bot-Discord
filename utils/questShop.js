@@ -108,7 +108,20 @@ function getVietQrUrl(bankId, bankAccount, amount, memo, accountName) {
   const safeAmount = Math.max(0, parseInt(amount, 10) || 0);
   const safeMemo = encodeURIComponent(cleanMemo);
   const safeName = encodeURIComponent((accountName || '').trim());
-  return `https://qr.sepay.vn/img?bank=${safeBank}&acc=${safeAcc}&amount=${safeAmount}&des=${safeMemo}&template=compact`;
+  return `https://qr.sepay.vn/img?bank=${safeBank}&acc=${safeAcc}&amount=${safeAmount}&des=${safeMemo}&template=compact.png`;
+}
+
+function getVietQrIoUrl(bankId, bankAccount, amount, memo, accountName) {
+  let cleanMemo = (memo || '').trim();
+  if (!cleanMemo.toUpperCase().startsWith('SEVQR')) {
+    cleanMemo = `SEVQR ${cleanMemo}`.trim();
+  }
+  const safeBank = encodeURIComponent((bankId || 'ICB').trim().toUpperCase());
+  const safeAcc = encodeURIComponent((bankAccount || '').trim());
+  const safeAmount = Math.max(0, parseInt(amount, 10) || 0);
+  const safeMemo = encodeURIComponent(cleanMemo);
+  const safeName = encodeURIComponent((accountName || '').trim());
+  return `https://img.vietqr.io/image/${safeBank}-${safeAcc}-compact2.png?amount=${safeAmount}&addInfo=${safeMemo}&accountName=${safeName}`;
 }
 
 function generateOrderId(prefix = 'LQ') {
@@ -772,12 +785,17 @@ function buildQuestSelectionPayload(orderId, pendingQuests, username) {
  * Tạo màn hình thanh toán VietQR cho đơn hàng
  */
 
-function fetchQrBuffer(url, timeoutMs = 2500) {
+function fetchQrBuffer(url, timeoutMs = 3500) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), timeoutMs);
     try {
       const https = require('node:https');
-      https.get(url, (res) => {
+      const req = https.get(url, (res) => {
+        // Hỗ trợ HTTP 301, 302 Redirect
+        if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
+          clearTimeout(timer);
+          return fetchQrBuffer(res.headers.location, Math.max(1000, timeoutMs - 500)).then(resolve);
+        }
         if (res.statusCode !== 200) {
           clearTimeout(timer);
           return resolve(null);
@@ -792,7 +810,8 @@ function fetchQrBuffer(url, timeoutMs = 2500) {
           clearTimeout(timer);
           resolve(null);
         });
-      }).on('error', () => {
+      });
+      req.on('error', () => {
         clearTimeout(timer);
         resolve(null);
       });
@@ -801,6 +820,19 @@ function fetchQrBuffer(url, timeoutMs = 2500) {
       resolve(null);
     }
   });
+}
+
+async function fetchQrBufferWithFallback(bankId, bankAccount, amount, memo, accountName) {
+  const url1 = getVietQrUrl(bankId, bankAccount, amount, memo, accountName);
+  const url2 = getVietQrIoUrl(bankId, bankAccount, amount, memo, accountName);
+
+  let buf = await fetchQrBuffer(url1, 3500);
+  if (buf && buf.length > 500) return { buffer: buf, url: url1 };
+
+  buf = await fetchQrBuffer(url2, 3500);
+  if (buf && buf.length > 500) return { buffer: buf, url: url2 };
+
+  return { buffer: null, url: url1 };
 }
 
 async function buildPaymentPayload(order) {
@@ -832,7 +864,7 @@ async function buildPaymentPayload(order) {
         .setStyle(ButtonStyle.Secondary)
     );
 
-    return { embeds: [completeEmbed], components: [closeRow], files: [] };
+    return { content: null, embeds: [completeEmbed], components: [closeRow], files: [] };
   }
 
   // Đơn hàng quá 10 phút hoặc đã bị hủy
@@ -845,13 +877,14 @@ async function buildPaymentPayload(order) {
         `• Bạn vui lòng quay lại **Bảng Dịch Vụ Quest Shop** để tạo lại đơn hàng mới nhé!`
       )
       .setFooter({ text: 'Lowkey Quest Shop • Tự động hủy sau 10 phút' });
-    return { embeds: [expiredEmbed], components: [], files: [] };
+    return { content: null, embeds: [expiredEmbed], components: [], files: [] };
   }
 
   const bank = getBankConfig();
   const bankNameFull = BANK_NAMES[bank.bankId] || bank.bankId;
   const transferMemo = `SEVQR ${order.order_id}`;
   const qrUrl = getVietQrUrl(bank.bankId, bank.bankAccount, order.amount, transferMemo, bank.bankName);
+  const qrIoUrl = getVietQrIoUrl(bank.bankId, bank.bankAccount, order.amount, transferMemo, bank.bankName);
 
   const isMonthly = order.package_type === 'monthly';
   const isChecking = (order.check_count || 0) > 0;
@@ -869,7 +902,6 @@ async function buildPaymentPayload(order) {
       `• **Chủ tài khoản:** **${bank.bankName || '(Chưa cấu hình)'}**\n` +
       `• **Nội dung chuyển khoản (BẮT BUỘC):** \`${transferMemo}\`\n` +
       `👉 *Bấm giữ để sao chép nội dung CK:*\n\`\`\`\n${transferMemo}\n\`\`\`\n` +
-      `• 🖼️ **[Bấm vào đây để mở ảnh mã QR nếu không thấy ảnh](${qrUrl})**\n` +
       `• ⏳ **Hạn thanh toán (10 phút):** Hết hạn <t:${Math.floor(expiresAt / 1000)}:R> lúc <t:${Math.floor(expiresAt / 1000)}:T>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `⚠️ **Lưu ý quan trọng:** Ghi đúng nội dung \`${transferMemo}\`. Sau 10 phút chưa thanh toán, đơn sẽ tự động hủy!` +
@@ -882,19 +914,29 @@ async function buildPaymentPayload(order) {
     })
     .setTimestamp();
 
-  // Tải buffer ảnh để upload trực tiếp dưới dạng Attachment của Discord (chống 100% lỗi proxy ảnh của Discord)
+  // Tải buffer ảnh để upload trực tiếp đính kèm (hỗ trợ 100% mọi nền tảng)
   const files = [];
   try {
-    const qrBuffer = await fetchQrBuffer(qrUrl);
+    const { buffer: qrBuffer, url: finalQrUrl } = await fetchQrBufferWithFallback(
+      bank.bankId,
+      bank.bankAccount,
+      order.amount,
+      transferMemo,
+      bank.bankName
+    );
+
     if (qrBuffer && qrBuffer.length > 500) {
       files.push(new AttachmentBuilder(qrBuffer, { name: 'vietqr.png' }));
       embed.setImage('attachment://vietqr.png');
     } else {
-      embed.setImage(qrUrl);
+      embed.setImage(finalQrUrl || qrUrl);
     }
   } catch (_) {
     embed.setImage(qrUrl);
   }
+
+  // Đặt thumbnail để đảm bảo thiết bị di động luôn hiển thị ô QR
+  embed.setThumbnail(qrIoUrl);
 
   const checkBtn = new ButtonBuilder()
     .setCustomId(`qshop:check_pay:${order.order_id}`)
@@ -914,7 +956,14 @@ async function buildPaymentPayload(order) {
     .setEmoji('🖼️');
 
   const row = new ActionRowBuilder().addComponents(checkBtn, cancelBtn, qrLinkBtn);
-  return { embeds: [embed], components: [row], files };
+
+  // Content hiển thị link ảnh QR trực tiếp: Discord Client tự động preview ảnh QR to đùng ngay cả khi embed bị lỗi hiển thị
+  const content =
+    `💳 **MÃ QR THANH TOÁN TỰ ĐỘNG SEPAY — ĐƠN HÀNG #${order.order_id} (${formatVnd(order.amount)})**\n` +
+    `👉 Mở app ngân hàng quét mã bên dưới (hoặc bấm nút **"Mở Mã QR (Trình Duyệt)"** nếu không thấy ảnh):\n` +
+    `${qrUrl}`;
+
+  return { content, embeds: [embed], components: [row], files };
 }
 
 /**
@@ -1056,11 +1105,17 @@ async function handleShopInteraction(interaction, client) {
   // Khách chọn Dùng Token Đã Lưu (Không cần nhập lại)
   if (customId.startsWith('qshop:use_saved:')) {
     const packageType = customId.split(':')[2] || 'single';
-    await interaction.deferUpdate();
+    await interaction.update({
+      content: '⏳ Đang khởi tạo hóa đơn thanh toán cho bạn...',
+      embeds: [],
+      components: [],
+      files: [],
+    });
 
     const sub = getSubscriber(interaction.user.id);
     if (!sub || !sub.token || sub.token.length < 20) {
-      return interaction.editReply({
+      return interaction.followUp({
+        flags: 64,
         content: '⚠️ Không tìm thấy token đã lưu. Vui lòng bấm tạo đơn lại để nhập token mới.',
         embeds: [],
         components: [],
@@ -1094,7 +1149,7 @@ async function handleShopInteraction(interaction, client) {
           .setStyle(ButtonStyle.Primary)
       );
 
-      return interaction.editReply({ embeds: [expiredEmbed], components: [changeRow] });
+      return interaction.followUp({ flags: 64, embeds: [expiredEmbed], components: [changeRow] });
     }
 
     const username = userInfo.global_name || userInfo.username;
@@ -1104,12 +1159,13 @@ async function handleShopInteraction(interaction, client) {
       try {
         quests = await fetchQuests(sub.token);
       } catch (e) {
-        return interaction.editReply({ content: `❌ Không thể tải danh sách Quest: ${e.message}`, embeds: [], components: [] });
+        return interaction.followUp({ flags: 64, content: `❌ Không thể tải danh sách Quest: ${e.message}`, embeds: [], components: [] });
       }
 
       const pendingQuests = quests.filter((q) => !q.user_status?.completed_at && !q.user_status?.claimed_at);
       if (pendingQuests.length === 0) {
-        return interaction.editReply({
+        return interaction.followUp({
+          flags: 64,
           content: `ℹ️ Tài khoản **@${username}** hiện không có nhiệm vụ Discord nào chưa hoàn thành! Hãy quay lại khi Discord ra mắt Quest mới nhé.`,
           embeds: [],
           components: [],
@@ -1127,7 +1183,7 @@ async function handleShopInteraction(interaction, client) {
       });
 
       const payload = buildQuestSelectionPayload(order.order_id, pendingQuests, username);
-      return interaction.editReply(payload);
+      return interaction.followUp({ flags: 64, ...payload });
     } else {
       const cfg = getBankConfig();
       const order = createOrder({
@@ -1140,7 +1196,7 @@ async function handleShopInteraction(interaction, client) {
       });
 
       const payload = await buildPaymentPayload(order);
-      return interaction.editReply(payload);
+      return interaction.followUp({ flags: 64, ...payload });
     }
   }
 
@@ -1275,7 +1331,12 @@ async function handleShopInteraction(interaction, client) {
       return interaction.reply({ content: '❌ Không tìm thấy thông tin đơn hàng này.', flags: 64 });
     }
 
-    await interaction.deferUpdate();
+    await interaction.update({
+      content: '⏳ Đang tạo hóa đơn thanh toán cho các nhiệm vụ bạn đã chọn...',
+      embeds: [],
+      components: [],
+      files: [],
+    });
 
     // Lấy lại danh sách tên nhiệm vụ
     let quests = [];
@@ -1305,7 +1366,7 @@ async function handleShopInteraction(interaction, client) {
 
     const updatedOrder = getOrder(orderId);
     const payload = await buildPaymentPayload(updatedOrder);
-    return interaction.editReply(payload);
+    return interaction.followUp({ flags: 64, ...payload });
   }
 
   // 7. Khách bấm [🔄 Đã Chuyển Tiền / Kiểm Tra]
