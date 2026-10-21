@@ -53,10 +53,10 @@ const DEFAULT_PANEL_DESCRIPTION =
   `**1️⃣ Gói Tùy Chọn Quest Lẻ — \`{single_price} / quest\`**\n` +
   `• Tự do tích chọn các nhiệm vụ bạn muốn làm trên tài khoản.\n` +
   `• Tiền thanh toán = \`Số lượng quest × {single_price}\`.\n` +
-  `• Sau khi quét mã QR thanh toán, bot sẽ lập tức cày và nhận thưởng ORBs ngay.\n\n` +
+  `• Sau khi quét mã QR thanh toán, bot sẽ lập tức cày hoàn tất 100% nhiệm vụ ngay.\n\n` +
   `**2️⃣ Gói Tự Động Theo Tháng — \`{monthly_price} / tháng\` (30 ngày)**\n` +
   `• **KHÔNG GIỚI HẠN** số lượng nhiệm vụ trong suốt 1 tháng!\n` +
-  `• Bot chạy nền 24/7 trên máy chủ: cứ có Quest mới là tự nhận, tự xem video / chơi game, tự nhận quà và gửi thông báo DM chúc mừng.\n` +
+  `• Bot chạy nền 24/7 trên máy chủ: cứ có Quest mới là tự nhận, tự xem video / chơi game hoàn tất 100% và gửi thông báo DM nhắc bạn bấm Claim.\n` +
   `• Bạn hoàn toàn không cần bật máy tính, mở game hay treo máy.\n` +
   `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
   `🛡️ *Hệ thống chia nhịp tua an toàn, chống 400 Bad Request & bảo vệ tài khoản tối đa.*`;
@@ -363,7 +363,7 @@ async function processPaidOrder(orderId, client) {
             `• **Mã đơn hàng:** \`${order.order_id}\`\n` +
             `• **Gói dịch vụ:** Tự động hoàn thành Quest Discord (Không giới hạn)\n` +
             `• **Hạn sử dụng:** 30 ngày (Đến ngày **${expDate}**)\n` +
-            `• **Quyền lợi:** Bot quét nền 24/7, tự nhận nhiệm vụ, tự xem video, cày ORB và gửi báo cáo về DM mỗi khi có quest mới.`
+            `• **Quyền lợi:** Bot quét nền 24/7, tự nhận nhiệm vụ, tự xem video, cày đủ tiến độ 100% và gửi báo cáo về DM để bạn bấm Claim nhận quà.`
           )
           .setFooter({ text: 'Lowkey Quest Shop • Dịch vụ tự động 24/7' })
           .setTimestamp();
@@ -407,7 +407,7 @@ async function processPaidOrder(orderId, client) {
 
     for (const q of targetQuests) {
       try {
-        const res = await completeSingleQuest(order.token, q, { autoClaim: true, heartbeatDelayMs: 1200 });
+        const res = await completeSingleQuest(order.token, q, { autoClaim: false, heartbeatDelayMs: 1200 });
         if (res.completed || res.alreadyDone || res.progressPercent >= 100) {
           completedCount++;
           results.push({
@@ -498,7 +498,7 @@ async function processPaidOrder(orderId, client) {
           if (ch && ch.isTextBased()) {
             ch.send({
               content: isAllDone
-                ? `🎉 Chúc mừng <@${order.user_id}>! Đơn hàng **#${order.order_id}** (${order.quest_count} nhiệm vụ) đã được hoàn tất 100% và nhận thưởng ORB!`
+                ? `🎉 Chúc mừng <@${order.user_id}>! Đơn hàng **#${order.order_id}** (${order.quest_count} nhiệm vụ) đã được hoàn tất 100%! Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim nhận quà nhé!`
                 : `🎯 Thông báo <@${order.user_id}>: Đơn hàng **#${order.order_id}** đã được bot nhận (Accept) thành công! Vui lòng mở tin nhắn riêng (DM) để nhận hướng dẫn hoàn tất 1-click.`,
             }).catch(() => {});
           }

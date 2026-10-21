@@ -331,7 +331,7 @@ async function scanUserQuests(subscriber, client, options = {}) {
           `Nhiệm vụ #${vq.id}`;
 
         try {
-          const res = await completeSingleQuest(token, vq, { autoClaim: true, ...opts });
+          const res = await completeSingleQuest(token, vq, { autoClaim: false, ...opts });
           const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
           actions.push({
             questId: vq.id,
@@ -413,7 +413,7 @@ async function scanUserQuests(subscriber, client, options = {}) {
               const staggerDelay = opts.heartbeatDelayMs && opts.heartbeatDelayMs < 1000 ? 5 : 2500;
               await new Promise((r) => setTimeout(r, idx * staggerDelay));
             }
-            return completeSingleQuest(token, quest, { autoClaim: true, ...opts });
+            return completeSingleQuest(token, quest, { autoClaim: false, ...opts });
           })();
         })
       );
@@ -478,7 +478,7 @@ async function scanUserQuests(subscriber, client, options = {}) {
             `Nhiệm vụ #${vq.id}`;
 
           try {
-            const res = await completeSingleQuest(token, vq, { autoClaim: true, ...opts });
+            const res = await completeSingleQuest(token, vq, { autoClaim: false, ...opts });
             const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
             actions.push({
               questId: vq.id,
