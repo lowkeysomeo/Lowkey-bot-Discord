@@ -39,28 +39,53 @@ TOP_GAMES = [
     {"id": "762434991303950386", "name": "Genshin Impact", "exe": "GenshinImpact.exe"}
 ]
 
-VARIETY_NAMES = [
-    "Counter-Strike 2", "Dota 2", "Team Fortress 2", "Half-Life 2", "Portal 2", "Left 4 Dead 2",
-    "VALORANT", "League of Legends", "Apex Legends", "Fortnite", "Overwatch 2", "Minecraft",
-    "Roblox", "Genshin Impact", "Honkai: Star Rail", "Zenless Zone Zero", "Grand Theft Auto V",
-    "Red Dead Redemption 2", "Cyberpunk 2077", "The Witcher 3: Wild Hunt", "Elden Ring",
-    "Dark Souls III", "Sekiro: Shadows Die Twice", "Baldur's Gate 3", "Black Myth: Wukong",
-    "PUBG: BATTLEGROUNDS", "Rust", "Palworld", "Terraria", "Stardew Valley", "Helldivers 2",
-    "Warframe", "Destiny 2", "Diablo IV", "Path of Exile", "World of Warcraft", "FINAL FANTASY XIV",
-    "Tom Clancy's Rainbow Six Siege", "Escape from Tarkov", "Lethal Company", "Among Us",
-    "Fall Guys", "Rocket League", "Garry's Mod", "osu!", "EA SPORTS FC 25", "Forza Horizon 5",
-    "Euro Truck Simulator 2", "American Truck Simulator", "BeamNG.drive", "Assetto Corsa",
-    "Need for Speed Unbound", "Cities: Skylines II", "Factorio", "Satisfactory", "RimWorld",
-    "Frostpunk 2", "Sid Meier's Civilization VI", "Age of Empires IV", "Total War: WARHAMMER III",
-    "Crusader Kings III", "Europa Universalis IV", "Hearts of Iron IV", "Stellaris",
-    "Deep Rock Galactic", "War Thunder", "World of Tanks", "World of Warships", "Call of Duty",
-    "Battlefield 2042", "Halo Infinite", "DOOM Eternal", "PAYDAY 2", "Ready or Not", "Squad",
-    "Arma 3", "Hell Let Loose", "Dead by Daylight", "Phasmophobia", "Hades II", "Dead Cells",
-    "Hollow Knight", "Celeste", "Cuphead", "The Binding of Isaac: Rebirth", "Vampire Survivors",
-    "Risk of Rain 2", "Slay the Spire", "Balatro", "Dave the Diver", "Disco Elysium", "Undertale",
-    "Resident Evil 4", "Silent Hill 2", "Dead Space", "Alan Wake 2", "The Last of Us Part I",
-    "God of War Ragnarök", "Horizon Forbidden West", "Ghost of Tsushima", "Marvel's Spider-Man Remastered"
-]
+DETECTABLE_FILE = os.path.join(BASE_DIR, "detectable_games.json")
+
+def load_verified_games(target_count=105):
+    # 1. Đọc từ file danh mục 120 game chuẩn của Discord
+    if os.path.exists(DETECTABLE_FILE):
+        try:
+            with open(DETECTABLE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if len(data) >= target_count:
+                    return data[:target_count]
+                elif len(data) > 0:
+                    return data
+        except Exception:
+            pass
+
+    # 2. Thử fetch trực tiếp từ API Discord nếu file bị thiếu
+    try:
+        req = urllib.request.Request(
+            "https://discord.com/api/v9/applications/detectable",
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        )
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+            clean = []
+            seen = set()
+            ignore = ['crash', 'unins', 'report', 'setup', 'redist', 'helper', 'x360ce', 'patch', 'vcredist', 'dxsetup']
+            for g in raw:
+                gid = str(g.get("id", ""))
+                name = g.get("name", "").strip()
+                if not gid or not name or gid in seen:
+                    continue
+                for e in g.get("executables", []):
+                    ename = e.get("name", "")
+                    if ename and (e.get("os") == "win32" or not e.get("os")):
+                        base = os.path.basename(ename.replace("\\", "/"))
+                        if base.lower().endswith(".exe") and not any(w in base.lower() for w in ignore):
+                            clean.append({"id": gid, "name": name, "exe": base})
+                            seen.add(gid)
+                            break
+                if len(clean) >= target_count:
+                    return clean
+            if clean:
+                return clean
+    except Exception:
+        pass
+
+    return TOP_GAMES
 
 class SpooferDesktopApp(tk.Tk):
     def __init__(self):
@@ -547,15 +572,16 @@ class SpooferDesktopApp(tk.Tk):
         self.set_status("Đang gửi telemetry 100 game...", "#FEE75C")
 
         def _worker():
-            games = VARIETY_NAMES[:100]
+            games = load_verified_games(105)
             success = 0
-            self.log(f"Bắt đầu tua {len(games)} trò chơi đa dạng...", "yellow")
+            self.log(f"Bắt đầu tua {len(games)} trò chơi PC chuẩn từ cơ sở dữ liệu Discord...", "yellow")
 
-            for i, name in enumerate(games, 1):
+            for i, game in enumerate(games, 1):
                 session_id = str(uuid.uuid4())
                 now_ms = int(time.time() * 1000)
-                app_id = str(400000000000000000 + (i * 1234567))
-                exe = name.replace(" ", "").replace(":", "").replace("'", "") + ".exe"
+                app_id = game["id"]
+                name = game["name"]
+                exe = game["exe"]
 
                 events = [
                     {
@@ -593,14 +619,14 @@ class SpooferDesktopApp(tk.Tk):
                 self.set_status(f"Đang tua game ({i}/{len(games)})...", "#5865F2")
 
                 if i % 10 == 0 or i == len(games):
-                    self.log(f"[{i}/{len(games)}] Đã hoàn tất: '{name}' (HTTP 204)", "blurple")
+                    self.log(f"[{i}/{len(games)}] Đã hoàn tất: '{name}' (ID: {app_id})", "blurple")
 
                 time.sleep(0.12)
 
             self.set_status(f"Hoàn thành {success}/{len(games)} Game ✓", "#57F287")
-            self.log(f"✨ HOÀN TẤT! Đã gửi thành công {success}/{len(games)} trò chơi!", "green")
+            self.log(f"✨ HOÀN TẤT! Đã gửi thành công {success}/{len(games)} trò chơi chính thức!", "green")
             self.toggle_buttons(True)
-            messagebox.showinfo("Hoàn Tất", f"Đã gửi thành công {success} tựa game lên máy chủ Discord!\nHuy hiệu sẽ cập nhật trong 24h - 48h.")
+            messagebox.showinfo("Hoàn Tất", f"Đã gửi thành công {success} tựa game chuẩn Discord!\nHuy hiệu sẽ cập nhật trong 24h - 48h.")
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -668,13 +694,14 @@ class SpooferDesktopApp(tk.Tk):
             time.sleep(1)
             self.log("🚀 BƯỚC 2/2: BẮT ĐẦU TUA 100 TỰA GAME...", "yellow")
 
-            games = VARIETY_NAMES[:100]
+            games = load_verified_games(105)
             success = 0
-            for i, name in enumerate(games, 1):
+            for i, game in enumerate(games, 1):
                 session_id = str(uuid.uuid4())
                 now_ms = int(time.time() * 1000)
-                app_id = str(400000000000000000 + (i * 1234567))
-                exe = name.replace(" ", "").replace(":", "").replace("'", "") + ".exe"
+                app_id = game["id"]
+                name = game["name"]
+                exe = game["exe"]
 
                 events_var = [
                     {
