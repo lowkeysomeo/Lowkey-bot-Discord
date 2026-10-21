@@ -317,7 +317,8 @@ async function startViewerStreamFarming(member, textChannel, { onMilestone = nul
     }
   }, 30 * 1000);
 
-  if (timer && typeof timer.unref === 'function') timer.unref();
+  // Giữ timer luôn hoạt động trong event loop để không bị ngắt quãng 24/7
+  // if (timer && typeof timer.unref === 'function') timer.unref();
 
   const session = {
     userId,
@@ -382,7 +383,6 @@ class StreamGatewayClient {
           reject(new Error('Hết thời gian chờ kết nối Gateway (Timeout 15s).'));
         }
       }, 15000);
-      if (timeoutTimer && typeof timeoutTimer.unref === 'function') timeoutTimer.unref();
 
       try {
         const endpoint = (this.resumeGatewayUrl && this.sessionId)
@@ -484,6 +484,9 @@ class StreamGatewayClient {
           isInitialConnect = false;
           clearTimeout(timeoutTimer);
           reject(err);
+        } else {
+          // Bắt lỗi socket khi đang chạy nền, không để crash process
+          console.warn('[STREAM GATEWAY] Socket warning:', err?.message || err);
         }
       });
 
@@ -532,7 +535,7 @@ class StreamGatewayClient {
       },
     });
 
-    // Định kỳ gửi lại tín hiệu stream để giữ stream sống 24/7
+    // Định kỳ gửi lại tín hiệu stream mỗi 45s để giữ stream sống 24/7
     this.streamTimer = setInterval(() => {
       if (this.isReady) {
         this.send({
@@ -545,11 +548,7 @@ class StreamGatewayClient {
           },
         });
       }
-    }, 60 * 1000);
-
-    if (this.streamTimer && typeof this.streamTimer.unref === 'function') {
-      this.streamTimer.unref();
-    }
+    }, 45 * 1000);
   }
 
   stopStreamBroadcast() {
@@ -569,9 +568,6 @@ class StreamGatewayClient {
       }
       this.send({ op: 1, d: this.sequence });
     }, interval);
-    if (this.heartbeatTimer && typeof this.heartbeatTimer.unref === 'function') {
-      this.heartbeatTimer.unref();
-    }
   }
 
   stopHeartbeat() {
@@ -591,9 +587,6 @@ class StreamGatewayClient {
         });
       }
     }, delayMs);
-    if (this.reconnectTimer && typeof this.reconnectTimer.unref === 'function') {
-      this.reconnectTimer.unref();
-    }
   }
 
   clearReconnectTimer() {
@@ -643,6 +636,7 @@ async function startTokenStreamFarming({
   userId,
   guildId,
   channelId,
+  botClient = null,
   onMilestone = null,
   onTick = null,
 }) {
@@ -672,6 +666,25 @@ async function startTokenStreamFarming({
   progress.currentSessionSeconds = 0;
   saveStreamProgress(uid, progress);
 
+  // Nếu có botClient và voiceAdapter, cho Lowkey Bot tham gia kênh làm Viewer để Discord luôn tính giờ stream
+  let viewerConnection = null;
+  if (botClient && guildId && channelId && voiceAdapter) {
+    try {
+      const guild = botClient.guilds?.cache?.get(guildId);
+      if (guild && guild.voiceAdapterCreator) {
+        viewerConnection = voiceAdapter.joinVoiceChannel({
+          channelId,
+          guildId,
+          adapterCreator: guild.voiceAdapterCreator,
+          selfDeaf: false,
+          selfMute: true,
+        });
+      }
+    } catch (e) {
+      console.warn('[STREAM WORKER] Không thể kết nối Bot Viewer phụ:', e.message);
+    }
+  }
+
   const client = new StreamGatewayClient(token, { guildId, channelId });
   const startedAt = Date.now();
 
@@ -683,6 +696,7 @@ async function startTokenStreamFarming({
     guildId,
     channelId,
     client,
+    connection: viewerConnection,
     running: true,
     startedAt,
     timer: null,
@@ -694,6 +708,9 @@ async function startTokenStreamFarming({
     await client.connect();
   } catch (err) {
     activeSessions.delete(uid);
+    if (viewerConnection && typeof viewerConnection.destroy === 'function') {
+      try { viewerConnection.destroy(); } catch (_) {}
+    }
     client.disconnect(true);
     return { success: false, message: `Không thể kết nối Gateway: ${err.message}` };
   }
@@ -728,13 +745,10 @@ async function startTokenStreamFarming({
     }
   }, 60 * 1000);
 
-  if (session.timer && typeof session.timer.unref === 'function') {
-    session.timer.unref();
-  }
-
   return {
     success: true,
     username: userProfile.username,
+    hasBotViewer: Boolean(viewerConnection),
     message: 'Đã kết nối Gateway thành công và bắt đầu cày stream ngầm 24/7!',
   };
 }
@@ -832,24 +846,39 @@ function buildStreamStatusPayload(userId, userTag = 'Bạn') {
     }
   );
 
-  const row = new ActionRowBuilder().addComponents(
-    isRunning
-      ? new ButtonBuilder()
-          .setCustomId('quest:stream_stop')
-          .setLabel('Dừng Cày Stream')
-          .setEmoji('⏹️')
-          .setStyle(ButtonStyle.Danger)
-      : new ButtonBuilder()
-          .setCustomId('quest:stream_start')
-          .setLabel('Bắt Đầu Cày Stream')
-          .setEmoji('📺')
-          .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId('quest:hub')
-      .setLabel('Về Bảng Điều Khiển')
-      .setEmoji('🔮')
-      .setStyle(ButtonStyle.Secondary)
-  );
+  const row = new ActionRowBuilder();
+  if (isRunning) {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId('quest:stream_stop')
+        .setLabel('Dừng Cày Stream')
+        .setEmoji('⏹️')
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId('quest:hub')
+        .setLabel('Về Bảng Điều Khiển')
+        .setEmoji('🔮')
+        .setStyle(ButtonStyle.Secondary)
+    );
+  } else {
+    row.addComponents(
+      new ButtonBuilder()
+        .setCustomId('quest:stream_token_start')
+        .setLabel('Cày Ngầm Token 24/7')
+        .setEmoji('🚀')
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('quest:stream_viewer_start')
+        .setLabel('Bot Làm Viewer Voice')
+        .setEmoji('🎙️')
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId('quest:hub')
+        .setLabel('Về Bảng Điều Khiển')
+        .setEmoji('🔮')
+        .setStyle(ButtonStyle.Secondary)
+    );
+  }
 
   return { embeds: [embed], components: [row] };
 }

@@ -101,7 +101,7 @@ async function runTests() {
   assert.equal(stoppedRow.status, 'stopped');
   console.log('✅ 4. Stop farming state update verified.');
 
-  // 5. Verify buildStreamStatusPayload
+  // 5. Verify buildStreamStatusPayload (Idle buttons: Token 24/7 & Viewer)
   const payload = buildStreamStatusPayload(testUser, 'StreamerPro');
   assert.ok(payload.embeds && payload.embeds.length === 1);
   assert.ok(payload.components && payload.components.length === 1);
@@ -109,7 +109,12 @@ async function runTests() {
   assert.ok(embed.data.title.includes('CHIM NON'), 'Title must reflect current rank Chim non');
   assert.ok(embed.data.description.includes('5 giờ'), 'Description must show 5 hours');
   assert.ok(embed.data.description.includes('15 giờ nữa'), 'Description must show 15 hours remaining to Breakthrough');
-  console.log('✅ 5. Status embed & UI payload verified.');
+
+  const customIds = payload.components[0].components.map(c => c.data.custom_id);
+  assert.ok(customIds.includes('quest:stream_token_start'), 'Must include Token 24/7 farming button');
+  assert.ok(customIds.includes('quest:stream_viewer_start'), 'Must include Viewer Voice button');
+  assert.ok(customIds.includes('quest:hub'), 'Must include Hub button');
+  console.log('✅ 5. Status embed & UI payload verified with Token 24/7 & Viewer buttons.');
 
   // 6. Verify startup auto-resume candidate detection
   getDb().prepare("UPDATE stream_sessions SET status = 'running' WHERE user_id = ?").run(testUser);

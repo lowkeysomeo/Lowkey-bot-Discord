@@ -41,6 +41,12 @@ echo ================================================================
 
 if %errorlevel% neq 0 (
     echo.
-    echo [LOI] Tien trinh bi dung dot ngot. Nhan phim bat ky de thoat...
+    echo [LOI] Tien trinh bi dung voi ma loi: %errorlevel%
+    echo Nhan phim bat ky de thoat...
+    pause >nul
+) else (
+    echo.
+    echo [HOAN TAT] Tien trinh da luu ket qua thanh cong.
+    echo Nhan phim bat ky de dong cua so...
     pause >nul
 )
