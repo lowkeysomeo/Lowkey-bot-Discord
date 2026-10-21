@@ -74,3 +74,4 @@ data/*.txt
 *.token*
 data/gametime_progress.json
 data/variety_progress.json
+dashboard/public/uploads/
