@@ -108,7 +108,7 @@ function getVietQrUrl(bankId, bankAccount, amount, memo, accountName) {
   const safeAmount = Math.max(0, parseInt(amount, 10) || 0);
   const safeMemo = encodeURIComponent(cleanMemo);
   const safeName = encodeURIComponent((accountName || '').trim());
-  return `https://img.vietqr.io/image/${safeBank}-${safeAcc}-compact2.png?amount=${safeAmount}&addInfo=${safeMemo}&accountName=${safeName}`;
+  return `https://qr.sepay.vn/img?bank=${safeBank}&acc=${safeAcc}&amount=${safeAmount}&des=${safeMemo}&template=compact`;
 }
 
 function generateOrderId(prefix = 'LQ') {
@@ -837,6 +837,7 @@ function buildPaymentPayload(order) {
       `• **Chủ tài khoản:** **${bank.bankName || '(Chưa cấu hình)'}**\n` +
       `• **Nội dung chuyển khoản (BẮT BUỘC):** \`${transferMemo}\`\n` +
       `👉 *Bấm giữ để sao chép nội dung CK:*\n\`\`\`\n${transferMemo}\n\`\`\`\n` +
+      `• 🖼️ **[Bấm vào đây để xem ảnh mã QR](${qrUrl})**\n` +
       `• ⏳ **Hạn thanh toán (10 phút):** Hết hạn <t:${Math.floor(expiresAt / 1000)}:R> lúc <t:${Math.floor(expiresAt / 1000)}:T>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `⚠️ **Lưu ý quan trọng:** Ghi đúng nội dung \`${transferMemo}\`. Sau 10 phút chưa thanh toán, đơn sẽ tự động hủy!` +
