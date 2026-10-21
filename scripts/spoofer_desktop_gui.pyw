@@ -394,7 +394,7 @@ class SpooferDesktopApp(tk.Tk):
                     self.cached_analytics_token = data.get("analytics_token")
 
                     self.lbl_account_name.config(text=f"👤 {user_tag}", fg="#f2f3f5")
-                    self.lbl_account_badge.config(text="Token OK ✓", bg="rgba(87, 242, 135, 0.15)", fg="#57F287")
+                    self.lbl_account_badge.config(text="Token OK ✓", bg="#1f3d2b", fg="#57F287")
                     self.log(f"Đã xác thực thành công tài khoản: {user_tag}", "green")
 
                     # Lưu token vào file state
@@ -403,20 +403,37 @@ class SpooferDesktopApp(tk.Tk):
             except urllib.error.HTTPError as e:
                 if e.code == 401:
                     self.lbl_account_name.config(text="Token không hợp lệ (401 Unauthorized)", fg="#ED4245")
-                    self.lbl_account_badge.config(text="Sai Token", bg="#383a40", fg="#ED4245")
+                    self.lbl_account_badge.config(text="Sai Token", bg="#3d1f24", fg="#ED4245")
                     self.log("Lỗi: Token không hợp lệ. Vui lòng kiểm tra lại!", "red")
                 else:
                     self.lbl_account_name.config(text=f"Lỗi kết nối (HTTP {e.code})", fg="#ED4245")
                     self.log(f"Lỗi kiểm tra token (HTTP {e.code})", "red")
             except Exception as e:
                 self.lbl_account_name.config(text="Không thể kết nối đến Discord", fg="#ED4245")
-                self.log(f"Lỗi kết nối: {e}", "red")
+                self.log(f"Lỗi: {e}", "red")
 
         threading.Thread(target=_do_verify, daemon=True).start()
 
     # ── TELEMETRY METHODS ────────────────────────────────────────────────────
     def post_science_events(self, token, events):
         url = "https://discord.com/api/v9/science"
+        if not self.cached_analytics_token:
+            try:
+                user_req = urllib.request.Request(
+                    "https://discord.com/api/v9/users/@me?with_analytics_token=true",
+                    headers={
+                        "Authorization": token,
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+                        "Content-Type": "application/json"
+                    },
+                    method="GET"
+                )
+                with urllib.request.urlopen(user_req, timeout=5) as u_resp:
+                    u_data = json.loads(u_resp.read().decode("utf-8"))
+                    self.cached_analytics_token = u_data.get("analytics_token")
+            except Exception:
+                pass
+
         payload = {"events": events}
         if self.cached_analytics_token:
             payload["token"] = self.cached_analytics_token
