@@ -146,7 +146,14 @@ def post_science_events(user_token, analytics_token, events, cookie=""):
             return resp.status in (200, 204)
     except urllib.error.HTTPError as e:
         if e.code == 429:
-            time.sleep(2)
+            retry_after = 2.5
+            try:
+                retry_header = e.headers.get("Retry-After")
+                if retry_header:
+                    retry_after = float(retry_header) + 0.5
+            except Exception:
+                pass
+            time.sleep(retry_after)
             return post_science_events(user_token, analytics_token, events, cookie)
         return False
     except Exception:

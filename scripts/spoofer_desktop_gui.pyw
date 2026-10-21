@@ -98,6 +98,7 @@ class SpooferDesktopApp(tk.Tk):
         self.running_thread = None
         self.is_cancelling = False
         self.cached_analytics_token = None
+        self.current_token_for_analytics = None
 
         self.load_state_data()
         self.create_styles()
@@ -417,6 +418,7 @@ class SpooferDesktopApp(tk.Tk):
                         user_tag += f" ({global_name})"
 
                     self.cached_analytics_token = data.get("analytics_token")
+                    self.current_token_for_analytics = token
 
                     self.lbl_account_name.config(text=f"👤 {user_tag}", fg="#f2f3f5")
                     self.lbl_account_badge.config(text="Token OK ✓", bg="#1f3d2b", fg="#57F287")
@@ -440,9 +442,11 @@ class SpooferDesktopApp(tk.Tk):
         threading.Thread(target=_do_verify, daemon=True).start()
 
     # ── TELEMETRY METHODS ────────────────────────────────────────────────────
-    def post_science_events(self, token, events):
+    def post_science_events(self, token, events, retry_count=0):
         url = "https://discord.com/api/v9/science"
-        if not self.cached_analytics_token:
+        if self.current_token_for_analytics != token or not self.cached_analytics_token:
+            self.cached_analytics_token = None
+            self.current_token_for_analytics = token
             try:
                 user_req = urllib.request.Request(
                     "https://discord.com/api/v9/users/@me?with_analytics_token=true",
@@ -453,7 +457,7 @@ class SpooferDesktopApp(tk.Tk):
                     },
                     method="GET"
                 )
-                with urllib.request.urlopen(user_req, timeout=5) as u_resp:
+                with urllib.request.urlopen(user_req, timeout=6) as u_resp:
                     u_data = json.loads(u_resp.read().decode("utf-8"))
                     self.cached_analytics_token = u_data.get("analytics_token")
             except Exception:
@@ -475,9 +479,16 @@ class SpooferDesktopApp(tk.Tk):
             with urllib.request.urlopen(req, timeout=10) as resp:
                 return resp.status in (200, 204)
         except urllib.error.HTTPError as e:
-            if e.code == 429:
-                time.sleep(2)
-                return self.post_science_events(token, events)
+            if e.code == 429 and retry_count < 3:
+                retry_after = 2.5
+                try:
+                    retry_header = e.headers.get("Retry-After")
+                    if retry_header:
+                        retry_after = float(retry_header) + 0.5
+                except Exception:
+                    pass
+                time.sleep(retry_after)
+                return self.post_science_events(token, events, retry_count=retry_count + 1)
             return False
         except Exception:
             return False
@@ -613,6 +624,8 @@ class SpooferDesktopApp(tk.Tk):
                 ok = self.post_science_events(token, events)
                 if ok:
                     success += 1
+                else:
+                    self.log(f"⚠ Lỗi gửi: '{name}' (ID: {app_id})", "yellow")
 
                 pct = (i / len(games)) * 100
                 self.set_progress(pct)
@@ -621,7 +634,7 @@ class SpooferDesktopApp(tk.Tk):
                 if i % 10 == 0 or i == len(games):
                     self.log(f"[{i}/{len(games)}] Đã hoàn tất: '{name}' (ID: {app_id})", "blurple")
 
-                time.sleep(0.12)
+                time.sleep(0.18)
 
             self.set_status(f"Hoàn thành {success}/{len(games)} Game ✓", "#57F287")
             self.log(f"✨ HOÀN TẤT! Đã gửi thành công {success}/{len(games)} trò chơi chính thức!", "green")
@@ -733,15 +746,17 @@ class SpooferDesktopApp(tk.Tk):
                 ok = self.post_science_events(token, events_var)
                 if ok:
                     success += 1
+                else:
+                    self.log(f"⚠ Lỗi gửi: '{name}' (ID: {app_id})", "yellow")
 
                 pct = (i / len(games)) * 100
                 self.set_progress(pct)
                 self.set_status(f"Đang tua game ({i}/{len(games)})...", "#5865F2")
 
                 if i % 10 == 0 or i == len(games):
-                    self.log(f"[{i}/{len(games)}] Đã hoàn tất: '{name}' (HTTP 204)", "blurple")
+                    self.log(f"[{i}/{len(games)}] Đã hoàn tất: '{name}' (ID: {app_id})", "blurple")
 
-                time.sleep(0.12)
+                time.sleep(0.18)
 
             self.set_status("COMBO HOÀN TẤT 100% ✓", "#57F287")
             self.log("🎉 TẤT CẢ GÓI TIN ĐÃ ĐƯỢC GỬI THÀNH CÔNG ĐẾN DISCORD!", "green")
