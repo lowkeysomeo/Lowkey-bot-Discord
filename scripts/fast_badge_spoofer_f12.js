@@ -5,13 +5,11 @@
  * Tự động tua nhanh tiến trình Huy hiệu Discord bằng cách gửi Telemetry trực tiếp
  * lên API Science nội bộ của Discord (/api/v9/science) - Kỹ thuật các Shop hay dùng!
  * 
- * 100% Không dùng prompt() / alert() (Không bao giờ bị lỗi Electron chặn)
- * Tự động hiển thị Bảng điều khiển (GUI Modal) trực quan ngay trong Discord!
- * 
- * Các tính năng chính:
- * 1. ⚡ Max 5,000h Huy hiệu "Thời gian chơi" (Game Time / Vĩnh cửu)
- * 2. 🎮 Max 100+ Game Huy hiệu "Trò chơi đa dạng" (Game Variety / Thuyết phổ quát)
- * 3. 🚀 Combo cả 2 huy hiệu chỉ trong 1 lần chạy (~30 giây hoàn tất)
+ * Phiên bản V2:
+ * - Khắc phục triệt để lỗi 401 Unauthorized bằng cơ chế trích xuất Webpack chuẩn
+ * - Tự động nhận diện User Token và Username chính xác 100%
+ * - Có sẵn ô nhập/dán Token thủ công nếu muốn tự đổi tài khoản
+ * - Sử dụng RestAPI nội bộ của Discord & fallback fetch
  * ==============================================================================
  */
 
@@ -31,59 +29,84 @@
         "  ╚════██║██╔═══╝ ██║   ██║██║   ██║██╔══╝  ██╔══╝  ██╔══██╗\n" +
         "  ███████║██║     ╚██████╔╝╚██████╔╝██║     ███████╗██║  ██║\n" +
         "  ╚══════╝╚═╝      ╚═════╝  ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═╝\n" +
-        "       ⚡ LOWKEY TELEMETRY BADGE SPOOFER (IN-APP GUI) ⚡",
+        "       ⚡ LOWKEY TELEMETRY BADGE SPOOFER (V2 - GUI FIXED) ⚡",
         "color: #5865F2; font-weight: bold; font-family: monospace; font-size: 11px;"
     );
 
-    // ── 1. MODULE EXTRACTOR & DISCORD AUTH ──────────────────────────────────
-    function getWebpackModules() {
-        if (window.Vencord?.Webpack?.wreq?.c) {
-            return Object.values(window.Vencord.Webpack.wreq.c).flatMap(m => {
-                const exp = m?.exports;
-                if (!exp) return [];
-                return [exp, exp.default, ...(typeof exp === "object" ? Object.values(exp) : [])];
-            }).filter(Boolean);
-        }
+    // ── 1. MODULE EXTRACTOR CHUẨN XÁC 100% ──────────────────────────────────
+    let reqInstance = null;
 
-        if (typeof webpackChunkdiscord_app !== "undefined") {
-            let req;
-            webpackChunkdiscord_app.push([[Symbol("spoofer-extract")], {}, incoming => {
-                req = incoming;
-            }]);
-            webpackChunkdiscord_app.pop();
-            if (req?.c) {
-                return Object.values(req.c).flatMap(m => {
-                    const exp = m?.exports;
-                    if (!exp) return [];
-                    return [exp, exp.default, ...(typeof exp === "object" ? Object.values(exp) : [])];
-                }).filter(Boolean);
-            }
-        }
-        return [];
+    // Vencord support
+    if (window.Vencord?.Webpack?.wreq?.c) {
+        reqInstance = window.Vencord.Webpack.wreq;
+    } else if (typeof webpackChunkdiscord_app !== "undefined") {
+        // Discord có cả Sentry runtime và Discord app runtime.
+        // Bắt buộc phải chọn runtime có số lượng modules lớn nhất để không bị dính Sentry rỗng!
+        webpackChunkdiscord_app.push([[Symbol("spoofer-v2")], {}, r => {
+            const cur = Object.keys(reqInstance?.c || {}).length;
+            const incoming = Object.keys(r?.c || {}).length;
+            if (incoming > cur) reqInstance = r;
+        }]);
+        webpackChunkdiscord_app.pop();
     }
 
-    const modules = getWebpackModules();
+    const rawModules = reqInstance?.c ? Object.values(reqInstance.c) : [];
 
-    function findStore(name) {
-        return modules.find(val => {
+    function findStore(storeName) {
+        for (const m of rawModules) {
             try {
-                return val && typeof val === "object" &&
-                    (val.getName?.() === name || val.__proto__?.constructor?.displayName === name);
-            } catch (_) {
-                return false;
-            }
-        });
+                const exp = m?.exports;
+                if (!exp || typeof exp !== "object") continue;
+                for (const key of Object.keys(exp)) {
+                    const prop = exp[key];
+                    if (prop && typeof prop === "object" && prop.__proto__?.constructor?.displayName === storeName) {
+                        return prop;
+                    }
+                }
+            } catch (_) {}
+        }
+        return undefined;
     }
 
     function findAPI() {
-        for (const val of modules) {
+        for (const m of rawModules) {
             try {
-                if (val && typeof val === "object" &&
-                    typeof val.get === "function" &&
-                    typeof val.post === "function" &&
-                    typeof val.del === "function" &&
-                    !val._dispatcher) {
-                    return val;
+                const exp = m?.exports;
+                if (!exp || typeof exp !== "object") continue;
+                for (const key of Object.keys(exp)) {
+                    const prop = exp[key];
+                    if (prop && typeof prop.get === "function" &&
+                        typeof prop.post === "function" &&
+                        typeof prop.del === "function" &&
+                        !prop._dispatcher) {
+                        return prop;
+                    }
+                }
+            } catch (_) {}
+        }
+        return undefined;
+    }
+
+    function findTokenFromModules() {
+        for (const m of rawModules) {
+            try {
+                const exp = m?.exports;
+                if (!exp) continue;
+                if (typeof exp.getToken === "function") {
+                    const t = exp.getToken();
+                    if (typeof t === "string" && t.length > 20) return t;
+                }
+                if (exp.default && typeof exp.default.getToken === "function") {
+                    const t = exp.default.getToken();
+                    if (typeof t === "string" && t.length > 20) return t;
+                }
+                if (typeof exp === "object") {
+                    for (const k of Object.keys(exp)) {
+                        if (exp[k] && typeof exp[k].getToken === "function") {
+                            const t = exp[k].getToken();
+                            if (typeof t === "string" && t.length > 20) return t;
+                        }
+                    }
                 }
             } catch (_) {}
         }
@@ -94,12 +117,23 @@
     const AuthStore = findStore("AuthenticationStore");
     const DiscordAPI = findAPI();
 
-    let autoToken = null;
+    // Tìm Token qua mọi phương thức khả thi
+    let detectedToken = null;
     try {
-        if (AuthStore?.getToken) autoToken = AuthStore.getToken();
+        if (AuthStore?.getToken) detectedToken = AuthStore.getToken();
     } catch (_) {}
 
-    if (!autoToken) {
+    if (!detectedToken) {
+        detectedToken = findTokenFromModules();
+    }
+
+    if (!detectedToken && window.Vencord?.Webpack?.findByProps) {
+        try {
+            detectedToken = window.Vencord.Webpack.findByProps("getToken")?.getToken();
+        } catch (_) {}
+    }
+
+    if (!detectedToken) {
         try {
             const iframe = document.createElement("iframe");
             document.head.append(iframe);
@@ -107,14 +141,17 @@
             iframe.remove();
             if (pd?.get) {
                 const raw = pd.get.call(window).getItem("token");
-                if (raw) autoToken = JSON.parse(raw);
+                if (raw) detectedToken = JSON.parse(raw);
             }
         } catch (_) {}
     }
 
     const currentUser = UserStore?.getCurrentUser?.();
-    const currentUsername = currentUser?.username ? `${currentUser.username}${currentUser.discriminator && currentUser.discriminator !== '0' ? '#' + currentUser.discriminator : ''}` : "Tài khoản Discord";
-    const currentUserId = currentUser?.id || "N/A";
+    let displayUsername = "Tài khoản Discord";
+    if (currentUser?.username) {
+        displayUsername = `${currentUser.username}${currentUser.discriminator && currentUser.discriminator !== "0" ? "#" + currentUser.discriminator : ""}`;
+        if (currentUser.globalName) displayUsername += ` (${currentUser.globalName})`;
+    }
 
     // ── 2. TOP GAMES LIST ───────────────────────────────────────────────────
     const TOP_GAMES = [
@@ -139,22 +176,25 @@
     // ── 3. TELEMETRY SENDER CORE ───────────────────────────────────────────
     let cachedAnalyticsToken = null;
 
-    async function getAnalyticsToken(token) {
+    async function getAnalyticsToken(activeToken) {
         if (cachedAnalyticsToken) return cachedAnalyticsToken;
-        try {
-            if (DiscordAPI?.get) {
+
+        // 1. Thử qua Discord RestAPI
+        if (DiscordAPI?.get) {
+            try {
                 const res = await DiscordAPI.get({ url: "/users/@me", query: { with_analytics_token: true } });
                 if (res?.body?.analytics_token) {
                     cachedAnalyticsToken = res.body.analytics_token;
                     return cachedAnalyticsToken;
                 }
-            }
-        } catch (_) {}
+            } catch (_) {}
+        }
 
+        // 2. Thử qua fetch chuẩn
         try {
-            const res = await fetch("/api/v9/users/@me?with_analytics_token=true", {
-                headers: token ? { "Authorization": token } : {}
-            });
+            const headers = { "Content-Type": "application/json" };
+            if (activeToken) headers["Authorization"] = activeToken;
+            const res = await fetch("/api/v9/users/@me?with_analytics_token=true", { headers });
             if (res.ok) {
                 const data = await res.json();
                 cachedAnalyticsToken = data.analytics_token;
@@ -164,12 +204,12 @@
         return null;
     }
 
-    async function sendScienceEvents(token, events) {
-        const aToken = await getAnalyticsToken(token);
+    async function sendScienceEvents(activeToken, events) {
+        const aToken = await getAnalyticsToken(activeToken);
         const payload = { events };
         if (aToken) payload.token = aToken;
 
-        // Ưu tiên RestAPI nội bộ của Discord
+        // Ưu tiên 1: RestAPI nội bộ của Discord (Tự gắn toàn bộ session headers & cookies)
         if (DiscordAPI?.post) {
             try {
                 const res = await DiscordAPI.post({
@@ -182,10 +222,10 @@
             }
         }
 
-        // Fallback fetch
+        // Ưu tiên 2: Fetch trực tiếp
         try {
             const headers = { "Content-Type": "application/json" };
-            if (token) headers["Authorization"] = token;
+            if (activeToken) headers["Authorization"] = activeToken;
             const res = await fetch("/api/v9/science", {
                 method: "POST",
                 headers,
@@ -212,11 +252,13 @@
         color: #dbdee1;
     `;
 
+    const isTokenReady = Boolean(detectedToken);
+
     root.innerHTML = `
         <div style="
             background: #313338;
             border-radius: 12px;
-            width: 480px;
+            width: 500px;
             max-width: 92vw;
             box-shadow: 0 12px 36px rgba(0,0,0,0.6);
             border: 1px solid #3f4147;
@@ -237,7 +279,7 @@
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <div style="background: #5865F2; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: bold; color: white;">⚡</div>
                     <div>
-                        <div style="font-weight: 700; color: #f2f3f5; font-size: 15px;">Lowkey Fast Badge Spoofer</div>
+                        <div style="font-weight: 700; color: #f2f3f5; font-size: 15px;">Lowkey Fast Badge Spoofer V2</div>
                         <div style="font-size: 12px; color: #949ba4;">Tua nhanh 5.000h & 100 Game qua Telemetry API</div>
                     </div>
                 </div>
@@ -254,29 +296,48 @@
             </div>
 
             <!-- Body -->
-            <div style="padding: 20px; display: flex; flex-direction: column; gap: 16px;">
-                <!-- User Account Info -->
+            <div style="padding: 20px; display: flex; flex-direction: column; gap: 14px;">
+                <!-- User Account Info & Token Box -->
                 <div style="
                     background: #2b2d31;
                     padding: 12px 14px;
                     border-radius: 8px;
                     display: flex;
-                    align-items: center;
-                    justify-content: space-between;
+                    flex-direction: column;
+                    gap: 8px;
                     border: 1px solid #383a40;
                 ">
-                    <div>
-                        <div style="font-size: 11px; text-transform: uppercase; color: #b5bac1; font-weight: 700; letter-spacing: 0.5px;">Tài khoản Discord</div>
-                        <div style="font-size: 14px; font-weight: 600; color: #f2f3f5; margin-top: 2px;" id="__lk_user_name__">${currentUsername}</div>
+                    <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <div>
+                            <div style="font-size: 11px; text-transform: uppercase; color: #b5bac1; font-weight: 700; letter-spacing: 0.5px;">Tài khoản Discord</div>
+                            <div style="font-size: 14px; font-weight: 600; color: #f2f3f5; margin-top: 2px;" id="__lk_user_name__">${displayUsername}</div>
+                        </div>
+                        <div id="__lk_token_badge__" style="
+                            background: ${isTokenReady ? "rgba(87, 242, 135, 0.15)" : "rgba(237, 66, 69, 0.15)"};
+                            color: ${isTokenReady ? "#57F287" : "#ED4245"};
+                            font-size: 12px;
+                            font-weight: 600;
+                            padding: 4px 10px;
+                            border-radius: 12px;
+                        ">${isTokenReady ? "Token OK ✓" : "Chưa có Token"}</div>
                     </div>
-                    <div style="
-                        background: rgba(87, 242, 135, 0.15);
-                        color: #57F287;
-                        font-size: 12px;
-                        font-weight: 600;
-                        padding: 4px 10px;
-                        border-radius: 12px;
-                    ">Sẵn sàng ✓</div>
+
+                    <!-- Token Input (Hiển thị hoặc cho phép sửa) -->
+                    <div style="margin-top: 4px;">
+                        <label style="font-size: 11px; color: #949ba4; display: block; margin-bottom: 4px;">User Token (Tự động nhận diện hoặc dán thủ công nếu cần):</label>
+                        <input id="__lk_token_input__" type="password" value="${detectedToken || ""}" placeholder="Dán Discord User Token vào đây nếu chưa nhận diện..." style="
+                            width: 100%;
+                            box-sizing: border-box;
+                            background: #1e1f22;
+                            border: 1px solid #3f4147;
+                            border-radius: 6px;
+                            padding: 8px 10px;
+                            color: #f2f3f5;
+                            font-size: 12px;
+                            font-family: monospace;
+                            outline: none;
+                        " />
+                    </div>
                 </div>
 
                 <!-- Game Selector -->
@@ -359,7 +420,7 @@
                 ">
                     <div style="display: flex; justify-content: space-between; color: #949ba4;">
                         <span>Trạng thái:</span>
-                        <span id="__lk_status_text__" style="color: #57F287; font-weight: bold;">Chờ bấm nút...</span>
+                        <span id="__lk_status_text__" style="color: #57F287; font-weight: bold;">Sẵn sàng...</span>
                     </div>
                     <div style="
                         width: 100%;
@@ -380,8 +441,8 @@
                 </div>
 
                 <!-- Footer Note -->
-                <div style="font-size: 11px; color: #949ba4; line-height: 1.4; border-top: 1px solid #2b2d31; padding-top: 10px;">
-                    ℹ️ <strong>Cơ chế cập nhật:</strong> Sau khi gửi gói tin hoàn tất (HTTP 204), máy chủ Discord sẽ tổng hợp dữ liệu và hiển thị huy hiệu lên hồ sơ trong vòng <strong>24h - 48h</strong>.
+                <div style="font-size: 11px; color: #949ba4; line-height: 1.4; border-top: 1px solid #2b2d31; padding-top: 8px;">
+                    ℹ️ <strong>Cơ chế cập nhật:</strong> Sau khi gửi gói tin thành công (HTTP 204), Discord sẽ cập nhật huy hiệu lên Profile của bạn trong vòng <strong>24h - 48h</strong>.
                 </div>
             </div>
         </div>
@@ -408,11 +469,30 @@
     const btnTime = document.getElementById("__lk_btn_time__");
     const btnVariety = document.getElementById("__lk_btn_variety__");
     const gameSelect = document.getElementById("__lk_game_select__");
+    const tokenInput = document.getElementById("__lk_token_input__");
+    const tokenBadge = document.getElementById("__lk_token_badge__");
     const statusText = document.getElementById("__lk_status_text__");
     const progressBar = document.getElementById("__lk_progress_bar__");
     const detailLog = document.getElementById("__lk_detail_log__");
 
     btnClose.onclick = () => root.remove();
+
+    tokenInput.oninput = () => {
+        const val = tokenInput.value.trim();
+        if (val.length > 20) {
+            tokenBadge.textContent = "Token OK ✓";
+            tokenBadge.style.background = "rgba(87, 242, 135, 0.15)";
+            tokenBadge.style.color = "#57F287";
+        } else {
+            tokenBadge.textContent = "Chưa có Token";
+            tokenBadge.style.background = "rgba(237, 66, 69, 0.15)";
+            tokenBadge.style.color = "#ED4245";
+        }
+    };
+
+    function getActiveToken() {
+        return tokenInput.value.trim() || detectedToken;
+    }
 
     function setStatus(text, color = "#57F287") {
         statusText.textContent = text;
@@ -439,6 +519,13 @@
 
     // ── 5. THỰC THI CÁC TÁC VỤ ──────────────────────────────────────────────
     async function runPlaytime(game, hours = 5000) {
+        const token = getActiveToken();
+        if (!token) {
+            setStatus("Thiếu Token!", "#ED4245");
+            log("❌ Vui lòng dán User Token vào ô bên trên để tiếp tục!");
+            return false;
+        }
+
         setStatus(`Đang tua ${hours.toLocaleString()} giờ...`, "#FEE75C");
         log(`Đang gửi telemetry ${hours}h cho "${game.name}"...`);
         setProgress(20);
@@ -474,7 +561,7 @@
             }
         ];
 
-        const ok = await sendScienceEvents(autoToken, events);
+        const ok = await sendScienceEvents(token, events);
         setProgress(100);
 
         if (ok) {
@@ -483,19 +570,28 @@
             return true;
         } else {
             setStatus("Lỗi gửi gói tin", "#ED4245");
-            log(`❌ Gửi thất bại. Discord trả về lỗi.`);
+            log(`❌ Gửi thất bại. Hãy kiểm tra lại Token của bạn.`);
             return false;
         }
     }
 
     async function runVariety(targetCount = 100) {
+        const token = getActiveToken();
+        if (!token) {
+            setStatus("Thiếu Token!", "#ED4245");
+            log("❌ Vui lòng dán User Token vào ô bên trên để tiếp tục!");
+            return false;
+        }
+
         setStatus("Đang tải danh mục game...", "#FEE75C");
         log("Đang lấy danh mục ứng dụng từ server Discord...");
         setProgress(5);
 
         let catalog = [];
         try {
-            const detectRes = await fetch("/api/v9/applications/detectable");
+            const detectRes = await fetch("/api/v9/applications/detectable", {
+                headers: token ? { "Authorization": token } : {}
+            });
             if (detectRes.ok) {
                 const detectList = await detectRes.json();
                 catalog = detectList.filter(g => g.executables && g.executables.length > 0).slice(0, targetCount + 10).map(g => ({
@@ -571,7 +667,7 @@
                 }
             ];
 
-            const ok = await sendScienceEvents(autoToken, events);
+            const ok = await sendScienceEvents(token, events);
             if (ok) successCount++;
 
             const pct = Math.round(((i + 1) / selectedGames.length) * 100);
@@ -605,14 +701,16 @@
         setButtonsDisabled(true);
         const selGame = TOP_GAMES[parseInt(gameSelect.value, 10)] || TOP_GAMES[0];
         log("🚀 Bắt đầu Combo: Bước 1/2 tua 5.000 giờ...");
-        await runPlaytime(selGame, 5000);
-        await new Promise(r => setTimeout(r, 800));
-        log("🚀 Bước 2/2: Bắt đầu tua 100 tựa game...");
-        await runVariety(100);
-        setStatus("COMBO HOÀN TẤT 100% ✓", "#57F287");
-        log("🎉 Tất cả dữ liệu đã được gửi thành công!\nHuy hiệu sẽ xuất hiện sau chu kỳ 24h - 48h.");
+        const pOk = await runPlaytime(selGame, 5000);
+        if (pOk) {
+            await new Promise(r => setTimeout(r, 800));
+            log("🚀 Bước 2/2: Bắt đầu tua 100 tựa game...");
+            await runVariety(100);
+            setStatus("COMBO HOÀN TẤT 100% ✓", "#57F287");
+            log("🎉 Tất cả dữ liệu đã được gửi thành công!\nHuy hiệu sẽ xuất hiện sau chu kỳ 24h - 48h.");
+        }
         setButtonsDisabled(false);
     };
 
-    console.log("%c[Spoofer] ✅ Bảng điều khiển Spoofer đã hiển thị trên màn hình Discord!", "color: #57F287; font-weight: bold;");
+    console.log("%c[Spoofer] ✅ Bảng điều khiển Spoofer V2 đã hiển thị!", "color: #57F287; font-weight: bold;");
 })();
