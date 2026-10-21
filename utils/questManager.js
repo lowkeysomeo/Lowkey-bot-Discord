@@ -148,9 +148,9 @@ function buildTokenGuidePayload() {
         '💻 **CÁCH 2: LẤY TOKEN TRÊN MÁY TÍNH (PC / LAPTOP):**\n' +
         '1. Mở Discord trên trình duyệt (hoặc Discord Desktop có bật DevTools).\n' +
         '2. Bấm phím `F12` hoặc tổ hợp phím `Ctrl + Shift + I` (trên Mac: `Cmd + Option + I`).\n' +
-        '3. Chuyển sang tab **Console** ➔ Dán lệnh sau và Enter:\n' +
-        '```javascript\n(function(){let req;(window.webpackChunkdiscord_app||[]).push([[Symbol()],{},(r)=>{if(Object.keys(r?.c||{}).length>Object.keys(req?.c||{}).length)req=r;}]);window.webpackChunkdiscord_app?.pop();for(const m of Object.values(req.c)){try{const exp=m?.exports;if(typeof exp?.default?.getToken==="function")return exp.default.getToken();if(typeof exp?.getToken==="function")return exp.getToken();}catch(e){}}})();\n```\n' +
-        '4. Sao chép chuỗi Token nằm trong dấu ngoặc kép và dán vào bot.\n\n' +
+        '3. Chuyển sang tab **Console** ➔ Dán lệnh sau rồi nhấn **Enter**:\n' +
+        '```javascript\nlet token;\nwindow.webpackChunkdiscord_app.push([[Symbol()], {}, o => {\n  for (let e of Object.values(o.c)) {\n    try {\n      if (!e.exports || e.exports === window) continue;\n      if (e.exports?.getToken) {\n        token = e.exports.getToken();\n        console.log("Token:", token);\n      }\n      for (let o in e.exports) {\n        if (e.exports?.[o]?.getToken && "IntlMessagesProxy" !== e.exports[o][Symbol.toStringTag]) {\n          token = e.exports[o].getToken();\n          console.log("Token:", token);\n        }\n      }\n    } catch {}\n  }\n}]);\nwindow.webpackChunkdiscord_app.pop();\n```\n' +
+        '4. Sao chép chuỗi Token hiện ra bên dưới (bỏ chữ `Token:` nếu có) và dán vào bot.\n\n' +
         '💡 **Mẹo:** Nếu không muốn lấy Token, bạn có thể vào phòng Voice trên điện thoại và gõ `/quest action:stream` để bot vào làm Viewer treo 15 phút cùng bạn hoàn toàn tự động!'
     )
     .setFooter({ text: 'Lowkey Auto Quest • Hỗ trợ hoàn hảo cả Điện thoại & Máy tính' })
