@@ -304,6 +304,15 @@ setWebSocketImplementation(MockWebSocket);
       };
     }
 
+    // GET /quests/get-decisions or /decision
+    if (urlStr.includes('get-decisions') || urlStr.includes('/decision')) {
+      return {
+        status: 200,
+        ok: true,
+        json: async () => ({ decisions: [] }),
+      };
+    }
+
     // POST /quests/{id}/enroll
     if (urlStr.includes('/enroll')) {
       enrollCalled = true;
@@ -794,6 +803,90 @@ setWebSocketImplementation(MockWebSocket);
     const monthlyScanRes = await scanUserQuests('user-monthly-vip', { heartbeatDelayMs: 10 });
     assert.equal(monthlyScanRes.success, true);
     assert(monthlyScanRes.actions.some((a) => a.type === 'video' && a.completed), 'Gói tháng phải tự động hoàn thành video quests');
+
+    // 9.15 Kiểm tra nhiệm vụ Magic: The Gathering | Star Trek (Xem 2 phút - 120s video, 240 Orbs)
+    const magicStarTrekQuest = {
+      id: 'quest-magic-star-trek-120s',
+      config: {
+        messages: {
+          quest_name: 'NHIỆM VỤ MAGIC: THE GATHERING | STAR TREK',
+          sub_title: 'Xem video để nhận được 240 Orbs!',
+          cta_title: 'Xem 2 phút',
+        },
+        rewards_config: {
+          rewards: [
+            { type: 4, orb_quantity: 240, messages: { name: '240 Orbs' } },
+          ],
+        },
+        task_config_v2: {
+          tasks: {
+            WATCH_VIDEO: { target: 120 },
+          },
+        },
+      },
+      user_status: { enrolled_at: null, completed_at: null, claimed_at: null },
+    };
+
+    assert.equal(isVideoQuest(magicStarTrekQuest), true, 'Magic Star Trek phải được nhận diện là Video Quest');
+    const { targetSeconds: magicDuration } = getVideoTaskInfo(magicStarTrekQuest);
+    assert.equal(magicDuration, 120, 'Thời lượng video nhiệm vụ Magic Star Trek phải là 120 giây (2 phút)');
+
+    const magicRes = await completeSingleQuest('valid_token_xyz', magicStarTrekQuest, {
+      autoClaim: true,
+      heartbeatDelayMs: 10,
+    });
+    assert.equal(magicRes.completed, true, 'Magic Star Trek video phải hoàn thành 100%');
+    assert.equal(magicRes.type, 'video');
+    assert.equal(magicRes.claimed, true, 'Phải tự động claim 240 Orbs');
+
+    // 9.16 Kiểm tra nhiệm vụ Video đã nhận thưởng trước đó (như Call of Duty MW4 Video) phải trả về type: 'video'
+    const codVideoClaimedQuest = {
+      id: 'quest-cod-mw4-video-claimed',
+      config: {
+        messages: {
+          quest_name: 'Call of Duty: Modern Warfare 4 Video',
+          game_title: 'Call of Duty: Modern Warfare 4',
+        },
+        task_config_v2: {
+          tasks: {
+            WATCH_VIDEO: { target: 60 },
+          },
+        },
+      },
+      user_status: {
+        enrolled_at: '2026-10-18T00:00:00Z',
+        completed_at: '2026-10-18T00:01:00Z',
+        claimed_at: '2026-10-18T00:01:05Z',
+      },
+    };
+    const codClaimedRes = await completeSingleQuest('valid_token_xyz', codVideoClaimedQuest);
+    assert.equal(codClaimedRes.alreadyDone, true);
+    assert.equal(codClaimedRes.type, 'video', 'Nhiệm vụ video đã claim phải giữ đúng type: video (không bị nhầm sang game)');
+
+    // 9.17 Kiểm tra fetchQuests tự động quét và khám phá nhiệm vụ từ Quest Home (placement=11)
+    const questHomeCustomFetch = async (url) => {
+      const u = String(url);
+      if (u.includes('/quests/@me')) {
+        return { status: 200, ok: true, json: async () => ({ quests: [codVideoClaimedQuest] }) };
+      }
+      if (u.includes('get-decisions?placement=11')) {
+        return {
+          status: 200,
+          ok: true,
+          json: async () => ({
+            decisions: [
+              { quest: magicStarTrekQuest },
+            ],
+          }),
+        };
+      }
+      return { status: 200, ok: true, json: async () => ({}) };
+    };
+
+    setFetchImplementation(questHomeCustomFetch);
+    const discoveredQuests = await fetchQuests('valid_token_xyz');
+    assert(discoveredQuests.some((q) => q.id === 'quest-magic-star-trek-120s'), 'fetchQuests phải khám phá được Magic Star Trek từ Quest Home (placement=11)');
+    setFetchImplementation(mainMockFetch);
   } finally {
     setFetchImplementation(null);
   }

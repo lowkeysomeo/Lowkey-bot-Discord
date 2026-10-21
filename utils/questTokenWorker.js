@@ -118,9 +118,75 @@ function isQuestActive(q) {
 }
 
 /**
- * Lấy danh sách nhiệm vụ hiện tại của tài khoản
+ * Trích xuất toàn bộ quest objects từ bất kỳ payload API nào của Discord (mảng, object, decisions, nested)
+ */
+function collectQuestsFromPayload(data) {
+  const quests = [];
+  const seen = new Set();
+
+  function scan(obj, depth = 0) {
+    if (!obj || depth > 5) return;
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        if (item && typeof item === 'object') {
+          const id = item.id || item.quest_id || item.questId;
+          if (id && (item.config || item.user_status || item.userStatus)) {
+            if (!seen.has(id)) {
+              seen.add(id);
+              quests.push({ ...item, id });
+            }
+          } else if (item.quest && typeof item.quest === 'object' && (item.quest.id || item.quest.quest_id)) {
+            const qId = item.quest.id || item.quest.quest_id;
+            if (!seen.has(qId)) {
+              seen.add(qId);
+              quests.push({ ...item.quest, id: qId });
+            }
+          } else if (item.quest_id || item.questId) {
+            const qId = item.quest_id || item.questId;
+            if (!seen.has(qId)) {
+              seen.add(qId);
+              quests.push({ id: qId, ...item });
+            }
+          } else {
+            scan(item, depth + 1);
+          }
+        }
+      }
+    } else if (typeof obj === 'object') {
+      const id = obj.id || obj.quest_id || obj.questId;
+      if (id && (obj.config || obj.user_status || obj.userStatus)) {
+        if (!seen.has(id)) {
+          seen.add(id);
+          quests.push({ ...obj, id });
+        }
+        return;
+      }
+      if (obj.quest && typeof obj.quest === 'object' && (obj.quest.id || obj.quest.quest_id)) {
+        const qId = obj.quest.id || obj.quest.quest_id;
+        if (!seen.has(qId)) {
+          seen.add(qId);
+          quests.push({ ...obj.quest, id: qId });
+        }
+        return;
+      }
+      for (const val of Object.values(obj)) {
+        scan(val, depth + 1);
+      }
+    }
+  }
+
+  scan(data);
+  return quests;
+}
+
+/**
+ * Lấy danh sách nhiệm vụ hiện tại của tài khoản từ tất cả nguồn:
+ * 1. Quests hiện tại / đã nhận (@me)
+ * 2. Khám phá / Quest Home decisions (placement=11 - Tab Tất Cả Nhiệm Vụ)
+ * 3. Quest Bar decisions (placement=1)
  */
 async function fetchQuests(token) {
+  // 1. Endpoint chính: /quests/@me
   const res = await requestDiscord('https://discord.com/api/v9/quests/@me', {
     method: 'GET',
     headers: getHeaders(token),
@@ -134,19 +200,56 @@ async function fetchQuests(token) {
   }
 
   const data = await res.json();
-  let allQuests = [];
-  if (Array.isArray(data?.quests)) {
-    allQuests = allQuests.concat(data.quests);
-  } else if (data?.quests && typeof data.quests === 'object') {
-    allQuests = allQuests.concat(Object.values(data.quests));
-  }
-  if (Array.isArray(data?.open_quests)) {
-    allQuests = allQuests.concat(data.open_quests);
-  } else if (data?.open_quests && typeof data.open_quests === 'object') {
-    allQuests = allQuests.concat(Object.values(data.open_quests));
-  }
-  if (Array.isArray(data)) {
-    allQuests = allQuests.concat(data);
+  const allQuests = collectQuestsFromPayload(data);
+
+  // 2. Quét thêm Quest Home (placement=11 - Tab Tất Cả Nhiệm Vụ) & Quest Bar (placement=1)
+  // để lấy mọi nhiệm vụ Video & Game mới chưa từng enroll (như Magic: The Gathering Star Trek, SteelSeries, v.v.)
+  const discoveryUrls = [
+    'https://discord.com/api/v9/quests/get-decisions?placement=11&num_decisions_requested=15',
+    'https://discord.com/api/v9/quests/decision?placement=11',
+    'https://discord.com/api/v9/quests/get-decisions?placement=1&num_decisions_requested=15',
+    'https://discord.com/api/v9/quests/decision?placement=1',
+  ];
+
+  await Promise.allSettled(
+    discoveryUrls.map(async (url) => {
+      try {
+        const extraRes = await requestDiscord(url, {
+          method: 'GET',
+          headers: getHeaders(token),
+        }, 0);
+        if (extraRes && extraRes.ok) {
+          const extraData = await extraRes.json().catch(() => null);
+          if (extraData) {
+            const extraQuests = collectQuestsFromPayload(extraData);
+            for (const eq of extraQuests) {
+              if (eq?.id && !allQuests.some((q) => q.id === eq.id)) {
+                allQuests.push(eq);
+              }
+            }
+          }
+        }
+      } catch (e) {}
+    })
+  );
+
+  // 3. Nếu có quest nào chỉ có id mà chưa tải đủ config, bổ sung chi tiết
+  for (let i = 0; i < allQuests.length; i++) {
+    const q = allQuests[i];
+    if (!q.config && q.id) {
+      try {
+        const detailRes = await requestDiscord(`https://discord.com/api/v9/quests/${q.id}`, {
+          method: 'GET',
+          headers: getHeaders(token),
+        }, 0);
+        if (detailRes && detailRes.ok) {
+          const detail = await detailRes.json();
+          if (detail && detail.config) {
+            allQuests[i] = { ...q, ...detail };
+          }
+        }
+      } catch (e) {}
+    }
   }
 
   const seen = new Set();
@@ -163,12 +266,24 @@ async function fetchQuests(token) {
 /**
  * Đăng ký / Nhận nhiệm vụ (Accept Quest)
  */
-async function enrollQuest(token, questId, platform = 0) {
+async function enrollQuest(token, questId, platform = 0, quest = null) {
   const isVideo = platform === -1 || platform === null || platform === false;
+  const sealed = quest?.traffic_metadata_sealed || quest?.trafficMetadataSealed || null;
   // Với Video Quests: Discord client gửi { location: 11, is_targeted: false } hoặc { location: 1 }
   const enrollBodies = isVideo
-    ? [{ location: 11, is_targeted: false }, { location: 1 }, {}]
-    : [{ location: 1, platform }, { platform }, { location: 11, platform }, {}];
+    ? [
+        { location: 11, is_targeted: false, traffic_metadata_sealed: sealed },
+        { location: 11, is_targeted: false },
+        { location: 1, traffic_metadata_sealed: sealed },
+        { location: 1 },
+        {},
+      ]
+    : [
+        { location: 1, platform, traffic_metadata_sealed: sealed },
+        { platform },
+        { location: 11, platform, traffic_metadata_sealed: sealed },
+        {},
+      ];
 
   let lastRes = null;
   for (const enrollBody of enrollBodies) {
@@ -343,10 +458,13 @@ async function sendVideoProgress(token, questId, timestamp = 30, retries = 3) {
 /**
  * Nhận thưởng (Claim Reward / ORBs)
  */
-async function claimQuestReward(token, questId, platform = 0) {
+async function claimQuestReward(token, questId, platform = 0, quest = null) {
+  const sealed = quest?.traffic_metadata_sealed || quest?.trafficMetadataSealed || null;
   const bodies = [
+    { platform, location: 11, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed },
     { platform, location: 11, is_targeted: false },
     { platform },
+    { location: 11, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed },
     { location: 11, is_targeted: false },
     {},
   ];
@@ -397,8 +515,11 @@ async function completeVideoQuest(token, quest, options = {}) {
   const questId = quest.id;
   const questName =
     quest.config?.messages?.quest_name ||
+    quest.config?.messages?.questName ||
     quest.config?.messages?.game_title ||
+    quest.config?.messages?.gameTitle ||
     quest.config?.messages?.game_name ||
+    quest.config?.messages?.gameName ||
     quest.config?.application?.name ||
     `Nhiệm vụ #${questId}`;
 
@@ -421,7 +542,7 @@ async function completeVideoQuest(token, quest, options = {}) {
   let enrolledAt = quest.user_status?.enrolled_at ? new Date(quest.user_status.enrolled_at).getTime() : null;
   if (!enrolledAt) {
     try {
-      await enrollQuest(token, questId, -1);
+      await enrollQuest(token, questId, -1, quest);
       enrolledAt = Date.now();
     } catch (e) {
       enrolledAt = Date.now();
@@ -438,7 +559,7 @@ async function completeVideoQuest(token, quest, options = {}) {
     let claimed = false;
     if (options.autoClaim === true) {
       try {
-        reward = await claimQuestReward(token, questId);
+        reward = await claimQuestReward(token, questId, 0, quest);
         claimed = true;
       } catch (e) {
         console.warn(`[QUEST WORKER] Không thể auto-claim quest (${questId}):`, e.message);
@@ -564,7 +685,7 @@ async function completeVideoQuest(token, quest, options = {}) {
     if (options.autoClaim === true) {
       try {
         if (!isFastTest) await new Promise((r) => setTimeout(r, 1200));
-        reward = await claimQuestReward(token, questId);
+        reward = await claimQuestReward(token, questId, 0, quest);
         claimed = true;
       } catch (e) {}
     }
@@ -913,29 +1034,53 @@ function isVideoQuest(quest) {
     }
   }
 
-  // 5. Kiểm tra tiêu đề / tên nhiệm vụ (cả snake_case và camelCase)
-  const title = (
-    cfg.messages?.quest_name ||
-    cfg.messages?.questName ||
-    cfg.messages?.game_title ||
-    cfg.messages?.gameTitle ||
-    cfg.messages?.game_name ||
-    cfg.messages?.gameName ||
-    cfg.application?.name ||
-    ''
-  ).toLowerCase();
+  // 5. Kiểm tra toàn bộ text trong messages (tiêu đề, phụ đề, mô tả, nút CTA)
+  const msgObj = cfg.messages || {};
+  const allTexts = [
+    msgObj.quest_name,
+    msgObj.questName,
+    msgObj.game_title,
+    msgObj.gameTitle,
+    msgObj.game_name,
+    msgObj.gameName,
+    msgObj.sub_title,
+    msgObj.subtitle,
+    msgObj.description,
+    msgObj.cta_title,
+    msgObj.ctaTitle,
+    msgObj.cta_body,
+    msgObj.ctaBody,
+    msgObj.reward_name,
+    cfg.application?.name,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
 
   if (
-    title.includes('video') ||
-    title.includes('xem') ||
-    title.includes('watch') ||
-    title.includes('trailer') ||
-    title.includes('clip')
+    allTexts.includes('video') ||
+    allTexts.includes('xem') ||
+    allTexts.includes('watch') ||
+    allTexts.includes('trailer') ||
+    allTexts.includes('clip')
   ) {
     return true;
   }
 
-  // 6. Nhiệm vụ thưởng điểm ORB không có yêu cầu chơi game PC bắt buộc
+  // 6. Kiểm tra assets có định dạng video / trailer
+  if (cfg.assets) {
+    const assetsStr = JSON.stringify(cfg.assets).toLowerCase();
+    if (
+      assetsStr.includes('video') ||
+      assetsStr.includes('trailer') ||
+      assetsStr.includes('.mp4') ||
+      assetsStr.includes('.webm')
+    ) {
+      return true;
+    }
+  }
+
+  // 7. Nhiệm vụ thưởng điểm ORB không có yêu cầu chơi game PC bắt buộc
   if (hasOrbReward(quest)) {
     const taskKeys = Object.keys(tasks).map(k => k.toUpperCase());
     const hasGameTask = taskKeys.some(k => k.startsWith('PLAY_') && !k.includes('VIDEO'));
@@ -1010,6 +1155,19 @@ function getVideoTaskInfo(quest) {
       }
     } else {
       taskKey = 'WATCH_VIDEO';
+    }
+  }
+
+  // Tự động nhận diện thời lượng video dựa trên văn bản hiển thị (vd: "Xem 2 phút" = 120s)
+  if (targetSeconds === 30) {
+    const msgObj = quest?.config?.messages || {};
+    const textDesc = `${msgObj.cta_title || ''} ${msgObj.ctaTitle || ''} ${msgObj.sub_title || ''} ${msgObj.subtitle || ''} ${msgObj.description || ''} ${msgObj.quest_name || ''} ${msgObj.questName || ''}`.toLowerCase();
+    if (textDesc.includes('2 phút') || textDesc.includes('2 minutes') || textDesc.includes('120s') || textDesc.includes('120 giây')) {
+      targetSeconds = 120;
+    } else if (textDesc.includes('1 phút') || textDesc.includes('1 minute') || textDesc.includes('60s') || textDesc.includes('60 giây')) {
+      targetSeconds = 60;
+    } else if (textDesc.includes('3 phút') || textDesc.includes('3 minutes') || textDesc.includes('180s') || textDesc.includes('180 giây')) {
+      targetSeconds = 180;
     }
   }
 
@@ -1109,10 +1267,14 @@ function getQuestApplicationInfo(quest) {
  */
 async function completeSingleQuest(token, quest, options = {}) {
   const questId = quest.id;
+  const isVid = isVideoQuest(quest);
   const questName =
     quest.config?.messages?.quest_name ||
+    quest.config?.messages?.questName ||
     quest.config?.messages?.game_title ||
+    quest.config?.messages?.gameTitle ||
     quest.config?.messages?.game_name ||
+    quest.config?.messages?.gameName ||
     quest.config?.application?.name ||
     `Nhiệm vụ #${questId}`;
 
@@ -1121,15 +1283,15 @@ async function completeSingleQuest(token, quest, options = {}) {
     return {
       questId,
       questName,
+      type: isVid ? 'video' : 'game',
       alreadyDone: true,
       completed: true,
       claimed: false,
       progressPercent: 100,
-      message: 'Nhiệm vụ này đã nhận thưởng trước đó.',
+      message: isVid ? 'Nhiệm vụ video này đã nhận thưởng trước đó.' : 'Nhiệm vụ này đã nhận thưởng trước đó.',
     };
   }
 
-  const isVid = isVideoQuest(quest);
   const tasks = extractQuestTasks(quest);
   let targetPlatform = isVid ? -1 : 0; // 0 = Desktop / PC, 1 = Console, 2 = Mobile, -1 = Video (không chọn platform)
   if (!isVid) {
@@ -1143,7 +1305,7 @@ async function completeSingleQuest(token, quest, options = {}) {
   // Đăng ký nhận nhiệm vụ nếu chưa enroll
   if (!quest.user_status?.enrolled_at) {
     try {
-      await enrollQuest(token, questId, targetPlatform);
+      await enrollQuest(token, questId, targetPlatform, quest);
     } catch (e) {}
   }
 
@@ -1439,7 +1601,7 @@ async function completeSingleQuest(token, quest, options = {}) {
           await new Promise((r) => setTimeout(r, claimDelay));
         }
         try {
-          reward = await claimQuestReward(token, questId);
+          reward = await claimQuestReward(token, questId, targetPlatform, quest);
           claimed = true;
         } catch (e) {}
       }
