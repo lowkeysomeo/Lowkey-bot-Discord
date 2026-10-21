@@ -203,12 +203,20 @@ async function fetchQuests(token) {
   const allQuests = collectQuestsFromPayload(data);
 
   // 2. Quét thêm Quest Home (placement=11 - Tab Tất Cả Nhiệm Vụ) & Quest Bar (placement=1)
-  // để lấy mọi nhiệm vụ Video & Game mới chưa từng enroll (như Magic: The Gathering Star Trek, SteelSeries, v.v.)
+  // Kèm UUID telemetry bắt buộc để Discord không trả mã lỗi 400 Bad Request
+  const crypto = require('crypto');
+  const hbSessionId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'c9a1b2c3-d4e5-4a5b-8c7d-e6f7a8b9c0d1';
+  const adSessionId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'e6f7a8b9-c0d1-4a5b-8c7d-c9a1b2c3d4e5';
+
   const discoveryUrls = [
+    `https://discord.com/api/v9/quests/get-decisions?placement=11&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    `https://discord.com/api/v9/quests/get-decisions?placement=1&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    `https://discord.com/api/v9/quests/get-decisions?placement=12&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    `https://discord.com/api/v9/quests/decision?placement=11&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    `https://discord.com/api/v9/quests/decision?placement=1&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    'https://discord.com/api/v9/quests/@me/claimed',
     'https://discord.com/api/v9/quests/get-decisions?placement=11&num_decisions_requested=15',
     'https://discord.com/api/v9/quests/decision?placement=11',
-    'https://discord.com/api/v9/quests/get-decisions?placement=1&num_decisions_requested=15',
-    'https://discord.com/api/v9/quests/decision?placement=1',
   ];
 
   await Promise.allSettled(
@@ -981,68 +989,65 @@ function hasOrbReward(quest) {
 function isVideoQuest(quest) {
   if (!quest) return false;
   const cfg = quest.config || {};
+  const tasks = extractQuestTasks(quest);
+  const taskKeys = Object.keys(tasks).map((k) => k.toUpperCase());
 
-  // 1. Kiểm tra video metadata ở config hoặc task_config
+  // 1. Kiểm tra task keys trong config: Nếu có WATCH_VIDEO hoặc task chứa VIDEO -> Video Quest
+  const hasExplicitVideoTask = taskKeys.some(
+    (k) => k === 'WATCH_VIDEO' || k.startsWith('WATCH_') || (k.includes('VIDEO') && !k.startsWith('PLAY_'))
+  );
+  if (hasExplicitVideoTask) return true;
+
+  // 2. Nếu có task chơi game rõ ràng (PLAY_ON_DESKTOP, PLAY_ON_XBOX, STREAM, v.v.) và không có video task -> 100% là GAME QUEST
+  const hasGameTask = taskKeys.some(
+    (k) => k.startsWith('PLAY_') || k.startsWith('STREAM_') || k === 'PLAY' || k === 'STREAM' || k === 'PLAY_ACTIVITY'
+  );
+  if (hasGameTask) return false;
+
+  // 3. Kiểm tra video metadata ở config hoặc task_config
   if (
     cfg.video_metadata || cfg.videoMetadata ||
     cfg.video_metadata_v2 || cfg.videoMetadataV2 ||
     cfg.task_config_v2?.video_metadata || cfg.task_config?.video_metadata
-  ) return true;
-
-  // 2. Kiểm tra quest_type
-  if (cfg.quest_type === 1 || cfg.questType === 1 || cfg.quest_type === 'video' || cfg.questType === 'video') return true;
-
-  // 3. Kiểm tra các task trong cấu hình (cả key và value properties: type, name, action, event_name)
-  const tasks = extractQuestTasks(quest);
-  for (const [k, v] of Object.entries(tasks)) {
-    const candidates = [
-      String(k || ''),
-      String(v?.type || ''),
-      String(v?.name || ''),
-      String(v?.action || ''),
-      String(v?.event_name || ''),
-    ];
-
-    for (const raw of candidates) {
-      const upper = raw.toUpperCase();
-      if (
-        upper.includes('VIDEO') ||
-        upper.startsWith('WATCH_') ||
-        upper.includes('WATCH') ||
-        upper.includes('TRAILER')
-      ) {
-        return true;
-      }
-    }
-
-    if (v?.video_metadata || v?.videoMetadata) return true;
+  ) {
+    return true;
   }
 
-  // 4. Kiểm tra user_status progress keys
+  // 4. Kiểm tra quest_type
+  if (cfg.quest_type === 1 || cfg.questType === 1 || cfg.quest_type === 'video' || cfg.questType === 'video') {
+    return true;
+  }
+
+  // 5. Kiểm tra user_status progress keys
   if (quest.user_status?.progress && typeof quest.user_status.progress === 'object') {
     for (const [k, v] of Object.entries(quest.user_status.progress)) {
       const upper = String(k).toUpperCase();
-      if (upper.includes('VIDEO') || upper.startsWith('WATCH_') || upper.includes('WATCH') || upper.includes('TRAILER')) {
+      if (upper === 'WATCH_VIDEO' || upper.startsWith('WATCH_') || (upper.includes('VIDEO') && !upper.startsWith('PLAY_'))) {
         return true;
-      }
-      if (v && typeof v === 'object') {
-        const subType = String(v.type || v.name || '').toUpperCase();
-        if (subType.includes('VIDEO') || subType.startsWith('WATCH_') || subType.includes('WATCH')) {
-          return true;
-        }
       }
     }
   }
 
-  // 5. Kiểm tra toàn bộ text trong messages (tiêu đề, phụ đề, mô tả, nút CTA)
+  // 6. Kiểm tra tiêu đề có chứa chữ "video" (vd: "Call of Duty: Modern Warfare 4 Video")
+  const questName = (
+    cfg.messages?.quest_name ||
+    cfg.messages?.questName ||
+    cfg.messages?.game_title ||
+    cfg.messages?.gameTitle ||
+    cfg.messages?.game_name ||
+    cfg.messages?.gameName ||
+    cfg.application?.name ||
+    ''
+  ).toLowerCase();
+
+  if (questName.includes('video')) {
+    return true;
+  }
+
+  // 7. Kiểm tra mô tả / phụ đề / nút CTA với các cụm từ video rõ ràng
+  // TUYỆT ĐỐI KHÔNG dùng từ "xem" đơn lẻ vì các nhiệm vụ Game khi xong đều có nút "Xem Phần Thưởng", "Xem Mã"
   const msgObj = cfg.messages || {};
-  const allTexts = [
-    msgObj.quest_name,
-    msgObj.questName,
-    msgObj.game_title,
-    msgObj.gameTitle,
-    msgObj.game_name,
-    msgObj.gameName,
+  const specificTexts = [
     msgObj.sub_title,
     msgObj.subtitle,
     msgObj.description,
@@ -1050,43 +1055,25 @@ function isVideoQuest(quest) {
     msgObj.ctaTitle,
     msgObj.cta_body,
     msgObj.ctaBody,
-    msgObj.reward_name,
-    cfg.application?.name,
   ]
     .filter(Boolean)
     .join(' ')
     .toLowerCase();
 
   if (
-    allTexts.includes('video') ||
-    allTexts.includes('xem') ||
-    allTexts.includes('watch') ||
-    allTexts.includes('trailer') ||
-    allTexts.includes('clip')
+    specificTexts.includes('xem video') ||
+    specificTexts.includes('watch video') ||
+    specificTexts.includes('xem trailer') ||
+    specificTexts.includes('watch trailer') ||
+    specificTexts.includes('xem clip') ||
+    specificTexts.includes('watch clip') ||
+    specificTexts.includes('xem 2 phút') ||
+    specificTexts.includes('xem 1 phút') ||
+    specificTexts.includes('xem 3 phút') ||
+    specificTexts.includes('watch 2 min') ||
+    specificTexts.includes('watch 1 min')
   ) {
     return true;
-  }
-
-  // 6. Kiểm tra assets có định dạng video / trailer
-  if (cfg.assets) {
-    const assetsStr = JSON.stringify(cfg.assets).toLowerCase();
-    if (
-      assetsStr.includes('video') ||
-      assetsStr.includes('trailer') ||
-      assetsStr.includes('.mp4') ||
-      assetsStr.includes('.webm')
-    ) {
-      return true;
-    }
-  }
-
-  // 7. Nhiệm vụ thưởng điểm ORB không có yêu cầu chơi game PC bắt buộc
-  if (hasOrbReward(quest)) {
-    const taskKeys = Object.keys(tasks).map(k => k.toUpperCase());
-    const hasGameTask = taskKeys.some(k => k.startsWith('PLAY_') && !k.includes('VIDEO'));
-    if (!hasGameTask) {
-      return true;
-    }
   }
 
   return false;

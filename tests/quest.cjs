@@ -887,6 +887,49 @@ setWebSocketImplementation(MockWebSocket);
     const discoveredQuests = await fetchQuests('valid_token_xyz');
     assert(discoveredQuests.some((q) => q.id === 'quest-magic-star-trek-120s'), 'fetchQuests phải khám phá được Magic Star Trek từ Quest Home (placement=11)');
     setFetchImplementation(mainMockFetch);
+
+    // 9.18 Kiểm tra các nhiệm vụ game đã hoàn thành có nút "Xem Phần Thưởng" / "Xem Mã" KHÔNG bị nhầm thành Video Quest
+    const gameQuestsToVerify = [
+      { id: 'g1', name: 'Deadzone Rogue 2', cta: 'Xem Phần Thưởng' },
+      { id: 'g2', name: 'EA SPORTS FC 27', cta: 'Xem Phần Thưởng' },
+      { id: 'g3', name: 'Bản 2.3 Hải Đại Bằng Lai', cta: 'Xem Phần Thưởng' },
+      { id: 'g4', name: 'Call of Duty: Modern Warfare 4', cta: 'Xem Mã' },
+      { id: 'g5', name: 'Version Update: Si', cta: 'Xem Phần Thưởng' },
+      { id: 'g6', name: 'Clean Crew', cta: 'Xem Phần Thưởng' },
+      { id: 'g7', name: 'Play Nekome Demo', cta: 'Xem Phần Thưởng' },
+    ];
+
+    for (const g of gameQuestsToVerify) {
+      const mockGameQuest = {
+        id: g.id,
+        config: {
+          messages: {
+            quest_name: g.name,
+            cta_title: g.cta,
+            description: 'Khám phá và nhận phần thưởng ngay.',
+          },
+          task_config_v2: {
+            tasks: {
+              PLAY_ON_DESKTOP: { target: 900 },
+            },
+          },
+        },
+        user_status: {
+          enrolled_at: '2026-10-18T00:00:00Z',
+          completed_at: '2026-10-18T00:15:00Z',
+          claimed_at: '2026-10-18T00:16:00Z',
+        },
+      };
+
+      assert.equal(
+        isVideoQuest(mockGameQuest),
+        false,
+        `Nhiệm vụ game "${g.name}" có nút "${g.cta}" phải được phân loại là GAME (false), không được nhầm thành Video!`
+      );
+
+      const res = await completeSingleQuest('valid_token_xyz', mockGameQuest);
+      assert.equal(res.type, 'game', `Nhiệm vụ "${g.name}" phải trả về type: 'game'`);
+    }
   } finally {
     setFetchImplementation(null);
   }
