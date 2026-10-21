@@ -331,7 +331,7 @@ async function scanUserQuests(subscriber, client, options = {}) {
           `Nhiệm vụ #${vq.id}`;
 
         try {
-          const res = await completeSingleQuest(token, vq, { autoClaim: false, ...opts });
+          const res = await completeSingleQuest(token, vq, { autoClaim: opts.autoClaim !== false, ...opts });
           const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
           actions.push({
             questId: vq.id,
@@ -478,7 +478,7 @@ async function scanUserQuests(subscriber, client, options = {}) {
             `Nhiệm vụ #${vq.id}`;
 
           try {
-            const res = await completeSingleQuest(token, vq, { autoClaim: false, ...opts });
+            const res = await completeSingleQuest(token, vq, { autoClaim: opts.autoClaim !== false, ...opts });
             const progressPercent = typeof res.progressPercent === 'number' ? res.progressPercent : (res.completed ? 100 : 0);
             actions.push({
               questId: vq.id,

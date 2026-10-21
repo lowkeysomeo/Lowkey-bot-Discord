@@ -20,30 +20,59 @@ function setWebSocketImplementation(customWs) {
   WebSocketImpl = customWs || WebSocketImpl;
 }
 
-const SUPER_PROPERTIES = Buffer.from(
-  JSON.stringify({
+let cachedSuperProperties = null;
+
+function getSuperProperties() {
+  if (cachedSuperProperties) return cachedSuperProperties;
+
+  const crypto = require('crypto');
+  const launchId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'a40792eb-dd06-46fd-9874-927cf171eba8';
+  const hbSessionId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : '6ca62d54-7393-4b15-8136-2f4b8d4ba847';
+
+  // Discord stable modern build properties - Bắt buộc để Discord trả về 100% Video Quests & Promotional Quests
+  const props = {
     os: 'Windows',
     browser: 'Discord Client',
     release_channel: 'stable',
-    client_version: '1.0.9168',
-    os_version: '10.0.19045',
+    client_version: '1.0.9264',
+    os_version: '10.0.26100',
     os_arch: 'x64',
-    system_locale: 'vi-VN',
-  })
-).toString('base64');
+    app_arch: 'x64',
+    system_locale: 'en-US',
+    has_client_mods: false,
+    client_launch_id: launchId,
+    browser_user_agent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9264 Chrome/148.0.7778.280 Electron/42.11.15 Safari/537.36',
+    browser_version: '42.11.15',
+    os_sdk_version: '26100',
+    client_build_number: 643186,
+    native_build_number: 95452,
+    client_event_source: null,
+    client_heartbeat_session_id: hbSessionId,
+    client_app_state: 'unfocused',
+  };
+
+  cachedSuperProperties = Buffer.from(JSON.stringify(props)).toString('base64');
+  return cachedSuperProperties;
+}
+
+const SUPER_PROPERTIES = getSuperProperties();
+const USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9264 Chrome/148.0.7778.280 Electron/42.11.15 Safari/537.36';
 
 function getHeaders(rawToken, referer = 'https://discord.com/channels/@me') {
   const token = (rawToken || '').trim().replace(/^['"]|['"]$/g, '');
   return {
     Authorization: token,
     'Content-Type': 'application/json',
-    'User-Agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9168 Chrome/128.0.6613.186 Electron/32.2.7 Safari/537.36',
-    'X-Super-Properties': SUPER_PROPERTIES,
+    'User-Agent': USER_AGENT,
+    'X-Super-Properties': getSuperProperties(),
     Origin: 'https://discord.com',
     Referer: referer,
+    'Accept-Language': 'en-US,en;q=0.9,vi;q=0.8',
     'X-Discord-Locale': 'vi',
-    'X-Discord-Timezone': 'Asia/Ho_Chi_Minh',
+    'X-Discord-Timezone': 'Asia/Bangkok',
+    'sec-ch-ua-platform': '"Windows"',
     Accept: '*/*',
   };
 }
@@ -316,10 +345,15 @@ async function fetchQuests(token) {
     `https://discord.com/api/v9/quests/get-decisions?placement=3&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     // Placement 11: QUEST_HOME_DESKTOP (Tab Tất Cả Nhiệm Vụ)
     `https://discord.com/api/v9/quests/get-decisions?placement=11&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    // Placement 1: DESKTOP_ACCOUNT_PANEL_AREA
+    `https://discord.com/api/v9/quests/get-decisions?placement=1&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    // Placement 4: QUEST_HOME_MOBILE_CAROUSEL
+    `https://discord.com/api/v9/quests/get-decisions?placement=4&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     // Quests đã nhận / đã hoàn tất
     'https://discord.com/api/v9/quests/@me/claimed',
     'https://discord.com/api/v9/quests/decision?placement=3',
     'https://discord.com/api/v9/quests/decision?placement=11',
+    'https://discord.com/api/v9/quests/decision?placement=1',
   ];
 
   await Promise.allSettled(
@@ -2028,5 +2062,7 @@ module.exports = {
   isQuestActive,
   getUserIdFromToken,
   runAutoQuestForToken,
+  getSuperProperties,
+  getHeaders,
 };
 
