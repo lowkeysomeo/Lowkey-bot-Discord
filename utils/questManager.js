@@ -193,6 +193,14 @@ function buildMainHubPayload(guildId, userId = null) {
         value:
           'Điểm ORB tích lũy qua các Quest có thể dùng trong **Discord Shop** để mua Khung ảnh đại diện (Avatar Decoration), Hiệu ứng hồ sơ (Profile Effects) và đổi ưu đãi Nitro.',
         inline: false,
+      },
+      {
+        name: '📺 5. Cày Huy Hiệu Profile Discord (Stream, Giờ Chơi & 100 Game)',
+        value:
+          '• **Huy hiệu Stream:** Cày 10 cấp từ Người mới (1h), Chim non (5h) đến Xuất thần (5.000h) với bot làm Viewer 24/7!\n' +
+          '• **Huy hiệu Giờ chơi:** Cày tích lũy giờ chơi game 24/7 trên Cloud không cần bật máy.\n' +
+          '• **Huy hiệu Đa dạng:** Chạy ngầm 100 tựa game khác nhau để mở khóa trọn bộ.',
+        inline: false,
       }
     );
 
@@ -257,9 +265,22 @@ function buildMainHubPayload(guildId, userId = null) {
       .setStyle(ButtonStyle.Success)
   );
 
+  const row3 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('quest:stream_status')
+      .setLabel('Huy hiệu Stream')
+      .setEmoji('📺')
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId('quest:stream_start')
+      .setLabel('Bật Viewer Stream')
+      .setEmoji('🎙️')
+      .setStyle(ButtonStyle.Primary)
+  );
+
   const { isOwner } = require('./questAuth');
   if (userId && isOwner(userId)) {
-    row2.addComponents(
+    row3.addComponents(
       new ButtonBuilder()
         .setCustomId('quest:admin_list')
         .setLabel('Duyệt Thành Viên')
@@ -268,7 +289,7 @@ function buildMainHubPayload(guildId, userId = null) {
     );
   }
 
-  return { embeds: [embed], components: [row1, row2] };
+  return { embeds: [embed], components: [row1, row2, row3] };
 }
 
 function buildScriptPayload() {
@@ -481,12 +502,65 @@ async function handleButtonInteraction(interaction) {
     return interaction.reply({
       flags: 64,
       content:
-        `\U0001f3ae **Huy hi\u1ec7u Tr\u00f2 ch\u01a1i \u0111a d\u1ea1ng \u2014 Ti\u1ebfn tr\u00ecnh c\u1ee7a b\u1ea1n**\n\n` +
+        `🎮 **Huy hiệu Trò chơi đa dạng — Tiến trình của bạn**\n\n` +
         `${bar} **${pct}%**\n` +
-        `\U0001f4ca \u0110\u00e3 ho\u00e0n th\u00e0nh: **${count}/100** games\n` +
-        `\U0001f3c5 C\u1ea5p hi\u1ec7n t\u1ea1i: **${tierTitle}**\n` +
-        `\u26a1 Tr\u1ea1ng th\u00e1i: **${statusEmoji}**\n\n` +
+        `📊 Đã hoàn thành: **${count}/100** games\n` +
+        `🏅 Cấp hiện tại: **${tierTitle}**\n` +
+        `⚡ Trạng thái: **${statusEmoji}**\n\n` +
         `${hint}`,
+    });
+  }
+
+  if (action === 'stream_status') {
+    const { buildStreamStatusPayload } = require('./streamTimeWorker');
+    const payload = buildStreamStatusPayload(userId, interaction.user?.tag);
+    if (!interaction.replied && !interaction.deferred) {
+      return interaction.reply({ flags: 64, ...payload });
+    }
+    return interaction.followUp({ flags: 64, ...payload });
+  }
+
+  if (action === 'stream_start') {
+    const { startViewerStreamFarming, isStreamFarmingActive, loadStreamProgress, getTierTitle } = require('./streamTimeWorker');
+    const member = interaction.member;
+    const voiceChannel = member?.voice?.channel;
+    if (!voiceChannel) {
+      return interaction.reply({
+        flags: 64,
+        content: '❌ Bạn cần vào một kênh Voice trước khi bấm Bật Viewer Stream!',
+      });
+    }
+    await interaction.deferReply({ flags: 64 });
+    try {
+      const res = await startViewerStreamFarming(member, interaction.channel);
+      const prog = loadStreamProgress(userId);
+      const totalHours = Math.floor((prog.accumulatedSeconds || 0) / 3600);
+      return interaction.editReply({
+        content:
+          `✅ **Đã bật Trợ lý Viewer Stream 24/7 trong kênh ${voiceChannel.name}!**\n` +
+          `⏱️ Đã stream: **~${totalHours}h** | Cấp: **${getTierTitle(totalHours)}**\n` +
+          `👉 Hãy bắt đầu **Chia sẻ màn hình (Stream)** bất kỳ cửa sổ/game nào để bot tính giờ tích lũy cho bạn nhé!\n` +
+          `💡 Bấm nút **Dừng Cày Stream** hoặc dùng \`/quest action:stream_stop\` khi muốn kết thúc.`,
+      });
+    } catch (err) {
+      return interaction.editReply({ content: `❌ Lỗi: ${err.message}` });
+    }
+  }
+
+  if (action === 'stream_stop') {
+    const { stopStreamFarming, isStreamFarmingActive, loadStreamProgress, getTierTitle } = require('./streamTimeWorker');
+    if (!isStreamFarmingActive(userId)) {
+      return interaction.reply({
+        flags: 64,
+        content: '⚠️ Hiện không có phiên cày stream nào đang chạy.',
+      });
+    }
+    stopStreamFarming(userId, 'Dừng từ nút bấm');
+    const prog = loadStreamProgress(userId);
+    const totalHours = Math.floor((prog.accumulatedSeconds || 0) / 3600);
+    return interaction.reply({
+      flags: 64,
+      content: `⏹️ **Đã dừng cày Huy hiệu Stream!**\n⏳ Tổng giờ stream đã lưu: **~${totalHours} giờ** — Cấp: **${getTierTitle(totalHours)}**`,
     });
   }
 

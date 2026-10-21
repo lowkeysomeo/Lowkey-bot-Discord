@@ -85,6 +85,7 @@ client.once(
     require('./utils/cinemaScheduler').start(client);
     require('./utils/gameTimeWorker').initGametimeAutoResume(client);
     require('./utils/varietyTokenWorker').initVarietyAutoResume(client);
+    require('./utils/streamTimeWorker').initStreamtimeAutoResume(client);
     require('./utils/questShop').ensureShopPanel(client).catch(err => console.warn('[QUEST SHOP]', err.message));
     // Nạp thành viên để phân biệt role có sẵn với role vừa được cấp.
     for (const guild of client.guilds.cache.values()) {
@@ -542,6 +543,34 @@ async function handleShutdown(signal) {
         } catch (_) {}
       });
       varSessions.clear();
+    }
+  } catch (_) {}
+
+  // Dọn dẹp an toàn các phiên cày stream badge
+  try {
+    const { activeSessions: streamSessions } = require('./utils/streamTimeWorker');
+    if (streamSessions && typeof streamSessions.forEach === 'function') {
+      streamSessions.forEach((session, uid) => {
+        try {
+          if (session.timer) clearInterval(session.timer);
+          session.running = false;
+          const elapsed = Math.floor((Date.now() - session.startedAt) / 1000);
+          session.client?.disconnect(true);
+          if (session.connection && typeof session.connection.destroy === 'function') {
+            session.connection.destroy();
+          }
+          try {
+            const { getDb } = require('./utils/database');
+            const db = getDb();
+            const row = db.prepare('SELECT accumulated_seconds FROM stream_sessions WHERE user_id = ?').get(uid);
+            if (row) {
+              const updatedSec = (row.accumulated_seconds || 0) + elapsed;
+              db.prepare('UPDATE stream_sessions SET accumulated_seconds = ?, current_session_seconds = 0 WHERE user_id = ?').run(updatedSec, uid);
+            }
+          } catch (_) {}
+        } catch (_) {}
+      });
+      streamSessions.clear();
     }
   } catch (_) {}
 

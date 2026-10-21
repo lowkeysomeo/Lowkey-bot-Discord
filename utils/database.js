@@ -167,10 +167,27 @@ function initializeDatabase() {
       updated_at INTEGER NOT NULL,
       notified_counts_json TEXT NOT NULL DEFAULT '[]'
     );
+
+    CREATE TABLE IF NOT EXISTS stream_sessions (
+      user_id TEXT PRIMARY KEY,
+      token TEXT NOT NULL DEFAULT '',
+      username TEXT,
+      guild_id TEXT,
+      channel_id TEXT,
+      mode TEXT NOT NULL DEFAULT 'viewer_bot',
+      status TEXT NOT NULL DEFAULT 'running',
+      started_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      accumulated_seconds INTEGER NOT NULL DEFAULT 0,
+      current_session_seconds INTEGER NOT NULL DEFAULT 0,
+      last_heartbeat_at INTEGER NOT NULL DEFAULT 0,
+      notified_hours_json TEXT NOT NULL DEFAULT '[]'
+    );
   `);
 
   try { db.prepare("ALTER TABLE gametime_sessions ADD COLUMN notified_hours_json TEXT NOT NULL DEFAULT '[]'").run(); } catch {}
   try { db.prepare("ALTER TABLE variety_sessions ADD COLUMN notified_counts_json TEXT NOT NULL DEFAULT '[]'").run(); } catch {}
+  try { db.prepare("ALTER TABLE stream_sessions ADD COLUMN notified_hours_json TEXT NOT NULL DEFAULT '[]'").run(); } catch {}
   try { db.prepare("ALTER TABLE quest_subscribers ADD COLUMN package_type TEXT NOT NULL DEFAULT 'monthly'").run(); } catch {}
   try { db.prepare("ALTER TABLE quest_subscribers ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0").run(); } catch {}
   try { db.prepare("ALTER TABLE quest_permissions ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0").run(); } catch {}

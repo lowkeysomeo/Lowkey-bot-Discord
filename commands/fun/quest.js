@@ -32,6 +32,9 @@ module.exports.data = {
         { name: '⏱️ Cày Huy hiệu Thời gian chơi (Token ngầm 24/7)', value: 'gametime_start' },
         { name: '⏹️ Dừng cày Huy hiệu Thời gian chơi', value: 'gametime_stop' },
         { name: '📊 Xem tiến trình Huy hiệu Thời gian chơi', value: 'gametime_status' },
+        { name: '📺 Cày Huy hiệu Stream (Viewer 24/7 & Token ngầm)', value: 'stream_start' },
+        { name: '⏹️ Dừng cày Huy hiệu Stream', value: 'stream_stop' },
+        { name: '📊 Xem tiến trình Huy hiệu Stream', value: 'stream_status' },
         { name: '🛡️ Quản lý phê duyệt (Dành cho Admin)', value: 'admin' },
         { name: '🔑 Hướng dẫn lấy Token (iOS, Android & PC)', value: 'token_guide' },
         { name: '⚡ Lấy Script Auto Hoàn Thành Quest (Console)', value: 'script' },
@@ -390,6 +393,134 @@ module.exports.execute = async (interaction) => {
         `🏅 Cấp hiện tại: **${currentTier}**` + (nextTier ? ` → Mục tiêu: **${nextTier.title} (${nextTier.hours}h)**` : '') + `\n` +
         `⚡ Trạng thái: **${isRunning ? '🟢 Đang cày ngầm 24/7' : '🔴 Không chạy'}**\n\n` +
         `${isRunning ? '💡 Dùng \`/quest action:gametime_stop\` để dừng.' : '💡 Dùng \`/quest action:gametime_start\` để tiếp tục cày!'}`,
+    });
+  }
+
+  if (action === 'stream_status') {
+    const { buildStreamStatusPayload } = require('../../utils/streamTimeWorker');
+    const payload = buildStreamStatusPayload(userId, userObj.tag);
+    return interaction.reply({ flags: 64, ...payload });
+  }
+
+  if (action === 'stream_start') {
+    if (!isApproved(userId) && !isOwner(userId)) {
+      return interaction.reply({ flags: 64, ...buildAccessGatePayload(userObj) });
+    }
+
+    const {
+      startViewerStreamFarming,
+      startTokenStreamFarming,
+      isStreamFarmingActive,
+      loadStreamProgress,
+      getTierTitle,
+    } = require('../../utils/streamTimeWorker');
+
+    if (isStreamFarmingActive(userId)) {
+      const prog = loadStreamProgress(userId);
+      const totalHours = Math.floor(((prog.accumulatedSeconds || 0) + (prog.currentSessionSeconds || 0)) / 3600);
+      return interaction.reply({
+        flags: 64,
+        content: `⚡ Tiến trình cày Huy hiệu Stream đang chạy rồi! **~${totalHours} giờ** — Cấp: **${getTierTitle(totalHours)}**`,
+      });
+    }
+
+    const member = interaction.member;
+    const voiceChannel = member?.voice?.channel;
+
+    // Cách 1: Người dùng đang ở trong kênh Voice -> Bot tham gia làm Viewer 24/7
+    if (voiceChannel) {
+      if (typeof interaction.deferReply === 'function') {
+        await interaction.deferReply({ flags: 64 });
+      }
+      try {
+        const res = await startViewerStreamFarming(member, interaction.channel, {
+          onMilestone: async ({ totalHours, tier }) => {
+            try {
+              const user = await interaction.client.users.fetch(userId);
+              await user.send(`🎉 **Đạt mốc Huy hiệu Stream!** Bạn đã tích lũy **${totalHours} giờ** — Cấp: **${tier.title}**!`);
+            } catch (_) {}
+          },
+        });
+        const prog = loadStreamProgress(userId);
+        const totalHours = Math.floor((prog.accumulatedSeconds || 0) / 3600);
+        return interaction.editReply({
+          content:
+            `✅ **Đã bật chế độ Trợ lý Khán giả (Viewer) 24/7!**\n` +
+            `📺 Kênh Voice: **${voiceChannel.name}**\n` +
+            `⏱️ Giờ đã stream: **~${totalHours}h** | Cấp: **${getTierTitle(totalHours)}**\n\n` +
+            `👉 **Hướng dẫn:** Hãy bật **Chia sẻ màn hình (Stream)** bất kỳ cửa sổ/game nào trong kênh Voice. Bot sẽ luôn ở lại làm Viewer đếm giờ tích lũy cho bạn!\n` +
+            `💡 Dùng \`/quest action:stream_stop\` khi muốn dừng.`,
+        });
+      } catch (err) {
+        return interaction.editReply({ content: `❌ Lỗi khi tham gia kênh Voice: ${err.message}` });
+      }
+    }
+
+    // Cách 2: Người dùng có Token -> Cày ngầm qua Token Gateway
+    const { getSubscriber } = require('../../utils/questScheduler');
+    const sub = getSubscriber(userId);
+    if (sub && sub.token) {
+      const defaultChannel = interaction.guild?.channels?.cache?.find(
+        (c) => c.isVoiceBased?.() && c.permissionsFor?.(interaction.client.user)?.has?.('Connect')
+      );
+      if (defaultChannel) {
+        if (typeof interaction.deferReply === 'function') {
+          await interaction.deferReply({ flags: 64 });
+        }
+        const res = await startTokenStreamFarming({
+          token: sub.token,
+          userId,
+          guildId: interaction.guildId,
+          channelId: defaultChannel.id,
+          onMilestone: async ({ totalHours, tier }) => {
+            try {
+              const user = await interaction.client.users.fetch(userId);
+              await user.send(`🎉 **Đạt mốc Huy hiệu Stream!** Bạn đã tích lũy **${totalHours} giờ** — Cấp: **${tier.title}**!`);
+            } catch (_) {}
+          },
+        });
+        if (!res.success) {
+          return interaction.editReply({ content: `❌ ${res.message}` });
+        }
+        return interaction.editReply({
+          content:
+            `✅ **Đã kích hoạt cày ngầm Huy hiệu Stream bằng Token 24/7 trên Cloud!**\n` +
+            `📺 Kênh: **${defaultChannel.name}** | Người dùng: **${res.username}**\n` +
+            `💡 Bot sẽ giữ stream ngầm liên tục mà bạn không cần mở Discord hay bật máy.\n` +
+            `💡 Dùng \`/quest action:stream_stop\` để dừng.`,
+        });
+      }
+    }
+
+    // Nếu chưa vào Voice và chưa có Token
+    return interaction.reply({
+      flags: 64,
+      content:
+        `📺 **Cày Huy hiệu Stream (Phát trực tiếp cho người khác)**\n\n` +
+        `Bạn có thể cày theo 2 cách cực kỳ tiện lợi:\n` +
+        `1️⃣ **Cách 1 (Khuyên Dùng — Không cần Token):**\n` +
+        `• Hãy tham gia vào một **kênh Voice** bất kỳ trong server này.\n` +
+        `• Sau đó gõ lại lệnh \`/quest action:stream_start\` -> Bot sẽ vào làm **Khán giả (Viewer)** 24/7 xem bạn Stream màn hình.\n\n` +
+        `2️⃣ **Cách 2 (Cày ngầm Cloud 24/7 bằng Token):**\n` +
+        `• Dùng lệnh \`/quest action:token\` để nạp Token Discord.\n` +
+        `• Bot sẽ tự động giả lập phát stream trên máy chủ đám mây cả ngày lẫn đêm mà bạn không cần treo máy.`,
+    });
+  }
+
+  if (action === 'stream_stop') {
+    const { stopStreamFarming, isStreamFarmingActive, loadStreamProgress, getTierTitle } = require('../../utils/streamTimeWorker');
+    if (!isStreamFarmingActive(userId)) {
+      return interaction.reply({
+        flags: 64,
+        content: '⚠️ Hiện không có phiên cày stream nào đang chạy trên tài khoản của bạn.',
+      });
+    }
+    stopStreamFarming(userId, 'Người dùng yêu cầu dừng');
+    const prog = loadStreamProgress(userId);
+    const totalHours = Math.floor((prog.accumulatedSeconds || 0) / 3600);
+    return interaction.reply({
+      flags: 64,
+      content: `⏹️ **Đã dừng cày Huy hiệu Stream!**\n⏳ Tổng giờ stream đã lưu: **~${totalHours} giờ** — Cấp: **${getTierTitle(totalHours)}**`,
     });
   }
 
