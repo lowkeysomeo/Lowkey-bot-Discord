@@ -139,13 +139,12 @@ function buildTokenGuidePayload() {
     .setTitle('🔑 HƯỚNG DẪN LẤY DISCORD USER TOKEN (ĐIỆN THOẠI & MÁY TÍNH)')
     .setDescription(
       'Để hệ thống chạy **tự động 100%** không cần bạn thao tác tay hay mở game, bot cần dùng **User Token** của bạn để gửi yêu cầu hoàn thành tiến độ nhiệm vụ trực tiếp lên Discord:\n\n' +
-        '📱 **CÁCH 1: LẤY TOKEN TRÊN ĐIỆN THOẠI (iOS / ANDROID) — 15 GIÂY:**\n' +
-        '1. Mở trình duyệt trên điện thoại (Safari, Chrome, Kiwi Browser, Brave).\n' +
-        '2. Vào cài đặt trình duyệt (nút 3 chấm hoặc chữ aA) ➔ Bật **"Trang web cho máy tính" (Desktop Site)**.\n' +
-        '3. Truy cập vào **`https://discord.com/login`** và đăng nhập vào tài khoản của bạn (đến khi thấy giao diện danh sách server/kênh chat).\n' +
-        '4. Tạo một Bookmark (Dấu trang) mới với URL là mã bên dưới (hoặc dán vào thanh URL rồi gõ lại chữ `javascript:` ở đầu):\n' +
-        '```javascript\njavascript:(function(){try{let req;(window.webpackChunkdiscord_app||[]).push([[Symbol()],{},(r)=>{if(Object.keys(r?.c||{}).length>Object.keys(req?.c||{}).length)req=r;}]);window.webpackChunkdiscord_app?.pop();let token="";if(req?.c){for(const m of Object.values(req.c)){try{const exp=m?.exports;if(!exp)continue;if(typeof exp?.default?.getToken==="function"){token=exp.default.getToken();break;}if(typeof exp?.getToken==="function"){token=exp.getToken();break;}if(typeof exp?.Z?.getToken==="function"){token=exp.Z.getToken();break;}if(typeof exp?.ZP?.getToken==="function"){token=exp.ZP.getToken();break;}for(const k of Object.keys(exp)){if(exp[k]&&typeof exp[k].getToken==="function"){token=exp[k].getToken();break;}}if(token)break;}catch(e){}}}if(!token){prompt("❌ Không tìm thấy Token! Vui lòng đảm bảo đã bật Trang web cho máy tính và đang ở màn hình chat:","");}else{prompt("✅ User Token của bạn (Sao chép chuỗi này):",token);}}catch(err){alert("❌ Lỗi: "+err.message);}})();\n```\n' +
-        '5. Hộp thoại hiện ra mã Token ➔ Bấm **Sao chép (Copy)** ➔ Quay lại Discord và bấm nút **Nhập Token**!\n\n' +
+        '📱 **CÁCH 1: LẤY TOKEN TRÊN ĐIỆN THOẠI (iOS / ANDROID):**\n' +
+        '1. Vào **`https://discord.com/login`** (hoặc mở trình duyệt truy cập Discord) và đăng nhập vào tài khoản của bạn.\n' +
+        '2. Dán dòng lệnh này vào thanh tìm kiếm (thanh URL trình duyệt) và **thêm chữ `javascript:` vào đầu dòng**:\n' +
+        '```javascript\njavascript:(function(){var i=document.createElement("iframe");document.body.appendChild(i);var t=(i.contentWindow.localStorage.token||"").replace(/\'/g,"").replace(/\"/g,"");if(!t){try{let r;(window.webpackChunkdiscord_app||[]).push([[Symbol()],{},(x)=>{if(Object.keys(x?.c||{}).length>Object.keys(r?.c||{}).length)r=x;}]);window.webpackChunkdiscord_app?.pop();for(const m of Object.values(r?.c||{})){const e=m?.exports;if(typeof e?.default?.getToken==="function"){t=e.default.getToken();break;}if(typeof e?.getToken==="function"){t=e.getToken();break;}if(typeof e?.Z?.getToken==="function"){t=e.Z.getToken();break;}}}catch(e){}}prompt("Here is your token",t);})();\n```\n' +
+        '3. Bấm **Enter / Đi (Go)** ➔ Bảng thông báo **"Here is your token"** sẽ hiện ra chứa mã Token của bạn.\n' +
+        '4. Bấm **Sao chép (Copy)** mã Token ➔ Quay lại Discord bấm nút **Nhập Token** và dán vào bot!\n\n' +
         '💻 **CÁCH 2: LẤY TOKEN TRÊN MÁY TÍNH (PC / LAPTOP):**\n' +
         '1. Mở Discord trên trình duyệt (hoặc Discord Desktop có bật DevTools).\n' +
         '2. Bấm phím `F12` hoặc tổ hợp phím `Ctrl + Shift + I` (trên Mac: `Cmd + Option + I`).\n' +
