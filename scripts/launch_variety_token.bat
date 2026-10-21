@@ -1,15 +1,25 @@
 @echo off
-chcp 65001 >nul
+setlocal enabledelayedexpansion
+chcp 65001 >nul 2>&1
 title Discord Auto Game Variety Badge - TOKEN RUNNER
 color 0a
 cd /d "%~dp0\.."
 
-where node >nul 2>nul
+set "NODE_CMD=node"
+where node >nul 2>&1
 if %errorlevel% neq 0 (
-    color 0c
-    echo [ERROR] Node.js chua duoc cai dat! Tai tai: https://nodejs.org
-    pause
-    exit /b 1
+    if exist "C:\Program Files\nodejs\node.exe" (
+        set "NODE_CMD=C:\Program Files\nodejs\node.exe"
+        set "PATH=C:\Program Files\nodejs;!PATH!"
+    ) else if exist "%ProgramFiles%\nodejs\node.exe" (
+        set "NODE_CMD=%ProgramFiles%\nodejs\node.exe"
+        set "PATH=%ProgramFiles%\nodejs;!PATH!"
+    ) else (
+        color 0c
+        echo [ERROR] Node.js chua duoc cai dat! Tai tai: https://nodejs.org
+        pause
+        exit /b 1
+    )
 )
 
 echo ================================================================
@@ -24,7 +34,7 @@ echo  3. Bot se ket noi Gateway va cay ngam - TAT MAY van chay!
 echo.
 echo ================================================================
 
-node scripts/auto_variety_token.js %*
+"%NODE_CMD%" scripts/auto_variety_token.js %*
 
 if %errorlevel% neq 0 (
     echo.
