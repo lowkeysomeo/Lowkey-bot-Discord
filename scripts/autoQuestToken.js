@@ -1,13 +1,15 @@
 'use strict';
 
 /**
- * Lowkey Discord Auto Quest CLI Runner
- * Chạy tự động 100% bằng User Token mà không cần mở Discord hoặc thao tác tay
+ * Lowkey Discord Auto Quest 24/7 CLI Runner (Video & Game — Auto Enroll & Complete, No-Claim)
+ * Chạy ngầm 24/7 bằng User Token: liên tục kiểm tra nhiệm vụ mới mỗi 2 phút,
+ * tự động nhận (Accept/Enroll) cả nhiệm vụ Video và Game và hoàn thành 100% (không tự bấm Claim).
  *
  * Cách dùng:
- *   node scripts/autoQuestToken.js
- *   node scripts/autoQuestToken.js --token "YOUR_USER_TOKEN"
- *   Hoặc bật trực tiếp từ file shortcut trên Desktop!
+ *   node scripts/autoQuestToken.js                   (Chạy chế độ canh 24/7 liên tục)
+ *   node scripts/autoQuestToken.js --once            (Chạy 1 lượt duy nhất rồi thoát)
+ *   node scripts/autoQuestToken.js --interval 120    (Tùy chỉnh chu kỳ quét tính bằng giây, mặc định 120s)
+ *   node scripts/autoQuestToken.js --token "TOKEN"
  */
 
 require('dotenv').config();
@@ -43,6 +45,31 @@ function maskToken(t) {
   return t.slice(0, 8) + '...' + t.slice(-4);
 }
 
+function parseCliArgs() {
+  const args = process.argv.slice(2);
+  const parsed = {
+    token: null,
+    once: false,
+    intervalSeconds: Number(process.env.QUEST_POLL_SECONDS || 120),
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--once') {
+      parsed.once = true;
+    } else if (arg.startsWith('--token=')) {
+      parsed.token = arg.replace('--token=', '').trim();
+    } else if (arg === '--token' && args[i + 1]) {
+      parsed.token = args[++i].trim();
+    } else if (arg.startsWith('--interval=')) {
+      parsed.intervalSeconds = Math.max(30, Number(arg.replace('--interval=', '')) || 120);
+    } else if (arg === '--interval' && args[i + 1]) {
+      parsed.intervalSeconds = Math.max(30, Number(args[++i]) || 120);
+    }
+  }
+  return parsed;
+}
+
 async function promptToken(saved) {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -52,7 +79,7 @@ async function promptToken(saved) {
   return new Promise((resolve) => {
     if (saved) {
       console.log(`\n🔑 Đã tìm thấy Token đã lưu: [ ${maskToken(saved)} ]`);
-      rl.question('👉 Nhấn [Enter] để CHẠY NGAY, hoặc dán Token mới: ', (answer) => {
+      rl.question('👉 Nhấn [Enter] để CHẠY AUTO 24/7 NGAY, hoặc dán Token mới: ', (answer) => {
         rl.close();
         const input = answer.trim();
         if (!input) {
@@ -74,118 +101,87 @@ async function promptToken(saved) {
   });
 }
 
-function parseCliToken() {
-  const args = process.argv.slice(2);
-  for (let i = 0; i < args.length; i++) {
-    if (args[i].startsWith('--token=')) {
-      return args[i].replace('--token=', '').trim();
-    }
-    if (args[i] === '--token' && args[i + 1]) {
-      return args[i + 1].trim();
+async function runSingleCycle(token, cycleNumber) {
+  const timestamp = new Date().toLocaleString('vi-VN');
+  console.log(`\n==================== [CHU KỲ QUÉT #${cycleNumber} — ${timestamp}] ====================`);
+
+  const report = await runAutoQuestForToken(token, {
+    autoClaim: false, // Chỉ hoàn thành 100%, không tự động Claim
+    maxPasses: 3,
+    heartbeatDelayMs: 20000,
+    videoStepDelayMs: 1000,
+    videoStepSeconds: 12,
+    onProgress: (p) => {
+      if (p.step === 'auth' && cycleNumber === 1) {
+        console.log(`[AUTH] ${p.message}`);
+      } else if (p.step === 'quest_start') {
+        const typeBadge = p.type === 'video' ? '🎬 [Video]' : '🎮 [Game]';
+        console.log(`\n[QUEST] ${typeBadge} ${p.message}`);
+      } else if (p.step === 'progress') {
+        const typeIcon = p.type === 'video' ? '🎬' : '🎮';
+        console.log(`  🔄 ${typeIcon} [Tiến độ] ${p.currentSeconds}/${p.targetSeconds}s (${p.percent}%)`);
+      }
+    },
+  });
+
+  console.log(`\n📊 KẾT QUẢ CHU KỲ #${cycleNumber} (${report.accountTag}):`);
+  console.log(`  • Tổng Quest đang mở: ${report.totalQuests}`);
+  console.log(`  • Đã tự động nhận (Enroll): ${report.enrolledCount}/${report.totalQuests}`);
+  console.log(`  • Đã hoàn thành 100%: ${report.completedCount}/${report.totalQuests} (Chế độ: Không tự Claim)`);
+
+  if (Array.isArray(report.results) && report.results.length > 0) {
+    for (const [idx, r] of report.results.entries()) {
+      const badge = r.type === 'video' ? '🎬 [Video]' : '🎮 [Game]';
+      const statusText = r.alreadyDone
+        ? '✅ Đã hoàn thành từ trước'
+        : r.completed
+        ? '✅ Hoàn thành 100% (Sẵn sàng vào Discord bấm Claim)'
+        : `⏳ Đang xử lý (${r.progressPercent || 0}%)`;
+      console.log(`    [${idx + 1}] ${badge} ${r.questName}: ${statusText}`);
     }
   }
-  return null;
-}
-
-async function waitExitPrompt() {
-  if (!process.stdin.isTTY) return;
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  return new Promise((resolve) => {
-    rl.question('\n👉 Nhấn phím [Enter] để đóng cửa sổ...', () => {
-      rl.close();
-      resolve();
-    });
-  });
 }
 
 (async () => {
-  console.log('====================================================');
-  console.log('🔮 LOWKEY DISCORD AUTO QUEST & ORB - 100% AUTOMATED');
-  console.log('====================================================');
+  console.log('===============================================================');
+  console.log('🔮 LOWKEY DISCORD AUTO QUEST 24/7 (VIDEO & GAME — NO AUTO-CLAIM)');
+  console.log('===============================================================');
 
-  const cliToken = parseCliToken();
+  const cli = parseCliArgs();
   const envToken =
     process.env.DISCORD_USER_TOKEN ||
     process.env.QUEST_USER_TOKENS ||
     process.env.USER_TOKEN;
   const savedToken = loadSavedToken();
 
-  let token = cliToken || envToken;
-
+  let token = cli.token || envToken;
   if (!token) {
-    token = await promptToken(savedToken);
+    if (!process.stdin.isTTY && savedToken) {
+      token = savedToken;
+    } else {
+      token = await promptToken(savedToken);
+    }
+  } else {
+    saveToken(token);
   }
 
   if (!token) {
     console.error('❌ Lỗi: Bạn chưa cung cấp User Token Discord.');
-    await waitExitPrompt();
     process.exit(1);
   }
 
-  console.log('\n[1/3] 🔄 Đang khởi tạo và kết nối tới Discord API...');
-
-  try {
-    const report = await runAutoQuestForToken(token, {
-      autoClaim: true,
-      heartbeatDelayMs: 1200,
-      onProgress: (p) => {
-        if (p.step === 'auth') {
-          console.log(`[AUTH] ${p.message}`);
-        } else if (p.step === 'fetch') {
-          console.log(`[INFO] ${p.message}`);
-        } else if (p.step === 'quest_start') {
-          const typeBadge = p.type === 'video' ? '🎬 [Video]' : '🎮 [Game]';
-          console.log(`\n----------------------------------------------------`);
-          console.log(`[QUEST] ${typeBadge} ${p.message}`);
-        } else if (p.step === 'progress') {
-          const typeIcon = p.type === 'video' ? '🎬' : '🎮';
-          console.log(`  ↪ ${typeIcon} [Tiến độ] ${p.currentSeconds}/${p.targetSeconds}s (${p.percent}%)`);
-        }
-      },
-    });
-
-    console.log('\n====================================================');
-    console.log('🎉 TỔNG KẾT AUTO QUEST DISCORD (VIDEO & GAME)');
-    console.log('====================================================');
-    console.log(`👤 Tài khoản: ${report.accountTag} (ID: ${report.user.id})`);
-    console.log(`📋 Tổng số Quest khả dụng: ${report.totalQuests}`);
-    console.log(`🎯 Đã tự động nhận (Accept): ${report.enrolledCount || 0}/${report.totalQuests} nhiệm vụ`);
-    console.log(`✅ Hoàn thành 100%: ${report.completedCount}/${report.totalQuests} nhiệm vụ`);
-    console.log(`🎁 Đã nhận thưởng: ${report.claimedCount} phần quà/ORB`);
-
-    if (report.results && report.results.length > 0) {
-      console.log('\nChi tiết từng nhiệm vụ:');
-      report.results.forEach((r, idx) => {
-        const typeBadge = r.type === 'video' ? '🎬 [Video]' : '🎮 [Game]';
-        if (r.success) {
-          if (r.alreadyDone) {
-            console.log(`  [${idx + 1}] ${typeBadge} ${r.questName}: ✅ Đã làm và nhận thưởng trước đó`);
-          } else if (r.completed) {
-            console.log(`  [${idx + 1}] ${typeBadge} ${r.questName}: ✅ Hoàn thành 100% (Vào Discord bấm Claim)`);
-          } else if (r.enrolled) {
-            console.log(`  [${idx + 1}] ${typeBadge} ${r.questName}: 🎯 Đã tự động nhận (Accept) trên tài khoản`);
-          }
-        } else {
-          console.log(`  [${idx + 1}] ${typeBadge} ${r.questName}: ❌ Thất bại (${r.error})`);
-        }
-      });
+  let cycle = 0;
+  do {
+    cycle++;
+    try {
+      await runSingleCycle(token, cycle);
+    } catch (err) {
+      console.error(`❌ Lỗi ở chu kỳ #${cycle}: ${err.message}`);
     }
 
-    if (report.completedCount > 0) {
-      console.log('\n----------------------------------------------------');
-      console.log('🎁 HƯỚNG DẪN NHẬN QUÀ:');
-      console.log('Nhiệm vụ đã được bot hoàn thành 100%!');
-      console.log('Vui lòng vào Cài đặt -> Quests trên Discord để tự bấm Claim nhận quà.');
-    }
+    if (cli.once) break;
 
-    console.log('\n✨ Đã xử lý xong! Kiểm tra mục Cài đặt -> Nhiệm vụ (Quests) trên Discord để xem chi tiết.');
-  } catch (err) {
-    console.error(`\n❌ LỖI AUTO QUEST: ${err.message}`);
-    process.exitCode = 1;
-  } finally {
-    await waitExitPrompt();
-  }
+    console.log(`\n⏳ Đang canh ngầm 24/7... Sẽ tự động quét lại nhiệm vụ mới sau ${cli.intervalSeconds} giây.`);
+    await new Promise((r) => setTimeout(r, cli.intervalSeconds * 1000));
+  } while (!cli.once);
 })();
