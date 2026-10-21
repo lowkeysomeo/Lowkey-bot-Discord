@@ -152,27 +152,13 @@ function isQuestActive(q) {
 function collectQuestsFromPayload(data) {
   const quests = [];
   const seen = new Set();
-  const excludedIds = new Set();
-
-  function registerExcluded(obj) {
-    if (!obj || typeof obj !== 'object') return;
-    const list = obj.excluded_quests || obj.excludedQuests;
-    if (Array.isArray(list)) {
-      for (const item of list) {
-        const qId = item?.id || item?.quest_id || item?.questId;
-        if (qId) excludedIds.add(String(qId));
-      }
-    }
-  }
-
-  registerExcluded(data);
 
   function addQuest(candidate, fallbackId = null, sealed = null) {
     if (!candidate || typeof candidate !== 'object') return false;
     const rawId = candidate.id || candidate.quest_id || candidate.questId || fallbackId;
     if (!rawId) return false;
     const sId = String(rawId);
-    if (excludedIds.has(sId) || isExcludedQuest(candidate)) return false; // Tuyệt đối bỏ qua nhiệm vụ bị Discord exclude hoặc quảng cáo rác
+    if (isExcludedQuest(candidate)) return false; // Chỉ loại bỏ quảng cáo nhà cái rác (FanDuel, DraftKings)
     if (seen.has(sId)) return true;
 
     let config = null;
@@ -221,8 +207,6 @@ function collectQuestsFromPayload(data) {
     }
 
     if (typeof obj === 'object') {
-      registerExcluded(obj);
-
       const currentSealed =
         obj.traffic_metadata_sealed ||
         obj.trafficMetadataSealed ||
@@ -264,7 +248,7 @@ function collectQuestsFromPayload(data) {
 
       // 3. Nếu bản thân obj có id hoặc quest_id
       const directId = obj.id || obj.quest_id || obj.questId;
-      if (directId && !excludedIds.has(String(directId))) {
+      if (directId) {
         if (
           obj.config ||
           obj.user_status ||
@@ -295,7 +279,7 @@ function collectQuestsFromPayload(data) {
   }
 
   scan(data);
-  return quests.filter((q) => !excludedIds.has(String(q.id)));
+  return quests;
 }
 
 /**
@@ -319,13 +303,6 @@ async function fetchQuests(token) {
   }
 
   const data = await res.json();
-  const allExcludedIds = new Set();
-  if (Array.isArray(data.excluded_quests)) {
-    for (const eq of data.excluded_quests) {
-      if (eq?.id) allExcludedIds.add(String(eq.id));
-    }
-  }
-
   const allQuests = collectQuestsFromPayload(data);
 
   // 2. Quét các vị trí quảng bá và khám phá nhiệm vụ từ Quest Home, User Settings & Quest Bar
@@ -355,14 +332,9 @@ async function fetchQuests(token) {
         if (extraRes && extraRes.ok) {
           const extraData = await extraRes.json().catch(() => null);
           if (extraData) {
-            if (Array.isArray(extraData.excluded_quests)) {
-              for (const eq of extraData.excluded_quests) {
-                if (eq?.id) allExcludedIds.add(String(eq.id));
-              }
-            }
             const extraQuests = collectQuestsFromPayload(extraData);
             for (const eq of extraQuests) {
-              if (eq?.id && !allExcludedIds.has(String(eq.id)) && !allQuests.some((q) => q.id === eq.id)) {
+              if (eq?.id && !allQuests.some((q) => q.id === eq.id)) {
                 allQuests.push(eq);
               }
             }
@@ -373,10 +345,9 @@ async function fetchQuests(token) {
   );
 
   // 3. Nếu có quest nào chỉ có id mà chưa tải đủ config, bổ sung chi tiết từ endpoint /quests/{id}
-  // (Chỉ bổ sung cho những quest KHÔNG bị exclude)
   for (let i = 0; i < allQuests.length; i++) {
     const q = allQuests[i];
-    if (q?.id && allExcludedIds.has(String(q.id))) continue;
+    if (q?.id && isExcludedQuest(q)) continue;
     if ((!q.config || !q.config.task_config_v2) && q.id) {
       try {
         const detailRes = await requestDiscord(`https://discord.com/api/v9/quests/${q.id}`, {
@@ -401,7 +372,7 @@ async function fetchQuests(token) {
 
   const seen = new Set();
   const dedupedQuests = allQuests.filter((q) => {
-    if (!q?.id || allExcludedIds.has(String(q.id)) || isExcludedQuest(q) || seen.has(String(q.id))) return false;
+    if (!q?.id || isExcludedQuest(q) || seen.has(String(q.id))) return false;
     seen.add(String(q.id));
     return true;
   });
@@ -417,21 +388,23 @@ async function enrollQuest(token, questId, platform = 0, quest = null) {
   const isVideo = platform === -1 || platform === null || platform === false;
   const sealed = quest?.traffic_metadata_sealed || quest?.trafficMetadataSealed || null;
 
-  // Với Video Quests & Promotional Quests (Magic: Star Trek): Discord client gửi { location: 11 }, { location: 3 }, hoặc { location: 0 }
+  // Với Video Quests & Promotional Quests (Magic: Star Trek): Discord client gửi location: 11, is_targeted: false, metadata_sealed: null
   const enrollBodies = [
     ...(sealed
       ? [
-          { location: 11, traffic_metadata_sealed: sealed },
-          { location: 3, traffic_metadata_sealed: sealed },
-          { location: 0, traffic_metadata_sealed: sealed },
-          { location: 1, traffic_metadata_sealed: sealed },
+          { location: 11, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed },
+          { location: 3, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed },
+          { location: 0, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed },
+          { location: 1, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed },
         ]
       : []),
+    { location: 11, is_targeted: false, metadata_sealed: null },
+    { location: 3, is_targeted: false, metadata_sealed: null },
     { location: 11 },
     { location: 3 },
     { location: 0 },
     { location: 1 },
-    ...(isVideo ? [] : [{ location: 1, platform }, { platform }]),
+    ...(isVideo ? [] : [{ location: 1, platform, is_targeted: false, metadata_sealed: null }, { platform }]),
     {},
   ];
 
@@ -575,7 +548,7 @@ async function sendVideoProgress(token, questId, timestamp = 30, retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     const res = await requestDiscord(`https://discord.com/api/v9/quests/${questId}/video-progress`, {
       method: 'POST',
-      headers: getHeaders(token),
+      headers: getHeaders(token, 'https://discord.com/quest-home'),
       body: JSON.stringify({ timestamp: formattedTimestamp }),
     });
 
@@ -702,16 +675,10 @@ async function completeVideoQuest(token, quest, options = {}) {
     };
   }
 
-  // 2. Đăng ký nhận nhiệm vụ nếu chưa enroll (truyền platform: -1 để không gọi select-task-platform)
-  let enrolledAt = quest.user_status?.enrolled_at ? new Date(quest.user_status.enrolled_at).getTime() : null;
-  if (!enrolledAt) {
-    try {
-      await enrollQuest(token, questId, -1, quest);
-      enrolledAt = Date.now();
-    } catch (e) {
-      enrolledAt = Date.now();
-    }
-  }
+  // 2. Luôn đảm bảo đã đăng ký nhận nhiệm vụ (enroll)
+  try {
+    await enrollQuest(token, questId, -1, quest);
+  } catch (e) {}
 
   // 3. Trích xuất thông tin task video và targetSeconds
   const { taskKey, targetSeconds, currentSeconds: initialSeconds } = getVideoTaskInfo(quest);
@@ -747,8 +714,8 @@ async function completeVideoQuest(token, quest, options = {}) {
   }
 
   const isFastTest = (options.heartbeatDelayMs != null && options.heartbeatDelayMs < 500) || process.env.DB_PATH === ':memory:';
-  // Nhịp gửi video an toàn: 5s mỗi nhịp trong production, hoặc theo heartbeatDelayMs nếu trong mock test
-  const loopDelay = isFastTest ? (options.heartbeatDelayMs || 5) : 5000;
+  // Nhịp gửi video an toàn: 7.5s mỗi nhịp trong production, hoặc theo heartbeatDelayMs nếu trong mock test
+  const loopDelay = isFastTest ? (options.heartbeatDelayMs || 5) : 7500;
   const videoStartTime = Date.now() - (currentSeconds * 1000);
   const maxDurationMs = isFastTest ? 5000 : (targetSeconds * 2.5 + 60) * 1000;
   const startTime = Date.now();
@@ -772,7 +739,7 @@ async function completeVideoQuest(token, quest, options = {}) {
       currentSeconds = Math.min(targetSeconds, safeElapsed);
     }
 
-    const payloadTs = Number(currentSeconds.toFixed(2));
+    const payloadTs = Number(Math.min(targetSeconds, currentSeconds).toFixed(6));
 
     try {
       const res = await sendVideoProgress(token, questId, payloadTs);
@@ -803,14 +770,15 @@ async function completeVideoQuest(token, quest, options = {}) {
         break;
       }
     } catch (err) {
-      console.warn(`[QUEST WORKER] Lỗi gửi video progress loop=${calls} (${questId}): ${err.message}`);
-      if (err.message.includes('không khả dụng') || err.message.includes('HTTP 404') || err.message.includes('HTTP 403') || err.message.includes('HTTP 401')) {
+      console.warn(`[QUEST WORKER] Video progress loop=${calls} (${questId}): ${err.message}`);
+      if (err.message.includes('401')) {
         throw err;
       }
     }
 
     if (options.onProgress) {
       options.onProgress({
+        step: 'progress',
         questId,
         questName,
         type: 'video',
@@ -829,13 +797,13 @@ async function completeVideoQuest(token, quest, options = {}) {
   // Gửi timestamp chốt hạ targetSeconds nếu chưa nhận được completed_at từ server
   if (!serverConfirmed && currentSeconds >= targetSeconds) {
     try {
-      const finalRes = await sendVideoProgress(token, questId, targetSeconds);
+      const finalRes = await sendVideoProgress(token, questId, Number(targetSeconds.toFixed(6)));
       if (finalRes?.completed_at || finalRes?.user_status?.completed_at) {
         serverConfirmed = true;
         lastServerResponse = finalRes;
       }
     } catch (e) {
-      console.warn(`[QUEST WORKER] Lỗi gửi final video progress (${questId}): ${e.message}`);
+      console.warn(`[QUEST WORKER] Final video progress (${questId}): ${e.message}`);
     }
   }
 
@@ -1161,13 +1129,7 @@ function isVideoQuest(quest) {
   );
   if (hasExplicitVideoTask) return true;
 
-  // 2. Nếu có task chơi game rõ ràng (PLAY_ON_DESKTOP, PLAY_ON_XBOX, STREAM, v.v.) và không có video task -> 100% là GAME QUEST
-  const hasGameTask = taskKeys.some(
-    (k) => k.startsWith('PLAY_') || k.startsWith('STREAM_') || k === 'PLAY' || k === 'STREAM' || k === 'PLAY_ACTIVITY'
-  );
-  if (hasGameTask) return false;
-
-  // 3. Kiểm tra video metadata ở config hoặc task_config
+  // 2. Kiểm tra video metadata ở config hoặc task_config
   if (
     cfg.video_metadata || cfg.videoMetadata ||
     cfg.video_metadata_v2 || cfg.videoMetadataV2 ||
@@ -1176,12 +1138,12 @@ function isVideoQuest(quest) {
     return true;
   }
 
-  // 4. Kiểm tra quest_type
+  // 3. Kiểm tra quest_type
   if (cfg.quest_type === 1 || cfg.questType === 1 || cfg.quest_type === 'video' || cfg.questType === 'video') {
     return true;
   }
 
-  // 5. Kiểm tra user_status progress keys
+  // 4. Kiểm tra user_status progress keys
   if (quest.user_status?.progress && typeof quest.user_status.progress === 'object') {
     for (const [k, v] of Object.entries(quest.user_status.progress)) {
       const upper = String(k).toUpperCase();
@@ -1191,26 +1153,16 @@ function isVideoQuest(quest) {
     }
   }
 
-  // 6. Kiểm tra tiêu đề có chứa chữ "video" (vd: "Call of Duty: Modern Warfare 4 Video")
-  const questName = (
-    cfg.messages?.quest_name ||
-    cfg.messages?.questName ||
-    cfg.messages?.game_title ||
-    cfg.messages?.gameTitle ||
-    cfg.messages?.game_name ||
-    cfg.messages?.gameName ||
-    cfg.application?.name ||
-    ''
-  ).toLowerCase();
-
-  if (questName.includes('video')) {
-    return true;
-  }
-
-  // 7. Kiểm tra mô tả / phụ đề / nút CTA với các cụm từ video rõ ràng
-  // TUYỆT ĐỐI KHÔNG dùng từ "xem" đơn lẻ vì các nhiệm vụ Game khi xong đều có nút "Xem Phần Thưởng", "Xem Mã"
+  // 5. Kiểm tra tiêu đề / mô tả / phụ đề / nút CTA / nhà tài trợ
   const msgObj = cfg.messages || {};
   const specificTexts = [
+    msgObj.quest_name,
+    msgObj.questName,
+    msgObj.game_title,
+    msgObj.gameTitle,
+    msgObj.game_name,
+    msgObj.gameName,
+    cfg.application?.name,
     msgObj.sub_title,
     msgObj.subtitle,
     msgObj.description,
@@ -1234,10 +1186,20 @@ function isVideoQuest(quest) {
     specificTexts.includes('xem 1 phút') ||
     specificTexts.includes('xem 3 phút') ||
     specificTexts.includes('watch 2 min') ||
-    specificTexts.includes('watch 1 min')
+    specificTexts.includes('watch 1 min') ||
+    specificTexts.includes('240 orbs') ||
+    specificTexts.includes('magic: the gathering') ||
+    specificTexts.includes('star trek') ||
+    specificTexts.includes('wizards of the coast')
   ) {
     return true;
   }
+
+  // 6. Nếu có task chơi game rõ ràng (PLAY_ON_DESKTOP, PLAY_ON_XBOX, STREAM, v.v.) và không có video task -> GAME QUEST
+  const hasGameTask = taskKeys.some(
+    (k) => k.startsWith('PLAY_') || k.startsWith('STREAM_') || k === 'PLAY' || k === 'STREAM' || k === 'PLAY_ACTIVITY'
+  );
+  if (hasGameTask) return false;
 
   return false;
 }
@@ -1309,10 +1271,10 @@ function getVideoTaskInfo(quest) {
   }
 
   // Tự động nhận diện thời lượng video dựa trên văn bản hiển thị (vd: "Xem 2 phút" = 120s)
-  if (targetSeconds === 30) {
+  if (targetSeconds === 30 || targetSeconds < 60) {
     const msgObj = quest?.config?.messages || {};
     const textDesc = `${msgObj.cta_title || ''} ${msgObj.ctaTitle || ''} ${msgObj.sub_title || ''} ${msgObj.subtitle || ''} ${msgObj.description || ''} ${msgObj.quest_name || ''} ${msgObj.questName || ''}`.toLowerCase();
-    if (textDesc.includes('2 phút') || textDesc.includes('2 minutes') || textDesc.includes('120s') || textDesc.includes('120 giây')) {
+    if (textDesc.includes('2 phút') || textDesc.includes('2 minutes') || textDesc.includes('120s') || textDesc.includes('120 giây') || textDesc.includes('magic') || textDesc.includes('star trek')) {
       targetSeconds = 120;
     } else if (textDesc.includes('1 phút') || textDesc.includes('1 minute') || textDesc.includes('60s') || textDesc.includes('60 giây')) {
       targetSeconds = 60;
