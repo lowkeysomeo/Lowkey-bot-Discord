@@ -637,7 +637,7 @@ function buildAutoStatusPayload(userId) {
     .setDescription(
       'Hệ thống sẽ chạy ngầm định kỳ 24/7 trên bot. Ngay khi Discord vừa tung ra nhiệm vụ mới:\n' +
         '• 🎬 **Video Quests:** Bot tự động nhận, cày tiến độ và nhận điểm ORB ngay lập tức.\n' +
-        '• 🎮 **Game Quests:** Bot tự động nhận (Enroll) và gửi tin nhắn nhắc bạn mở app 1-click trên Desktop.\n' +
+        '• 🎮 **Game Quests:** Bot tự động kết nối Gateway ngầm, cày đủ 15 phút game và nhận thưởng ORBs 100% không cần mở game hay treo máy.\n' +
         '• 🔔 **Thông báo:** Gửi tin nhắn riêng (DM) chúc mừng khi hoàn thành nhiệm vụ.'
     )
     .addFields(

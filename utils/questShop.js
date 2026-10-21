@@ -342,7 +342,8 @@ async function processPaidOrder(orderId, client) {
       'monthly',
       newExpiresAt
     );
-    approveUser(order.user_id, 'Hệ thống Auto Quest Shop');
+    const daysRemaining = Math.max(30, Math.ceil((newExpiresAt - now) / (24 * 60 * 60 * 1000)));
+    approveUser(order.user_id, 'Hệ thống Auto Quest Shop', client, daysRemaining);
 
     updateOrderStatus(orderId, 'completed', { completedAt: Date.now() });
 
@@ -406,7 +407,7 @@ async function processPaidOrder(orderId, client) {
 
     for (const q of targetQuests) {
       try {
-        const res = await completeSingleQuest(order.token, q, { heartbeatDelayMs: 1200 });
+        const res = await completeSingleQuest(order.token, q, { autoClaim: true, heartbeatDelayMs: 1200 });
         if (res.completed || res.alreadyDone || res.progressPercent >= 100) {
           completedCount++;
           results.push({

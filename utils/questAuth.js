@@ -117,11 +117,12 @@ async function approveUser(userId, approverId, client, days = 10) {
   // Cập nhật hoặc đồng bộ vào bảng subscribers nếu người dùng đã có tài khoản
   const sub = db.prepare('SELECT * FROM quest_subscribers WHERE user_id = ?').get(String(userId));
   if (sub) {
+    const targetExpires = (sub.expires_at && sub.expires_at > expiresAt && !isAdmin) ? sub.expires_at : expiresAt;
     db.prepare(`
       UPDATE quest_subscribers
       SET expires_at = ?, enabled = 1
       WHERE user_id = ?
-    `).run(expiresAt, String(userId));
+    `).run(targetExpires, String(userId));
   }
 
   // Gửi thông báo DM cho người dùng
