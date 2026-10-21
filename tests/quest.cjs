@@ -930,6 +930,95 @@ setWebSocketImplementation(MockWebSocket);
       const res = await completeSingleQuest('valid_token_xyz', mockGameQuest);
       assert.equal(res.type, 'game', `Nhiệm vụ "${g.name}" phải trả về type: 'game'`);
     }
+
+    // 9.19 Kiểm tra collectQuestsFromPayload bóc tách chuẩn xác cấu trúc thực tế Discord Decisions & Excluded Quests
+    const { collectQuestsFromPayload } = require('../utils/questTokenWorker');
+    const realDiscordDecisionsPayload = {
+      request_id: 'req-ad-decision-abc',
+      decisions: [
+        {
+          creative: {
+            creative_type: 1, // QUEST: creative_content là Quest Config trực tiếp (không bọc trong config property)
+            creative_content: {
+              id: '1342624440894361624',
+              config_version: 2,
+              messages: {
+                quest_name: 'NHIỆM VỤ MAGIC: THE GATHERING | STAR TREK',
+                sub_title: 'Xem video để nhận được 240 Orbs!',
+                cta_title: 'Xem 2 phút',
+              },
+              task_config_v2: {
+                tasks: {
+                  WATCH_VIDEO: { target: 120 },
+                },
+              },
+            },
+          },
+          traffic_metadata_sealed: 'sealed-magic-jwt-xyz',
+        },
+        {
+          creative: {
+            creative_type: 2, // QUEST_HOME_HERO: chứa mảng quest_ids
+            creative_content: {
+              id: 'hero-banner-1',
+              quest_ids: ['1342624440894361625'],
+            },
+          },
+        },
+      ],
+      excluded_quests: [
+        { id: '1342624440894361626' },
+      ],
+    };
+
+    const extractedQuests = collectQuestsFromPayload(realDiscordDecisionsPayload);
+    assert.equal(extractedQuests.length, 3, 'Phải bóc tách đủ 3 quest từ decision creative_content, hero quest_ids và excluded_quests');
+    const mtgExtracted = extractedQuests.find((q) => q.id === '1342624440894361624');
+    assert(mtgExtracted, 'Phải tìm thấy quest Magic Star Trek');
+    assert.equal(mtgExtracted.traffic_metadata_sealed, 'sealed-magic-jwt-xyz', 'Phải giữ nguyên traffic_metadata_sealed');
+    assert.equal(isVideoQuest(mtgExtracted), true, 'Magic Star Trek bóc tách từ decisions phải là Video Quest');
+
+    // 9.20 Kiểm tra fetchQuests khám phá Magic Star Trek từ placement=3 (QUEST_HOME_BANNER_DESKTOP)
+    const bannerCustomFetch = async (url) => {
+      const u = String(url);
+      if (u.includes('/quests/@me')) {
+        return { status: 200, ok: true, json: async () => ({ quests: [] }) };
+      }
+      if (u.includes('placement=3')) {
+        return {
+          status: 200,
+          ok: true,
+          json: async () => ({
+            decisions: [
+              {
+                creative: {
+                  creative_type: 1,
+                  creative_content: {
+                    id: '1342624440894361624',
+                    messages: {
+                      quest_name: 'NHIỆM VỤ MAGIC: THE GATHERING | STAR TREK',
+                      sub_title: 'Xem video để nhận được 240 Orbs!',
+                      cta_title: 'Xem 2 phút',
+                    },
+                    task_config_v2: {
+                      tasks: {
+                        WATCH_VIDEO: { target: 120 },
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          }),
+        };
+      }
+      return { status: 200, ok: true, json: async () => ({}) };
+    };
+
+    setFetchImplementation(bannerCustomFetch);
+    const discoveredFromBanner = await fetchQuests('valid_token_xyz');
+    assert(discoveredFromBanner.some((q) => q.id === '1342624440894361624'), 'fetchQuests phải khám phá được Magic Star Trek từ placement=3 (Banner Desktop)');
+    setFetchImplementation(mainMockFetch);
   } finally {
     setFetchImplementation(null);
   }

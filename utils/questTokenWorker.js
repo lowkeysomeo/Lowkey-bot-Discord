@@ -32,7 +32,7 @@ const SUPER_PROPERTIES = Buffer.from(
   })
 ).toString('base64');
 
-function getHeaders(rawToken) {
+function getHeaders(rawToken, referer = 'https://discord.com/channels/@me') {
   const token = (rawToken || '').trim().replace(/^['"]|['"]$/g, '');
   return {
     Authorization: token,
@@ -41,7 +41,7 @@ function getHeaders(rawToken) {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9168 Chrome/128.0.6613.186 Electron/32.2.7 Safari/537.36',
     'X-Super-Properties': SUPER_PROPERTIES,
     Origin: 'https://discord.com',
-    Referer: 'https://discord.com/channels/@me',
+    Referer: referer,
     'X-Discord-Locale': 'vi',
     'X-Discord-Timezone': 'Asia/Ho_Chi_Minh',
     Accept: '*/*',
@@ -118,59 +118,148 @@ function isQuestActive(q) {
 }
 
 /**
- * Trích xuất toàn bộ quest objects từ bất kỳ payload API nào của Discord (mảng, object, decisions, nested)
+ * Trích xuất toàn bộ quest objects từ bất kỳ payload API nào của Discord:
+ * - Mảng quests bình thường / claimed quests
+ * - Đối tượng decisions (creative_type = 1: quest config, creative_type = 2: hero quest_ids)
+ * - Đối tượng { quest: ... } trong decision
+ * - Danh sách excluded_quests
+ * - Bản đồ map { quest_id: quest } trong earned-decision
+ * - Bản thân đối tượng là Quest Config (chứa messages / task_config_v2)
  */
 function collectQuestsFromPayload(data) {
   const quests = [];
   const seen = new Set();
 
-  function scan(obj, depth = 0) {
-    if (!obj || depth > 5) return;
+  function addQuest(candidate, fallbackId = null, sealed = null) {
+    if (!candidate || typeof candidate !== 'object') return false;
+    const rawId = candidate.id || candidate.quest_id || candidate.questId || fallbackId;
+    if (!rawId) return false;
+    const sId = String(rawId);
+    if (seen.has(sId)) return true;
+
+    let config = null;
+    if (candidate.config && typeof candidate.config === 'object') {
+      config = candidate.config;
+    } else if (
+      candidate.task_config_v2 ||
+      candidate.taskConfigV2 ||
+      candidate.messages ||
+      candidate.rewards_config ||
+      candidate.rewardsConfig ||
+      candidate.config_version ||
+      candidate.configVersion
+    ) {
+      config = candidate;
+    }
+
+    const trafficMetadataSealed =
+      candidate.traffic_metadata_sealed ||
+      candidate.trafficMetadataSealed ||
+      sealed ||
+      null;
+
+    const userStatus = candidate.user_status || candidate.userStatus || null;
+
+    seen.add(sId);
+    quests.push({
+      ...candidate,
+      id: sId,
+      config,
+      user_status: userStatus,
+      traffic_metadata_sealed: trafficMetadataSealed,
+    });
+    return true;
+  }
+
+  function scan(obj, depth = 0, parentSealed = null) {
+    if (!obj || depth > 12) return;
+
     if (Array.isArray(obj)) {
       for (const item of obj) {
-        if (item && typeof item === 'object') {
-          const id = item.id || item.quest_id || item.questId;
-          if (id && (item.config || item.user_status || item.userStatus)) {
-            if (!seen.has(id)) {
-              seen.add(id);
-              quests.push({ ...item, id });
+        if (!item || typeof item !== 'object') continue;
+        scan(item, depth + 1, parentSealed);
+      }
+      return;
+    }
+
+    if (typeof obj === 'object') {
+      const currentSealed =
+        obj.traffic_metadata_sealed ||
+        obj.trafficMetadataSealed ||
+        parentSealed;
+
+      // 1. Nếu obj là Quest Ad Decision (trong mảng decisions của get-decisions)
+      if (obj.creative && typeof obj.creative === 'object') {
+        const cc = obj.creative.creative_content || obj.creative.creativeContent;
+        if (cc && typeof cc === 'object') {
+          const ct = obj.creative.creative_type ?? obj.creative.creativeType;
+          // creative_type 1 (QUEST): cc chính là quest config
+          if (ct === 1 || (!ct && !cc.quest_ids && !cc.questIds)) {
+            if (cc.id) {
+              addQuest(cc, cc.id, currentSealed);
             }
-          } else if (item.quest && typeof item.quest === 'object' && (item.quest.id || item.quest.quest_id)) {
-            const qId = item.quest.id || item.quest.quest_id;
-            if (!seen.has(qId)) {
-              seen.add(qId);
-              quests.push({ ...item.quest, id: qId });
+          }
+          // creative_type 2 (QUEST_HOME_HERO): cc chứa mảng quest_ids
+          if (Array.isArray(cc.quest_ids)) {
+            for (const qId of cc.quest_ids) {
+              if (qId) addQuest({ id: qId }, qId, currentSealed);
             }
-          } else if (item.quest_id || item.questId) {
-            const qId = item.quest_id || item.questId;
-            if (!seen.has(qId)) {
-              seen.add(qId);
-              quests.push({ id: qId, ...item });
+          }
+          if (Array.isArray(cc.questIds)) {
+            for (const qId of cc.questIds) {
+              if (qId) addQuest({ id: qId }, qId, currentSealed);
             }
-          } else {
-            scan(item, depth + 1);
+          }
+        }
+        return;
+      }
+
+      // 2. Nếu obj có trường quest (như { quest: questObj } trong decision)
+      if (obj.quest && typeof obj.quest === 'object') {
+        const qId = obj.quest.id || obj.quest.quest_id || obj.quest.questId;
+        if (qId) {
+          addQuest(obj.quest, qId, currentSealed);
+        }
+      }
+
+      // 3. Nếu obj có danh sách excluded_quests
+      if (Array.isArray(obj.excluded_quests) || Array.isArray(obj.excludedQuests)) {
+        const list = obj.excluded_quests || obj.excludedQuests;
+        for (const item of list) {
+          const qId = item?.id || item?.quest_id || item?.questId;
+          if (qId) {
+            addQuest(item, qId, currentSealed);
           }
         }
       }
-    } else if (typeof obj === 'object') {
-      const id = obj.id || obj.quest_id || obj.questId;
-      if (id && (obj.config || obj.user_status || obj.userStatus)) {
-        if (!seen.has(id)) {
-          seen.add(id);
-          quests.push({ ...obj, id });
+
+      // 4. Nếu bản thân obj có id hoặc quest_id
+      const directId = obj.id || obj.quest_id || obj.questId;
+      if (directId) {
+        if (
+          obj.config ||
+          obj.user_status ||
+          obj.userStatus ||
+          obj.task_config_v2 ||
+          obj.taskConfigV2 ||
+          obj.messages ||
+          obj.rewards_config ||
+          obj.rewardsConfig
+        ) {
+          addQuest(obj, directId, currentSealed);
+          return;
         }
-        return;
-      }
-      if (obj.quest && typeof obj.quest === 'object' && (obj.quest.id || obj.quest.quest_id)) {
-        const qId = obj.quest.id || obj.quest.quest_id;
-        if (!seen.has(qId)) {
-          seen.add(qId);
-          quests.push({ ...obj.quest, id: qId });
+        const sId = String(directId);
+        if (/^\d{17,20}$/.test(sId) || sId.startsWith('quest-')) {
+          addQuest(obj, directId, currentSealed);
         }
-        return;
       }
+
+      // 5. Quét tiếp các thuộc tính con
       for (const val of Object.values(obj)) {
-        scan(val, depth + 1);
+        if (val && typeof val === 'object') {
+          scan(val, depth + 1, currentSealed);
+        }
       }
     }
   }
@@ -182,8 +271,8 @@ function collectQuestsFromPayload(data) {
 /**
  * Lấy danh sách nhiệm vụ hiện tại của tài khoản từ tất cả nguồn:
  * 1. Quests hiện tại / đã nhận (@me)
- * 2. Khám phá / Quest Home decisions (placement=11 - Tab Tất Cả Nhiệm Vụ)
- * 3. Quest Bar decisions (placement=1)
+ * 2. Khám phá / Quest Home decisions (placement=3: Banner Desktop, placement=11: Tab Tất Cả Nhiệm Vụ, placement=1: Account Panel, placement=5: Video Modal)
+ * 3. Danh sách excluded_quests & claimed quests
  */
 async function fetchQuests(token) {
   // 1. Endpoint chính: /quests/@me
@@ -202,20 +291,36 @@ async function fetchQuests(token) {
   const data = await res.json();
   const allQuests = collectQuestsFromPayload(data);
 
-  // 2. Quét thêm Quest Home (placement=11 - Tab Tất Cả Nhiệm Vụ) & Quest Bar (placement=1)
-  // Kèm UUID telemetry bắt buộc để Discord không trả mã lỗi 400 Bad Request
+  // 2. Quét các vị trí quảng bá và khám phá nhiệm vụ từ Quest Home & Quest Bar
+  // Chuẩn bị UUID telemetry bắt buộc
   const crypto = require('crypto');
   const hbSessionId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'c9a1b2c3-d4e5-4a5b-8c7d-e6f7a8b9c0d1';
   const adSessionId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'e6f7a8b9-c0d1-4a5b-8c7d-c9a1b2c3d4e5';
 
   const discoveryUrls = [
+    // Placement 3: QUEST_HOME_BANNER_DESKTOP (Nơi các chiến dịch lớn như Magic: Star Trek hiển thị trên Desktop Quest Home)
+    `https://discord.com/api/v9/quests/get-decisions?placement=3&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    // Placement 11: QUEST_HOME_DESKTOP (Tab Tất Cả Nhiệm Vụ)
     `https://discord.com/api/v9/quests/get-decisions?placement=11&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    // Placement 1: DESKTOP_ACCOUNT_PANEL_AREA (Quest Bar / User Settings)
     `https://discord.com/api/v9/quests/get-decisions?placement=1&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-    `https://discord.com/api/v9/quests/get-decisions?placement=12&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    // Placement 4: QUEST_HOME_MOBILE_CAROUSEL
+    `https://discord.com/api/v9/quests/get-decisions?placement=4&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    // Placement 5: VIDEO_MODAL_MOBILE (Khu vực phân phối Video Quests)
+    `https://discord.com/api/v9/quests/get-decisions?placement=5&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    // Placement 2: MOBILE_HOME_DOCK_AREA
+    `https://discord.com/api/v9/quests/get-decisions?placement=2&num_decisions_requested=15&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    // Route đơn lẻ: decision
+    `https://discord.com/api/v9/quests/decision?placement=3&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     `https://discord.com/api/v9/quests/decision?placement=11&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
     `https://discord.com/api/v9/quests/decision?placement=1&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    `https://discord.com/api/v9/quests/decision?placement=5&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+    // Quests đã nhận / đã hoàn tất
     'https://discord.com/api/v9/quests/@me/claimed',
+    // Fallback không truyền UUID
+    'https://discord.com/api/v9/quests/get-decisions?placement=3&num_decisions_requested=15',
     'https://discord.com/api/v9/quests/get-decisions?placement=11&num_decisions_requested=15',
+    'https://discord.com/api/v9/quests/decision?placement=3',
     'https://discord.com/api/v9/quests/decision?placement=11',
   ];
 
@@ -224,7 +329,7 @@ async function fetchQuests(token) {
       try {
         const extraRes = await requestDiscord(url, {
           method: 'GET',
-          headers: getHeaders(token),
+          headers: getHeaders(token, 'https://discord.com/quest-home'),
         }, 0);
         if (extraRes && extraRes.ok) {
           const extraData = await extraRes.json().catch(() => null);
@@ -241,19 +346,25 @@ async function fetchQuests(token) {
     })
   );
 
-  // 3. Nếu có quest nào chỉ có id mà chưa tải đủ config, bổ sung chi tiết
+  // 3. Nếu có quest nào chỉ có id mà chưa tải đủ config, bổ sung chi tiết từ endpoint /quests/{id}
   for (let i = 0; i < allQuests.length; i++) {
     const q = allQuests[i];
-    if (!q.config && q.id) {
+    if ((!q.config || !q.config.task_config_v2) && q.id) {
       try {
         const detailRes = await requestDiscord(`https://discord.com/api/v9/quests/${q.id}`, {
           method: 'GET',
-          headers: getHeaders(token),
+          headers: getHeaders(token, 'https://discord.com/quest-home'),
         }, 0);
         if (detailRes && detailRes.ok) {
           const detail = await detailRes.json();
-          if (detail && detail.config) {
-            allQuests[i] = { ...q, ...detail };
+          const cfg = detail.config || detail;
+          if (cfg && (cfg.messages || cfg.task_config_v2 || cfg.id || cfg.application)) {
+            allQuests[i] = {
+              ...q,
+              ...detail,
+              config: cfg,
+              id: q.id || cfg.id,
+            };
           }
         }
       } catch (e) {}
@@ -277,11 +388,13 @@ async function fetchQuests(token) {
 async function enrollQuest(token, questId, platform = 0, quest = null) {
   const isVideo = platform === -1 || platform === null || platform === false;
   const sealed = quest?.traffic_metadata_sealed || quest?.trafficMetadataSealed || null;
-  // Với Video Quests: Discord client gửi { location: 11, is_targeted: false } hoặc { location: 1 }
+  // Với Video Quests: Discord client gửi { location: 11 } (Quest Home), { location: 3 } (Banner), hoặc { location: 1 } (Quest Bar)
   const enrollBodies = isVideo
     ? [
         { location: 11, is_targeted: false, traffic_metadata_sealed: sealed },
         { location: 11, is_targeted: false },
+        { location: 3, is_targeted: false, traffic_metadata_sealed: sealed },
+        { location: 3, is_targeted: false },
         { location: 1, traffic_metadata_sealed: sealed },
         { location: 1 },
         {},
@@ -471,9 +584,12 @@ async function claimQuestReward(token, questId, platform = 0, quest = null) {
   const bodies = [
     { platform, location: 11, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed },
     { platform, location: 11, is_targeted: false },
+    { platform, location: 3, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed },
+    { platform, location: 3, is_targeted: false },
     { platform },
     { location: 11, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed },
     { location: 11, is_targeted: false },
+    { location: 3, is_targeted: false },
     {},
   ];
 
@@ -1854,6 +1970,7 @@ module.exports = {
   getQuestTargetSeconds,
   getQuestApplicationInfo,
   fetchUserInfo,
+  collectQuestsFromPayload,
   fetchQuests,
   enrollQuest,
   sendHeartbeat,
