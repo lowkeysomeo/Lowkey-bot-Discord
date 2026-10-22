@@ -1,10 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 ==============================================================================
-LOWKEY BADGE SPOOFER - DESKTOP GUI APPLICATION
+LOWKEY BADGE SPOOFER - DESKTOP GUI APPLICATION (2026 EDITION)
 ==============================================================================
-Ứng dụng giao diện Desktop độc lập dành cho Windows.
-Mỗi lần dùng chỉ cần mở app, nhập/dán Token của bất kỳ tài khoản nào và bấm Start!
+Ứng dụng giao diện Desktop Windows độc lập, hỗ trợ tăng tiến trình 2 Huy hiệu:
+- "Trò chơi đa dạng" (100 Games)
+- "Thời gian chơi" (Tùy chọn 30h - 5.000h)
+
+Tích hợp chuẩn Telemetry Engine của Discord:
+- Tự động tạo Windows PE Authenticode Fingerprint
+- Đồng bộ chuỗi x-super-properties và phiên heartbeat
+- Gửi đầy đủ vòng đời 3 bước: initial heartbeat -> launch -> final heartbeat
 ==============================================================================
 """
 
@@ -21,11 +27,24 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter.scrolledtext import ScrolledText
 
-# Đường dẫn lưu cấu hình state
+# Thêm đường dẫn thư mục scripts để import engine
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STATE_FILE = os.path.join(BASE_DIR, "science_state.json")
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
-# Danh sách game chuẩn Discord nhận diện 100%
+from fast_badge_spoofer import (
+    ScienceEngine,
+    generate_fingerprint,
+    build_super_props,
+    fetch_analytics_token,
+    user_id_from_token,
+    load_verified_games,
+    load_state,
+    save_state,
+    STATE_FILE,
+    FALLBACK_GAMES
+)
+
 TOP_GAMES = [
     {"id": "1158877933042143272", "name": "Counter-Strike 2", "exe": "cs2.exe"},
     {"id": "423646631248461825", "name": "Grand Theft Auto V", "exe": "GTA5.exe"},
@@ -39,97 +58,37 @@ TOP_GAMES = [
     {"id": "762434991303950386", "name": "Genshin Impact", "exe": "GenshinImpact.exe"}
 ]
 
-DETECTABLE_FILE = os.path.join(BASE_DIR, "detectable_games.json")
-
-def load_verified_games(target_count=105):
-    # 1. Đọc từ file danh mục 120 game chuẩn của Discord
-    if os.path.exists(DETECTABLE_FILE):
-        try:
-            with open(DETECTABLE_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if len(data) >= target_count:
-                    return data[:target_count]
-                elif len(data) > 0:
-                    return data
-        except Exception:
-            pass
-
-    # 2. Thử fetch trực tiếp từ API Discord nếu file bị thiếu
-    try:
-        req = urllib.request.Request(
-            "https://discord.com/api/v9/applications/detectable",
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        )
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            raw = json.loads(resp.read().decode("utf-8"))
-            clean = []
-            seen = set()
-            ignore = ['crash', 'unins', 'report', 'setup', 'redist', 'helper', 'x360ce', 'patch', 'vcredist', 'dxsetup']
-            for g in raw:
-                gid = str(g.get("id", ""))
-                name = g.get("name", "").strip()
-                if not gid or not name or gid in seen:
-                    continue
-                for e in g.get("executables", []):
-                    ename = e.get("name", "")
-                    if ename and (e.get("os") == "win32" or not e.get("os")):
-                        base = os.path.basename(ename.replace("\\", "/"))
-                        if base.lower().endswith(".exe") and not any(w in base.lower() for w in ignore):
-                            clean.append({"id": gid, "name": name, "exe": base})
-                            seen.add(gid)
-                            break
-                if len(clean) >= target_count:
-                    return clean
-            if clean:
-                return clean
-    except Exception:
-        pass
-
-    return TOP_GAMES
-
 class SpooferDesktopApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("⚡ Lowkey Fast Badge Spoofer - 5.000h & 100 Games")
-        self.geometry("620x760")
-        self.minsize(580, 720)
+        self.title("⚡ Lowkey Fast Badge Spoofer - 100 Games & Playtime (Pro 2026)")
+        self.geometry("640x780")
+        self.minsize(600, 740)
         self.configure(bg="#1e1f22")
 
         self.running_thread = None
-        self.is_cancelling = False
         self.cached_analytics_token = None
-        self.current_token_for_analytics = None
+        self.cached_fingerprint = None
+        self.current_user_id = None
 
         self.load_state_data()
         self.create_styles()
         self.build_ui()
 
-        # Tự động xác thực nếu đã có token lưu sẵn
         if self.saved_token:
             self.after(500, self.verify_account)
 
     def load_state_data(self):
-        self.state = {}
-        if os.path.exists(STATE_FILE):
-            try:
-                with open(STATE_FILE, "r", encoding="utf-8") as f:
-                    self.state = json.load(f)
-            except Exception:
-                pass
+        self.state = load_state()
         self.saved_token = self.state.get("user_token", "")
+        self.cached_fingerprint = self.state.get("fingerprint", "")
 
     def save_state_data(self):
-        try:
-            with open(STATE_FILE, "w", encoding="utf-8") as f:
-                json.dump(self.state, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
+        save_state(self.state)
 
     def create_styles(self):
         self.style = ttk.Style(self)
         self.style.theme_use("clam")
-
-        # Custom ttk progressbar
         self.style.configure(
             "Custom.Horizontal.TProgressbar",
             troughcolor="#2b2d31",
@@ -158,13 +117,13 @@ class SpooferDesktopApp(tk.Tk):
         title_box.pack(side=tk.LEFT, fill=tk.Y)
 
         title_lbl = tk.Label(
-            title_box, text="LOWKEY FAST BADGE SPOOFER",
+            title_box, text="LOWKEY DISCORD BADGE SPOOFER",
             font=("Segoe UI", 13, "bold"), fg="#f2f3f5", bg="#2b2d31"
         )
         title_lbl.pack(anchor="w")
 
         subtitle_lbl = tk.Label(
-            title_box, text="Tua nhanh 5.000 Giờ & 100 Game qua Discord Science Telemetry API",
+            title_box, text="Tua nhanh 100 Game & Giờ chơi qua Discord Science Telemetry Engine (2026)",
             font=("Segoe UI", 9), fg="#949ba4", bg="#2b2d31"
         )
         subtitle_lbl.pack(anchor="w")
@@ -241,7 +200,6 @@ class SpooferDesktopApp(tk.Tk):
         cfg_grid = tk.Frame(config_inner, bg="#2b2d31")
         cfg_grid.pack(fill=tk.X)
 
-        # Cột chọn game
         col_game = tk.Frame(cfg_grid, bg="#2b2d31")
         col_game.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
 
@@ -259,7 +217,6 @@ class SpooferDesktopApp(tk.Tk):
         )
         self.combo_game.pack(fill=tk.X, ipady=3)
 
-        # Cột số giờ
         col_hours = tk.Frame(cfg_grid, bg="#2b2d31")
         col_hours.pack(side=tk.RIGHT, fill=tk.Y)
 
@@ -269,7 +226,7 @@ class SpooferDesktopApp(tk.Tk):
         )
         lbl_hours.pack(anchor="w", pady=(0, 4))
 
-        self.hours_var = tk.StringVar(value="5000")
+        self.hours_var = tk.StringVar(value="30")
         self.entry_hours = tk.Entry(
             col_hours, textvariable=self.hours_var, width=10,
             font=("Consolas", 10, "bold"), bg="#1e1f22", fg="#57F287",
@@ -283,7 +240,7 @@ class SpooferDesktopApp(tk.Tk):
 
         self.btn_combo = tk.Button(
             btn_frame,
-            text="🚀  [COMBO] BẮT ĐẦU CÀY CẢ 5.000 GIỜ + 100 GAME (KHUYÊN DÙNG)",
+            text="🚀  [COMBO TOÀN DIỆN] BẮT ĐẦU CÀY CẢ 100 GAME + SỐ GIỜ (KHUYÊN DÙNG)",
             font=("Segoe UI", 10, "bold"), bg="#5865F2", fg="white",
             activebackground="#4752C4", activeforeground="white",
             bd=0, relief="flat", cursor="hand2", pady=10,
@@ -295,7 +252,7 @@ class SpooferDesktopApp(tk.Tk):
         btn_row2.pack(fill=tk.X)
 
         self.btn_time = tk.Button(
-            btn_row2, text="⚡ Chỉ Cày Giờ (5.000h)",
+            btn_row2, text="⚡ Chỉ Cày Giờ Chơi",
             font=("Segoe UI", 9, "bold"), bg="#2b2d31", fg="#f2f3f5",
             activebackground="#383a40", activeforeground="white",
             bd=1, relief="solid", cursor="hand2", pady=8,
@@ -304,7 +261,7 @@ class SpooferDesktopApp(tk.Tk):
         self.btn_time.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
         self.btn_variety = tk.Button(
-            btn_row2, text="🎮 Chỉ Cày 100 Game",
+            btn_row2, text="🎮 Chỉ Cày 100 Game Đa Dạng",
             font=("Segoe UI", 9, "bold"), bg="#2b2d31", fg="#f2f3f5",
             activebackground="#383a40", activeforeground="white",
             bd=1, relief="solid", cursor="hand2", pady=8,
@@ -312,186 +269,88 @@ class SpooferDesktopApp(tk.Tk):
         )
         self.btn_variety.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
 
-        # ── 5. PROGRESS & LIVE LOG BOX ───────────────────────────────────────
+        # ── 5. PROGRESS & REALTIME LOGS ──────────────────────────────────────
         card_log = tk.Frame(main_box, bg="#2b2d31", bd=1, relief="solid")
         card_log.configure(highlightbackground="#383a40", highlightthickness=1)
         card_log.pack(fill=tk.BOTH, expand=True)
 
-        log_inner = tk.Frame(card_log, bg="#2b2d31", padx=14, pady=10)
+        log_inner = tk.Frame(card_log, bg="#2b2d31", padx=14, pady=12)
         log_inner.pack(fill=tk.BOTH, expand=True)
 
-        # Trạng thái & % tiến độ
-        status_row = tk.Frame(log_inner, bg="#2b2d31")
-        status_row.pack(fill=tk.X, pady=(0, 6))
+        status_box = tk.Frame(log_inner, bg="#2b2d31")
+        status_box.pack(fill=tk.X, pady=(0, 6))
+
+        tk.Label(
+            status_box, text="Trạng thái:",
+            font=("Segoe UI", 8, "bold"), fg="#949ba4", bg="#2b2d31"
+        ).pack(side=tk.LEFT)
 
         self.lbl_status = tk.Label(
-            status_row, text="Trạng thái: Sẵn sàng",
-            font=("Segoe UI", 9, "bold"), fg="#57F287", bg="#2b2d31"
+            status_box, text="Sẵn sàng...",
+            font=("Segoe UI", 8, "bold"), fg="#57F287", bg="#2b2d31"
         )
-        self.lbl_status.pack(side=tk.LEFT)
+        self.lbl_status.pack(side=tk.LEFT, padx=(6, 0))
 
         self.lbl_pct = tk.Label(
-            status_row, text="0%",
-            font=("Consolas", 10, "bold"), fg="#5865F2", bg="#2b2d31"
+            status_box, text="0%",
+            font=("Segoe UI", 8, "bold"), fg="#949ba4", bg="#2b2d31"
         )
         self.lbl_pct.pack(side=tk.RIGHT)
 
         self.progress_bar = ttk.Progressbar(
-            log_inner, style="Custom.Horizontal.TProgressbar",
-            mode="determinate"
+            log_inner, orient="horizontal", mode="determinate",
+            style="Custom.Horizontal.TProgressbar"
         )
-        self.progress_bar.pack(fill=tk.X, pady=(0, 10))
+        self.progress_bar.pack(fill=tk.X, pady=(0, 8))
 
-        # Khung nhật ký log
-        self.log_text = ScrolledText(
-            log_inner, wrap=tk.WORD, font=("Consolas", 9),
-            bg="#1e1f22", fg="#dbdee1", bd=0, insertbackground="white"
+        lbl_console = tk.Label(
+            log_inner, text="NHẬT KÝ HOẠT ĐỘNG (SCIENCE TELEMETRY):",
+            font=("Segoe UI", 8, "bold"), fg="#b5bac1", bg="#2b2d31"
         )
-        self.log_text.pack(fill=tk.BOTH, expand=True)
-        self.log_text.tag_config("green", foreground="#57F287")
-        self.log_text.tag_config("yellow", foreground="#FEE75C")
-        self.log_text.tag_config("red", foreground="#ED4245")
-        self.log_text.tag_config("blurple", foreground="#5865F2")
+        lbl_console.pack(anchor="w", pady=(0, 4))
 
-        # ── FOOTER NOTE ──────────────────────────────────────────────────────
-        footer_lbl = tk.Label(
-            self,
-            text="📌 Sau khi gửi thành công (HTTP 204), Discord sẽ cập nhật huy hiệu lên hồ sơ trong vòng 24h - 48h.",
-            font=("Segoe UI", 8), fg="#949ba4", bg="#1e1f22", pady=8
+        self.txt_log = ScrolledText(
+            log_inner, font=("Consolas", 9), bg="#1e1f22", fg="#dbdee1",
+            insertbackground="white", bd=0, relief="flat", height=10
         )
-        footer_lbl.pack(side=tk.BOTTOM, fill=tk.X)
+        self.txt_log.pack(fill=tk.BOTH, expand=True)
+        self.txt_log.tag_config("green", foreground="#57F287")
+        self.txt_log.tag_config("yellow", foreground="#FEE75C")
+        self.txt_log.tag_config("red", foreground="#ED4245")
+        self.txt_log.tag_config("blurple", foreground="#5865F2")
+        self.txt_log.tag_config("grey", foreground="#949ba4")
 
-        self.log("Sẵn sàng cày huy hiệu. Nhập token và nhấn nút Bắt đầu!", "yellow")
+        # ── 6. FOOTER ────────────────────────────────────────────────────────
+        footer_frame = tk.Frame(self, bg="#1e1f22", height=32)
+        footer_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=20, pady=(0, 10))
 
-    # ── LOGGING HELPER ───────────────────────────────────────────────────────
-    def log(self, message, tag=None):
-        self.log_text.configure(state=tk.NORMAL)
-        t_str = time.strftime("[%H:%M:%S] ")
-        self.log_text.insert(tk.END, t_str)
-        if tag:
-            self.log_text.insert(tk.END, message + "\n", tag)
+        note_lbl = tk.Label(
+            footer_frame,
+            text="ℹ️ Sau khi gửi telemetry thành công (HTTP 204), Discord sẽ tổng hợp và cập nhật huy hiệu trong 24h - 48h.",
+            font=("Segoe UI", 8), fg="#949ba4", bg="#1e1f22"
+        )
+        note_lbl.pack(anchor="w")
+
+    def toggle_token_visibility(self):
+        if self.entry_token.cget("show") == "•":
+            self.entry_token.config(show="")
+            self.btn_show_token.config(text="🔒")
         else:
-            self.log_text.insert(tk.END, message + "\n")
-        self.log_text.see(tk.END)
-        self.log_text.configure(state=tk.DISABLED)
+            self.entry_token.config(show="•")
+            self.btn_show_token.config(text="👁")
+
+    def log(self, text, tag="grey"):
+        t_str = time.strftime("[%H:%M:%S] ")
+        self.txt_log.insert(tk.END, t_str, "grey")
+        self.txt_log.insert(tk.END, text + "\n", tag)
+        self.txt_log.see(tk.END)
 
     def set_status(self, text, color="#57F287"):
-        self.lbl_status.config(text=f"Trạng thái: {text}", fg=color)
+        self.lbl_status.config(text=text, fg=color)
 
     def set_progress(self, pct):
         self.progress_bar["value"] = pct
         self.lbl_pct.config(text=f"{int(pct)}%")
-
-    def toggle_token_visibility(self):
-        if self.entry_token.cget("show") == "":
-            self.entry_token.configure(show="•")
-            self.btn_show_token.config(text="👁")
-        else:
-            self.entry_token.configure(show="")
-            self.btn_show_token.config(text="🔒")
-
-    # ── VERIFY USER TOKEN ────────────────────────────────────────────────────
-    def verify_account(self):
-        token = self.token_var.get().strip().strip('"').strip("'")
-        if not token:
-            self.lbl_account_name.config(text="Vui lòng nhập Token trước!", fg="#ED4245")
-            self.lbl_account_badge.config(text="Thiếu Token", bg="#383a40", fg="#ED4245")
-            return
-
-        def _do_verify():
-            self.lbl_account_name.config(text="Đang kiểm tra...", fg="#FEE75C")
-            url = "https://discord.com/api/v9/users/@me?with_analytics_token=true"
-            headers = {
-                "Authorization": token,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-                "Content-Type": "application/json"
-            }
-            req = urllib.request.Request(url, headers=headers, method="GET")
-            try:
-                with urllib.request.urlopen(req, timeout=8) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    username = data.get("username", "Unknown")
-                    discrim = data.get("discriminator", "0")
-                    user_tag = f"{username}#{discrim}" if discrim != "0" else username
-                    global_name = data.get("global_name")
-                    if global_name:
-                        user_tag += f" ({global_name})"
-
-                    self.cached_analytics_token = data.get("analytics_token")
-                    self.current_token_for_analytics = token
-
-                    self.lbl_account_name.config(text=f"👤 {user_tag}", fg="#f2f3f5")
-                    self.lbl_account_badge.config(text="Token OK ✓", bg="#1f3d2b", fg="#57F287")
-                    self.log(f"Đã xác thực thành công tài khoản: {user_tag}", "green")
-
-                    # Lưu token vào file state
-                    self.state["user_token"] = token
-                    self.save_state_data()
-            except urllib.error.HTTPError as e:
-                if e.code == 401:
-                    self.lbl_account_name.config(text="Token không hợp lệ (401 Unauthorized)", fg="#ED4245")
-                    self.lbl_account_badge.config(text="Sai Token", bg="#3d1f24", fg="#ED4245")
-                    self.log("Lỗi: Token không hợp lệ. Vui lòng kiểm tra lại!", "red")
-                else:
-                    self.lbl_account_name.config(text=f"Lỗi kết nối (HTTP {e.code})", fg="#ED4245")
-                    self.log(f"Lỗi kiểm tra token (HTTP {e.code})", "red")
-            except Exception as e:
-                self.lbl_account_name.config(text="Không thể kết nối đến Discord", fg="#ED4245")
-                self.log(f"Lỗi: {e}", "red")
-
-        threading.Thread(target=_do_verify, daemon=True).start()
-
-    # ── TELEMETRY METHODS ────────────────────────────────────────────────────
-    def post_science_events(self, token, events, retry_count=0):
-        url = "https://discord.com/api/v9/science"
-        if self.current_token_for_analytics != token or not self.cached_analytics_token:
-            self.cached_analytics_token = None
-            self.current_token_for_analytics = token
-            try:
-                user_req = urllib.request.Request(
-                    "https://discord.com/api/v9/users/@me?with_analytics_token=true",
-                    headers={
-                        "Authorization": token,
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-                        "Content-Type": "application/json"
-                    },
-                    method="GET"
-                )
-                with urllib.request.urlopen(user_req, timeout=6) as u_resp:
-                    u_data = json.loads(u_resp.read().decode("utf-8"))
-                    self.cached_analytics_token = u_data.get("analytics_token")
-            except Exception:
-                pass
-
-        payload = {"events": events}
-        if self.cached_analytics_token:
-            payload["token"] = self.cached_analytics_token
-
-        body = json.dumps(payload).encode("utf-8")
-        headers = {
-            "Authorization": token,
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-            "Content-Type": "application/json"
-        }
-
-        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                return resp.status in (200, 204)
-        except urllib.error.HTTPError as e:
-            if e.code == 429 and retry_count < 3:
-                retry_after = 2.5
-                try:
-                    retry_header = e.headers.get("Retry-After")
-                    if retry_header:
-                        retry_after = float(retry_header) + 0.5
-                except Exception:
-                    pass
-                time.sleep(retry_after)
-                return self.post_science_events(token, events, retry_count=retry_count + 1)
-            return False
-        except Exception:
-            return False
 
     def toggle_buttons(self, state):
         val = tk.NORMAL if state else tk.DISABLED
@@ -499,6 +358,78 @@ class SpooferDesktopApp(tk.Tk):
         self.btn_time.config(state=val)
         self.btn_variety.config(state=val)
         self.btn_verify.config(state=val)
+
+    def verify_account(self):
+        token = self.token_var.get().strip().strip('"').strip("'")
+        if not token:
+            self.lbl_account_name.config(text="Vui lòng nhập Token", fg="#ED4245")
+            self.lbl_account_badge.config(text="Trống", bg="#3d1f24", fg="#ED4245")
+            return
+
+        def _do_verify():
+            self.lbl_account_name.config(text="Đang kiểm tra...", fg="#FEE75C")
+            uid = user_id_from_token(token)
+            self.current_user_id = uid
+
+            # 1. Tạo hoặc tải Fingerprint
+            if not self.cached_fingerprint:
+                try:
+                    self.log("Đang tạo chữ ký số Windows PE Authenticode...", "yellow")
+                    self.cached_fingerprint = generate_fingerprint(uid)
+                    self.state["fingerprint"] = self.cached_fingerprint
+                    self.save_state_data()
+                    self.log(f"Đã tạo Fingerprint ({len(self.cached_fingerprint)} ký tự) ✓", "green")
+                except Exception as e:
+                    self.log(f"Cảnh báo Fingerprint: {e}", "yellow")
+
+            # 2. Lấy Analytics Token
+            sig = str(uuid.uuid4())
+            hb = str(uuid.uuid4())
+            props = build_super_props(sig, hb)
+            cookie = self.state.get("cookie", "")
+
+            try:
+                a_token, username, fetched_uid = fetch_analytics_token(token, props, cookie)
+                self.cached_analytics_token = a_token
+                user_tag = f"👤 {username} (ID: {fetched_uid})"
+
+                self.lbl_account_name.config(text=user_tag, fg="#f2f3f5")
+                self.lbl_account_badge.config(text="Token OK ✓", bg="#1f3d2b", fg="#57F287")
+                self.log(f"Đã xác thực thành công tài khoản: {username}", "green")
+
+                self.state["user_token"] = token
+                self.save_state_data()
+            except Exception as e:
+                self.lbl_account_name.config(text=f"Lỗi: {e}", fg="#ED4245")
+                self.lbl_account_badge.config(text="Lỗi", bg="#3d1f24", fg="#ED4245")
+                self.log(f"Lỗi kiểm tra token: {e}", "red")
+
+        threading.Thread(target=_do_verify, daemon=True).start()
+
+    def get_or_prepare_engine(self, token):
+        uid = user_id_from_token(token)
+        if not self.cached_fingerprint:
+            try:
+                self.cached_fingerprint = generate_fingerprint(uid)
+                self.state["fingerprint"] = self.cached_fingerprint
+                self.save_state_data()
+            except Exception as e:
+                self.log(f"Cảnh báo Fingerprint: {e}", "yellow")
+
+        if not self.cached_analytics_token:
+            sig = str(uuid.uuid4())
+            hb = str(uuid.uuid4())
+            props = build_super_props(sig, hb)
+            cookie = self.state.get("cookie", "")
+            a_token, _, _ = fetch_analytics_token(token, props, cookie)
+            self.cached_analytics_token = a_token
+
+        return ScienceEngine(
+            token,
+            self.cached_analytics_token,
+            self.cached_fingerprint or "",
+            self.state.get("cookie", "")
+        )
 
     # ── TASK 1: PLAYTIME ONLY ────────────────────────────────────────────────
     def start_playtime_only(self):
@@ -512,7 +443,7 @@ class SpooferDesktopApp(tk.Tk):
             if hours <= 0:
                 raise ValueError
         except ValueError:
-            messagebox.showwarning("Số Giờ Sai", "Vui lòng nhập một số giờ hợp lệ lớn hơn 0!")
+            messagebox.showwarning("Số Giờ Sai", "Vui lòng nhập số giờ hợp lệ lớn hơn 0!")
             return
 
         sel_name = self.game_var.get()
@@ -520,54 +451,38 @@ class SpooferDesktopApp(tk.Tk):
 
         self.toggle_buttons(False)
         self.set_progress(10)
-        self.set_status("Đang gửi telemetry giờ chơi...", "#FEE75C")
+        self.set_status("Đang chuẩn bị gửi telemetry...", "#FEE75C")
 
         def _worker():
-            self.log(f"Bắt đầu tua {hours:,} giờ cho game: '{target_game['name']}'...", "yellow")
-            total_seconds = hours * 3600
-            session_id = str(uuid.uuid4())
-            now_ms = int(time.time() * 1000)
+            try:
+                self.log(f"Khởi tạo Engine và Fingerprint cho: '{target_game['name']}'...", "yellow")
+                engine = self.get_or_prepare_engine(token)
+                dur_ms = hours * 3600 * 1000
+                events = engine.build_game_session(target_game, dur_ms)
 
-            events = [
-                {
-                    "type": "launch_game",
-                    "properties": {
-                        "client_track_timestamp": now_ms - (total_seconds * 1000),
-                        "client_heartbeat_session_id": session_id,
-                        "game_id": target_game["id"],
-                        "game_name": target_game["name"],
-                        "game_executable": target_game["exe"],
-                        "verified": True
-                    }
-                },
-                {
-                    "type": "running_game_heartbeat",
-                    "properties": {
-                        "client_track_timestamp": now_ms,
-                        "client_heartbeat_session_id": session_id,
-                        "event_sequence_number": 1,
-                        "game_id": target_game["id"],
-                        "game_name": target_game["name"],
-                        "game_executable": target_game["exe"],
-                        "duration": 60,
-                        "total_duration": total_seconds
-                    }
-                }
-            ]
+                self.set_progress(40)
+                self.log(f"Đang gửi {hours:,} giờ chơi lên /api/v9/science...", "blurple")
+                status = engine.post_batch(events)
+                self.set_progress(100)
 
-            ok = self.post_science_events(token, events)
-            self.set_progress(100)
-
-            if ok:
-                self.set_status("Thành công (HTTP 204) ✓", "#57F287")
-                self.log(f"✨ THÀNH CÔNG! Discord đã nhận {hours:,}h cho '{target_game['name']}'!", "green")
-                messagebox.showinfo("Hoàn Tất", f"Đã gửi thành công {hours:,} giờ cho game '{target_game['name']}'!\nDiscord sẽ cập nhật huy hiệu trong 24h - 48h.")
-            else:
-                self.set_status("Thất bại", "#ED4245")
-                self.log("❌ Gửi thất bại. Hãy kiểm tra lại Token hoặc mạng internet.", "red")
-                messagebox.showerror("Lỗi", "Gửi gói tin thất bại. Vui lòng kiểm tra lại Token!")
-
-            self.toggle_buttons(True)
+                if status == 204:
+                    self.set_status("Thành công (HTTP 204) ✓", "#57F287")
+                    self.log(f"✨ THÀNH CÔNG! Discord đã ghi nhận {hours:,}h cho '{target_game['name']}'!", "green")
+                    messagebox.showinfo(
+                        "Hoàn Tất",
+                        f"Đã gửi thành công {hours:,} giờ cho game '{target_game['name']}'!\n"
+                        f"Discord sẽ cập nhật huy hiệu trong vòng 24h - 48h."
+                    )
+                else:
+                    self.set_status(f"Lỗi HTTP {status}", "#ED4245")
+                    self.log(f"❌ Gửi thất bại với mã lỗi HTTP {status}", "red")
+                    messagebox.showerror("Lỗi", f"Máy chủ trả về mã HTTP {status}. Vui lòng kiểm tra lại Token!")
+            except Exception as e:
+                self.set_status("Lỗi hệ thống", "#ED4245")
+                self.log(f"Lỗi: {e}", "red")
+                messagebox.showerror("Lỗi", str(e))
+            finally:
+                self.toggle_buttons(True)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -583,63 +498,44 @@ class SpooferDesktopApp(tk.Tk):
         self.set_status("Đang gửi telemetry 100 game...", "#FEE75C")
 
         def _worker():
-            games = load_verified_games(105)
-            success = 0
-            self.log(f"Bắt đầu tua {len(games)} trò chơi PC chuẩn từ cơ sở dữ liệu Discord...", "yellow")
+            try:
+                self.log("Khởi tạo Engine và tải danh mục 105 tựa game chuẩn Discord...", "yellow")
+                engine = self.get_or_prepare_engine(token)
+                games = load_verified_games(105)
+                sent_count = 0
+                batch_size = 15
 
-            for i, game in enumerate(games, 1):
-                session_id = str(uuid.uuid4())
-                now_ms = int(time.time() * 1000)
-                app_id = game["id"]
-                name = game["name"]
-                exe = game["exe"]
+                for i in range(0, len(games), batch_size):
+                    chunk = games[i:i + batch_size]
+                    batch_events = []
+                    for g in chunk:
+                        batch_events.extend(engine.build_game_session(g, 900000))
 
-                events = [
-                    {
-                        "type": "launch_game",
-                        "properties": {
-                            "client_track_timestamp": now_ms - 180000,
-                            "client_heartbeat_session_id": session_id,
-                            "game_id": app_id,
-                            "game_name": name,
-                            "game_executable": exe,
-                            "verified": True
-                        }
-                    },
-                    {
-                        "type": "running_game_heartbeat",
-                        "properties": {
-                            "client_track_timestamp": now_ms,
-                            "client_heartbeat_session_id": session_id,
-                            "event_sequence_number": 1,
-                            "game_id": app_id,
-                            "game_name": name,
-                            "game_executable": exe,
-                            "duration": 60,
-                            "total_duration": 180
-                        }
-                    }
-                ]
+                    st = engine.post_batch(batch_events)
+                    if st == 204:
+                        sent_count += len(chunk)
+                        pct = (sent_count / len(games)) * 100
+                        self.set_progress(pct)
+                        self.set_status(f"Đang tua game ({sent_count}/{len(games)})...", "#5865F2")
+                        self.log(f"Đã gửi batch {i // batch_size + 1}: {sent_count}/{len(games)} game (HTTP 204) ✓", "green")
+                    else:
+                        self.log(f"⚠ Lỗi batch {i // batch_size + 1}: HTTP {st}", "yellow")
 
-                ok = self.post_science_events(token, events)
-                if ok:
-                    success += 1
-                else:
-                    self.log(f"⚠ Lỗi gửi: '{name}' (ID: {app_id})", "yellow")
+                    time.sleep(0.35)
 
-                pct = (i / len(games)) * 100
-                self.set_progress(pct)
-                self.set_status(f"Đang tua game ({i}/{len(games)})...", "#5865F2")
-
-                if i % 10 == 0 or i == len(games):
-                    self.log(f"[{i}/{len(games)}] Đã hoàn tất: '{name}' (ID: {app_id})", "blurple")
-
-                time.sleep(0.18)
-
-            self.set_status(f"Hoàn thành {success}/{len(games)} Game ✓", "#57F287")
-            self.log(f"✨ HOÀN TẤT! Đã gửi thành công {success}/{len(games)} trò chơi chính thức!", "green")
-            self.toggle_buttons(True)
-            messagebox.showinfo("Hoàn Tất", f"Đã gửi thành công {success} tựa game chuẩn Discord!\nHuy hiệu sẽ cập nhật trong 24h - 48h.")
+                self.set_status(f"Hoàn thành {sent_count}/{len(games)} Game ✓", "#57F287")
+                self.log(f"✨ HOÀN TẤT! Đã gửi thành công {sent_count} trò chơi chính thức!", "green")
+                messagebox.showinfo(
+                    "Hoàn Tất",
+                    f"Đã gửi thành công {sent_count} tựa game chính thức lên Discord!\n"
+                    f"Tiến trình huy hiệu sẽ cập nhật trong 24h - 48h."
+                )
+            except Exception as e:
+                self.set_status("Lỗi hệ thống", "#ED4245")
+                self.log(f"Lỗi: {e}", "red")
+                messagebox.showerror("Lỗi", str(e))
+            finally:
+                self.toggle_buttons(True)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -655,7 +551,7 @@ class SpooferDesktopApp(tk.Tk):
             if hours <= 0:
                 raise ValueError
         except ValueError:
-            messagebox.showwarning("Số Giờ Sai", "Vui lòng nhập số giờ hợp lệ!")
+            messagebox.showwarning("Số Giờ Sai", "Vui lòng nhập số giờ hợp lệ lớn hơn 0!")
             return
 
         sel_name = self.game_var.get()
@@ -666,106 +562,59 @@ class SpooferDesktopApp(tk.Tk):
         self.set_status("Đang chạy Combo toàn diện...", "#FEE75C")
 
         def _worker():
-            self.log("🚀 BẮT ĐẦU COMBO: BƯỚC 1/2 TUA 5.000 GIỜ...", "yellow")
-            total_seconds = hours * 3600
-            session_id = str(uuid.uuid4())
-            now_ms = int(time.time() * 1000)
+            try:
+                self.log("🚀 BẮT ĐẦU COMBO: BƯỚC 1/2 TUA GIỜ CHƠI...", "yellow")
+                engine = self.get_or_prepare_engine(token)
+                dur_ms = hours * 3600 * 1000
+                events = engine.build_game_session(target_game, dur_ms)
 
-            events = [
-                {
-                    "type": "launch_game",
-                    "properties": {
-                        "client_track_timestamp": now_ms - (total_seconds * 1000),
-                        "client_heartbeat_session_id": session_id,
-                        "game_id": target_game["id"],
-                        "game_name": target_game["name"],
-                        "game_executable": target_game["exe"],
-                        "verified": True
-                    }
-                },
-                {
-                    "type": "running_game_heartbeat",
-                    "properties": {
-                        "client_track_timestamp": now_ms,
-                        "client_heartbeat_session_id": session_id,
-                        "event_sequence_number": 1,
-                        "game_id": target_game["id"],
-                        "game_name": target_game["name"],
-                        "game_executable": target_game["exe"],
-                        "duration": 60,
-                        "total_duration": total_seconds
-                    }
-                }
-            ]
-
-            p_ok = self.post_science_events(token, events)
-            if p_ok:
-                self.log(f"✓ Bước 1 thành công: Đã nhận {hours:,}h cho '{target_game['name']}'!", "green")
-            else:
-                self.log("⚠ Bước 1 gặp sự cố khi gửi giờ chơi, vẫn tiếp tục Bước 2...", "yellow")
-
-            time.sleep(1)
-            self.log("🚀 BƯỚC 2/2: BẮT ĐẦU TUA 100 TỰA GAME...", "yellow")
-
-            games = load_verified_games(105)
-            success = 0
-            for i, game in enumerate(games, 1):
-                session_id = str(uuid.uuid4())
-                now_ms = int(time.time() * 1000)
-                app_id = game["id"]
-                name = game["name"]
-                exe = game["exe"]
-
-                events_var = [
-                    {
-                        "type": "launch_game",
-                        "properties": {
-                            "client_track_timestamp": now_ms - 180000,
-                            "client_heartbeat_session_id": session_id,
-                            "game_id": app_id,
-                            "game_name": name,
-                            "game_executable": exe,
-                            "verified": True
-                        }
-                    },
-                    {
-                        "type": "running_game_heartbeat",
-                        "properties": {
-                            "client_track_timestamp": now_ms,
-                            "client_heartbeat_session_id": session_id,
-                            "event_sequence_number": 1,
-                            "game_id": app_id,
-                            "game_name": name,
-                            "game_executable": exe,
-                            "duration": 60,
-                            "total_duration": 180
-                        }
-                    }
-                ]
-
-                ok = self.post_science_events(token, events_var)
-                if ok:
-                    success += 1
+                st1 = engine.post_batch(events)
+                if st1 == 204:
+                    self.log(f"✓ Bước 1 thành công: Đã nhận {hours:,}h cho '{target_game['name']}'!", "green")
                 else:
-                    self.log(f"⚠ Lỗi gửi: '{name}' (ID: {app_id})", "yellow")
+                    self.log(f"⚠ Bước 1 gặp mã HTTP {st1}, vẫn tiếp tục Bước 2...", "yellow")
 
-                pct = (i / len(games)) * 100
-                self.set_progress(pct)
-                self.set_status(f"Đang tua game ({i}/{len(games)})...", "#5865F2")
+                time.sleep(1)
+                self.log("🚀 BƯỚC 2/2: BẮT ĐẦU TUA 105 TỰA GAME ĐA DẠNG...", "yellow")
 
-                if i % 10 == 0 or i == len(games):
-                    self.log(f"[{i}/{len(games)}] Đã hoàn tất: '{name}' (ID: {app_id})", "blurple")
+                games = load_verified_games(105)
+                sent_count = 0
+                batch_size = 15
 
-                time.sleep(0.18)
+                for i in range(0, len(games), batch_size):
+                    chunk = games[i:i + batch_size]
+                    batch_events = []
+                    for g in chunk:
+                        batch_events.extend(engine.build_game_session(g, 900000))
 
-            self.set_status("COMBO HOÀN TẤT 100% ✓", "#57F287")
-            self.log("🎉 TẤT CẢ GÓI TIN ĐÃ ĐƯỢC GỬI THÀNH CÔNG ĐẾN DISCORD!", "green")
-            self.log("📌 Sau chu kỳ 24h - 48h, huy hiệu sẽ hiển thị trên Profile của bạn.", "yellow")
-            self.toggle_buttons(True)
-            messagebox.showinfo(
-                "Combo Thành Công",
-                f"Đã hoàn thành xuất sắc COMBO!\n- 5.000 Giờ: {target_game['name']}\n- {success} Trò chơi đa dạng\n\nDiscord sẽ cập nhật huy hiệu trong 24h - 48h!"
-            )
+                    st2 = engine.post_batch(batch_events)
+                    if st2 == 204:
+                        sent_count += len(chunk)
+                        pct = (sent_count / len(games)) * 100
+                        self.set_progress(pct)
+                        self.set_status(f"Đang gửi game ({sent_count}/{len(games)})...", "#5865F2")
+                        self.log(f"Batch {i // batch_size + 1}: {sent_count}/{len(games)} game ghi nhận thành công ✓", "green")
+                    else:
+                        self.log(f"⚠ Batch {i // batch_size + 1} gặp lỗi HTTP {st2}", "yellow")
+
+                    time.sleep(0.35)
+
+                self.set_status("COMBO HOÀN TẤT 100% ✓", "#57F287")
+                self.log("🎉 TẤT CẢ GÓI TIN ĐÃ ĐƯỢC GỬI THÀNH CÔNG ĐẾN DISCORD!", "green")
+                self.log("📌 Sau chu kỳ 24h - 48h, huy hiệu sẽ hiển thị trên Profile của bạn.", "yellow")
+                messagebox.showinfo(
+                    "Combo Thành Công",
+                    f"Đã hoàn thành xuất sắc COMBO!\n"
+                    f"- Giờ chơi: {hours:,}h ({target_game['name']})\n"
+                    f"- Trò chơi đa dạng: {sent_count} Game chính thức\n\n"
+                    f"Discord sẽ cập nhật huy hiệu trong vòng 24h - 48h!"
+                )
+            except Exception as e:
+                self.set_status("Lỗi hệ thống", "#ED4245")
+                self.log(f"Lỗi: {e}", "red")
+                messagebox.showerror("Lỗi", str(e))
+            finally:
+                self.toggle_buttons(True)
 
         threading.Thread(target=_worker, daemon=True).start()
 
