@@ -461,15 +461,17 @@ async function ensureCinemaChannelPermissions(guild, config) {
       const overwrite = channel.permissionOverwrites.cache?.get(guild.roles.everyone.id);
       const hasAllow = overwrite?.allow?.has?.(PermissionFlagsBits.UseEmbeddedActivities) &&
                        overwrite?.allow?.has?.(PermissionFlagsBits.Speak);
-      const hasDeny = overwrite?.deny?.has?.(PermissionFlagsBits.UseSoundboard);
+      const hasDeny = overwrite?.deny?.has?.(PermissionFlagsBits.UseSoundboard) &&
+                      overwrite?.deny?.has?.(PermissionFlagsBits.UseVAD);
       if (!hasAllow || !hasDeny) {
         await channel.permissionOverwrites.edit(guild.roles.everyone, {
           UseEmbeddedActivities: true,
           Speak: true,
+          UseVAD: false,
           UseSoundboard: false,
           UseExternalSounds: false,
           SendVoiceMessages: false,
-        }, { reason: 'VNL Cinema: Cho phép thành viên nói chuyện, mở Activities và chặn soundboard' });
+        }, { reason: 'VNL Cinema: Cho phép thành viên nói chuyện bằng Push-to-Talk, mở Activities và chặn soundboard/Voice Activity' });
       }
     } catch (err) {
       console.warn(`[CINEMA] Không thể cập nhật quyền Activity cho kênh #${channel?.name}:`, err.message);

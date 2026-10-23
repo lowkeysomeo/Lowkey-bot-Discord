@@ -111,6 +111,19 @@ function getVietQrUrl(bankId, bankAccount, amount, memo, accountName) {
   return `https://qr.sepay.vn/img?bank=${safeBank}&acc=${safeAcc}&amount=${safeAmount}&des=${safeMemo}&template=compact.png`;
 }
 
+function getVietQrSquareUrl(bankId, bankAccount, amount, memo, accountName) {
+  let cleanMemo = (memo || '').trim();
+  if (!cleanMemo.toUpperCase().startsWith('SEVQR')) {
+    cleanMemo = `SEVQR ${cleanMemo}`.trim();
+  }
+  const safeBank = encodeURIComponent((bankId || 'MB').trim().toUpperCase());
+  const safeAcc = encodeURIComponent((bankAccount || '').trim());
+  const safeAmount = Math.max(0, parseInt(amount, 10) || 0);
+  const safeMemo = encodeURIComponent(cleanMemo);
+  const safeName = encodeURIComponent((accountName || '').trim());
+  return `https://qr.sepay.vn/img?bank=${safeBank}&acc=${safeAcc}&amount=${safeAmount}&des=${safeMemo}&template=qr_only.png`;
+}
+
 function getVietQrIoUrl(bankId, bankAccount, amount, memo, accountName) {
   let cleanMemo = (memo || '').trim();
   if (!cleanMemo.toUpperCase().startsWith('SEVQR')) {
@@ -884,7 +897,7 @@ async function buildPaymentPayload(order) {
   const bankNameFull = BANK_NAMES[bank.bankId] || bank.bankId;
   const transferMemo = `SEVQR ${order.order_id}`;
   const qrUrl = getVietQrUrl(bank.bankId, bank.bankAccount, order.amount, transferMemo, bank.bankName);
-  const qrIoUrl = getVietQrIoUrl(bank.bankId, bank.bankAccount, order.amount, transferMemo, bank.bankName);
+  const qrThumbUrl = getVietQrSquareUrl(bank.bankId, bank.bankAccount, order.amount, transferMemo, bank.bankName);
 
   const isMonthly = order.package_type === 'monthly';
   const isChecking = (order.check_count || 0) > 0;
@@ -902,41 +915,20 @@ async function buildPaymentPayload(order) {
       `• **Chủ tài khoản:** **${bank.bankName || '(Chưa cấu hình)'}**\n` +
       `• **Nội dung chuyển khoản (BẮT BUỘC):** \`${transferMemo}\`\n` +
       `👉 *Bấm giữ để sao chép nội dung CK:*\n\`\`\`\n${transferMemo}\n\`\`\`\n` +
+      `• 🖼️ **[Bấm vào đây để mở ảnh Mã QR nếu chưa thấy ảnh](${qrUrl})**\n` +
       `• ⏳ **Hạn thanh toán (10 phút):** Hết hạn <t:${Math.floor(expiresAt / 1000)}:R> lúc <t:${Math.floor(expiresAt / 1000)}:T>\n` +
       `━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
       `⚠️ **Lưu ý quan trọng:** Ghi đúng nội dung \`${transferMemo}\`. Sau 10 phút chưa thanh toán, đơn sẽ tự động hủy!` +
       (isChecking ? `\n\n⏳ *Hệ thống đang tự động kiểm tra SePay mỗi 15 giây... Vui lòng không bấm liên tục.*` : '')
     )
+    .setImage(qrUrl)
+    .setThumbnail(qrThumbUrl)
     .setFooter({
       text: isChecking
         ? 'Đã ghi nhận yêu cầu! Đang đợi SePay duyệt tự động...'
         : 'Chuyển xong hãy bấm nút "Đã Chuyển Tiền" (chỉ cần bấm 1 lần)!'
     })
     .setTimestamp();
-
-  // Tải buffer ảnh để upload trực tiếp đính kèm (hỗ trợ 100% mọi nền tảng)
-  const files = [];
-  try {
-    const { buffer: qrBuffer, url: finalQrUrl } = await fetchQrBufferWithFallback(
-      bank.bankId,
-      bank.bankAccount,
-      order.amount,
-      transferMemo,
-      bank.bankName
-    );
-
-    if (qrBuffer && qrBuffer.length > 500) {
-      files.push(new AttachmentBuilder(qrBuffer, { name: 'vietqr.png' }));
-      embed.setImage('attachment://vietqr.png');
-    } else {
-      embed.setImage(finalQrUrl || qrUrl);
-    }
-  } catch (_) {
-    embed.setImage(qrUrl);
-  }
-
-  // Đặt thumbnail để đảm bảo thiết bị di động luôn hiển thị ô QR
-  embed.setThumbnail(qrIoUrl);
 
   const checkBtn = new ButtonBuilder()
     .setCustomId(`qshop:check_pay:${order.order_id}`)
@@ -957,13 +949,13 @@ async function buildPaymentPayload(order) {
 
   const row = new ActionRowBuilder().addComponents(checkBtn, cancelBtn, qrLinkBtn);
 
-  // Content hiển thị link ảnh QR trực tiếp: Discord Client tự động preview ảnh QR to đùng ngay cả khi embed bị lỗi hiển thị
+  // Content hiển thị link ảnh QR trực tiếp: Discord Client tự động preview ảnh QR ngay cả khi embed bị lag proxy
   const content =
     `💳 **MÃ QR THANH TOÁN TỰ ĐỘNG SEPAY — ĐƠN HÀNG #${order.order_id} (${formatVnd(order.amount)})**\n` +
     `👉 Mở app ngân hàng quét mã bên dưới (hoặc bấm nút **"Mở Mã QR (Trình Duyệt)"** nếu không thấy ảnh):\n` +
     `${qrUrl}`;
 
-  return { content, embeds: [embed], components: [row], files };
+  return { content, embeds: [embed], components: [row], files: [] };
 }
 
 /**
@@ -1717,6 +1709,7 @@ module.exports = {
   getBankConfig,
   setBankConfig,
   getVietQrUrl,
+  getVietQrSquareUrl,
   createOrder,
   getOrder,
   updateOrderStatus,
