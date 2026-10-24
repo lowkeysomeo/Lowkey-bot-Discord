@@ -79,3 +79,7 @@ dashboard/public/uploads/
 __pycache__/
 *.pyc
 science_state.json
+scripts/tokens.txt
+scripts/fingerprints.txt
+scripts/science_state.json
+

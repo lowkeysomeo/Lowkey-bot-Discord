@@ -1,22 +1,22 @@
 @echo off
-chcp 65001 >nul
-title Lowkey Discord Science Badge Spoofer (2026 Pro Edition)
+title Lowkey Discord Science Badge Spoofer 2026
 cls
 
 echo ======================================================================
-echo           ⚡ LOWKEY DISCORD SCIENCE BADGE SPOOFER (2026) ⚡
-echo   Tua nhanh Huy hiệu Profile Discord qua Telemetry API nội bộ
+echo           LOWKEY DISCORD SCIENCE BADGE SPOOFER (2026)
+echo   Tua nhanh Huy hieu Profile Discord qua Telemetry API noi bo
 echo ======================================================================
 echo.
-echo [1] Cày Huy hiệu 1: TRÒ CHƠI ĐA DẠNG (100 Game độc nhất)
-echo [2] Cày Huy hiệu 2: THỜI GIAN CHƠI (Tùy chọn 150h, 500h, 5.000h)
-echo [3] Mở Giao diện Desktop GUI (Có thanh tiến trình trực quan)
-echo [4] Mở file tokens.txt (Dán danh sách token để cày hàng loạt)
-echo [5] Hướng dẫn cơ chế cập nhật Huy hiệu của Discord
-echo [0] Thoát
+echo [1] Cay Huy hieu 1: TRO CHOI DA DANG (105 Game doc nhat)
+echo [2] Cay Huy hieu 2: THOI GIAN CHOI (Tuy chon 150h, 500h, 5.000h)
+echo [3] Mo Giao dien Desktop GUI (Co thanh tien trinh truc quan)
+echo [4] Mo file tokens.txt (Dan danh sach token de cay hang loat)
+echo [5] Huong dan co che cap nhat Huy hieu cua Discord
+echo [0] Thoat
 echo.
 echo ======================================================================
-set /p choice="Nhập lựa chọn của bạn (0-5): "
+set "choice="
+set /p choice="Nhap lua chon cua ban (0-5): "
 
 if "%choice%"=="1" goto run_variety
 if "%choice%"=="2" goto run_time
@@ -24,56 +24,57 @@ if "%choice%"=="3" goto run_gui
 if "%choice%"=="4" goto open_tokens
 if "%choice%"=="5" goto show_guide
 if "%choice%"=="0" exit /b
+goto end
 
 :run_variety
 cls
-echo [*] Đang khởi động cày Huy hiệu Trò chơi đa dạng (100 game)...
+echo [*] Dang khoi dong cay Huy hieu Tro choi da dang (105 game doc nhat)...
 python "%~dp0spoofer_badge_variety.py"
 pause
 goto end
 
 :run_time
 cls
-echo [*] Đang khởi động cày Huy hiệu Thời gian chơi...
+echo [*] Dang khoi dong cay Huy hieu Thoi gian choi...
 python "%~dp0spoofer_badge_time.py"
 pause
 goto end
 
 :run_gui
 cls
-echo [*] Đang khởi động Giao diện Desktop GUI...
+echo [*] Dang khoi dong Giao dien Desktop GUI...
 start pythonw "%~dp0spoofer_desktop_gui.pyw"
 exit /b
 
 :open_tokens
 cls
 if not exist "%~dp0tokens.txt" (
-    echo # Dán mỗi dòng 1 Discord User Token > "%~dp0tokens.txt"
+    echo # Dan moi dong 1 Discord User Token> "%~dp0tokens.txt"
 )
-echo [*] Đang mở file tokens.txt trong Notepad...
+echo [*] Dang mo file tokens.txt trong Notepad...
 start notepad.exe "%~dp0tokens.txt"
 exit /b
 
 :show_guide
 cls
 echo ======================================================================
-echo        CƠ CHẾ GHI NHẬN VÀ CẬP NHẬT TIẾN TRÌNH HUY HIỆU DISCORD
+echo        CO CHE GHI NHAN VA CAP NHAT TIEN TRINH HUY HIEU DISCORD
 echo ======================================================================
 echo.
-echo 1. Vì sao chia làm 2 script riêng biệt?
-echo    - Huy hiệu "Trò chơi đa dạng" yêu cầu 100 game KHÁC NHAU. Script 1 sẽ
-echo      lọc đúng 105 tựa game PC độc nhất để gửi lên Discord.
-echo    - Huy hiệu "Thời gian chơi" chỉ cần tích lũy giờ chơi cho game chính.
-echo      Script 2 sẽ gửi thời lượng 5.000h (duration_tracked_ms) cho 1 game duy nhất.
+echo 1. Vi sao chia lam 2 script rieng biet?
+echo    - Huy hieu Tro choi da dang yeu cau 100 game KHAC NHAU. Script 1 se
+echo      loc dung 105 tua game PC doc nhat de gui len Discord.
+echo    - Huy hieu Thoi gian choi chi can tich luy gio choi cho game chinh.
+echo      Script 2 se gui thoi luong 5.000h cho 1 game duy nhat.
 echo.
-echo 2. Cần chuẩn bị gì trước khi chạy?
-echo    - Chỉ cần mở tokens.txt và dán User Token vào (mỗi dòng 1 token).
-echo    - Tool sẽ tự động băm chữ ký Windows PE (executable_fingerprint) thật
-echo      từ máy của bạn, đảm bảo Discord xác thực phiên chơi hợp lệ 100%%.
+echo 2. Can chuan bi gi truoc khi chay?
+echo    - Chi can mo tokens.txt va dan User Token vao (moi dong 1 token).
+echo    - Tool se tu dong tao chu ky Windows PE (executable_fingerprint)
+echo      that tu may cua ban, dam bao Discord xac thuc phien choi hop le 100%%.
 echo.
-echo 3. Khi nào Discord hiển thị huy hiệu trên Profile?
-echo    - Dữ liệu sau khi gửi thành công (HTTP 204) sẽ vào hàng đợi Discord.
-echo    - Hệ thống Backend Pipeline của Discord chạy tổng hợp sau mỗi 24h - 48h.
+echo 3. Khi nao Discord hien thi huy hieu tren Profile?
+echo    - Du lieu sau khi gui thanh cong (HTTP 204) se vao hang doi Discord.
+echo    - He thong Backend Pipeline cua Discord chay tong hop sau moi 24h - 48h.
 echo.
 echo ======================================================================
 pause
