@@ -52,10 +52,12 @@ function createDashboard(client, options = {}) {
   const sessions = new Map();
   const states = new Map();
   const limits = new Map();
+  const cleanClientId = String(env.CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
+  const cleanClientSecret = String(env.DISCORD_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
   const origin = env.DASHBOARD_URL ? new URL(env.DASHBOARD_URL).origin : '';
   const secure = origin.startsWith('https:');
   const local = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-  const configured = Boolean(env.DISCORD_CLIENT_SECRET && env.CLIENT_ID && (secure || local));
+  const configured = Boolean(cleanClientSecret && cleanClientId && (secure || local));
   const setCookie = (name, value, seconds) => `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${seconds}${secure ? '; Secure' : ''}`;
   function prune() {
     const now = Date.now();
@@ -101,7 +103,7 @@ function createDashboard(client, options = {}) {
     if (!guild) fail(404, 'Hãy mời bot vào server này trước.');
     return guild;
   }
-  const invite = id => `https://discord.com/oauth2/authorize?client_id=${env.CLIENT_ID || ''}&scope=bot%20applications.commands&permissions=309506198528&integration_type=0${id ? `&guild_id=${id}` : ''}`;
+  const invite = id => `https://discord.com/oauth2/authorize?client_id=${cleanClientId || ''}&scope=bot%20applications.commands&permissions=309506198528&integration_type=0${id ? `&guild_id=${id}` : ''}`;
   function json(res, status, value) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); }
   function redirect(res, location, cookies) {
     res.writeHead(302, { Location: location, ...(cookies ? { 'Set-Cookie': cookies } : {}) }); res.end();
@@ -143,7 +145,7 @@ function createDashboard(client, options = {}) {
         const state = random();
         const browserKey = random();
         states.set(hash(state), { browser: hash(browserKey), expires: Date.now() + 600000 });
-        const params = new URLSearchParams({ client_id: env.CLIENT_ID, response_type: 'code', scope: 'identify guilds',
+        const params = new URLSearchParams({ client_id: cleanClientId, response_type: 'code', scope: 'identify guilds',
           redirect_uri: `${origin}/auth/callback`, state });
         return redirect(res, `https://discord.com/oauth2/authorize?${params}`, setCookie('vnl_oauth', browserKey, 600));
       }
@@ -157,10 +159,25 @@ function createDashboard(client, options = {}) {
         if (!code) fail(400, 'Thiếu mã đăng nhập.');
         const response = await fetchApi('https://discord.com/api/v10/oauth2/token', {
           method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({ client_id: env.CLIENT_ID, client_secret: env.DISCORD_CLIENT_SECRET,
-            grant_type: 'authorization_code', code, redirect_uri: `${origin}/auth/callback` }), signal: AbortSignal.timeout(12000),
+          body: new URLSearchParams({ client_id: cleanClientId, client_secret: cleanClientSecret,
+            grant_type: 'authorization_code', code: code.trim(), redirect_uri: `${origin}/auth/callback` }), signal: AbortSignal.timeout(12000),
         });
-        if (!response.ok) fail(401, 'Không thể đăng nhập. Hãy thử lại.');
+        if (!response.ok) {
+          let errText = '';
+          let errJson = null;
+          try {
+            errText = await response.text();
+            errJson = JSON.parse(errText);
+          } catch {}
+          console.error('[DASHBOARD OAUTH ERROR] Status:', response.status, errText || errJson);
+          if (errJson?.error === 'invalid_client') {
+            fail(500, 'Lỗi cấu hình Discord OAuth: DISCORD_CLIENT_SECRET trên server không chính xác (hãy kiểm tra lại Client Secret trong Discord Developer Portal -> OAuth2).');
+          } else if (errJson?.error === 'invalid_grant') {
+            fail(400, `Lỗi xác thực OAuth: Mã đăng nhập đã hết hạn hoặc Redirect URI không khớp. Hãy đảm bảo Redirect URI "${origin}/auth/callback" đã được thêm chính xác vào mục OAuth2 -> Redirects trong Discord Developer Portal.`);
+          } else {
+            fail(401, errJson?.error_description || errJson?.error || 'Không thể đăng nhập. Hãy thử lại.');
+          }
+        }
         const tokens = await response.json();
         const user = await discord('/users/@me', tokens.access_token);
         if (sessions.size > 5000) fail(503, 'Hãy thử lại sau.');
@@ -720,8 +737,14 @@ function createDashboard(client, options = {}) {
       }
       fail(404, 'Không tìm thấy trang.');
     } catch (error) {
-      if (!res.headersSent) json(res, error.status || 500, { error: error.status ? error.message : 'Có lỗi xảy ra. Vui lòng thử lại.' });
-      else res.end();
+      if (!res.headersSent) {
+        if (req.headers.accept?.includes('text/html') && req.method === 'GET' && (route === '/auth/callback' || route === '/auth/discord')) {
+          res.writeHead(error.status || 500, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(`<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Lỗi Đăng Nhập · VNL</title><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{background:#0e0406;color:#fff;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px;box-sizing:border-box}.card{background:#16080c;border:1px solid #e50914;padding:32px;border-radius:16px;max-width:540px;text-align:center;box-shadow:0 12px 40px rgba(229,9,20,0.3)}h2{color:#ffd65a;margin-top:0}p{color:#d9c4c7;line-height:1.6;font-size:15px}a{display:inline-block;margin-top:16px;background:#e50914;color:#fff;text-decoration:none;padding:10px 24px;border-radius:8px;font-weight:bold}</style></head><body><div class="card"><h2>⚠️ Không thể đăng nhập Dashboard</h2><p>${error.message}</p><a href="/">Quay lại trang chủ</a></div></body></html>`);
+          return;
+        }
+        json(res, error.status || 500, { error: error.status ? error.message : 'Có lỗi xảy ra. Vui lòng thử lại.' });
+      } else res.end();
       if (!error.status) console.error('[DASHBOARD] Request failed:', error.name);
     }
   });
