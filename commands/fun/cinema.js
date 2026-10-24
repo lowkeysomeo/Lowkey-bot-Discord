@@ -189,7 +189,6 @@ async function executeCinemaRoom(interaction, requestedRoom = null) {
   }
 
   // TRƯỜNG HỢP 2: Chưa có phim nào đang chiếu trong phòng này -> Cho phép chọn phim phát ngay
-  if (!isAdmin) return interaction.reply({ content: 'Chỉ Administrator mới được bắt đầu suất chiếu. Thành viên có thể tham gia các suất đã lên lịch.', flags: 64 });
   if (hasCategory) {
     if (!userVoice) {
       const allowedNames = cinemaVoices.map(c => `**${c.name}**`).join(', ');
@@ -346,9 +345,6 @@ async function handleSelect(interaction) {
   }
 
   await interaction.deferUpdate();
-
-  const freshMember = await interaction.guild.members.fetch({ user: interaction.user.id, force: true }).catch(() => null);
-  if (!cinema.isStaffMember(freshMember)) return interaction.editReply({ content: 'Chỉ Administrator mới được bắt đầu suất chiếu.', embeds: [], components: [] });
 
   const config = cinema.getConfig(interaction.guildId);
   if (process.env.CINEMA_ENABLED !== 'true' || !config.enabled || !config.rightsConfirmed) return interaction.editReply({ content: 'Cinema đang tắt hoặc chưa xác nhận quyền trình chiếu.', embeds: [], components: [] });
