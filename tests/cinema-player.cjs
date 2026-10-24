@@ -32,6 +32,9 @@ async function main() {
   prime(); response = { status: 403, data: { error: 'Role revoked' } };
   await run('poll()'); assert.equal(node('#video').src, '', 'Authorization failure unloads media immediately');
   assert.equal(run('hasStarted'), false);
+  prime(); response = { status: 401, data: { error: 'Phiên xem đã hết hạn' } };
+  await run('poll()'); assert.equal(node('#video').src, show.mediaPath, '401 session expiration does not interrupt playback');
+  assert.equal(run('hasStarted'), true, '401 maintains hasStarted true');
   prime(); networkError = new Error('Temporary network error');
   await run('poll()'); assert.equal(node('#video').src, show.mediaPath, 'Brief outages do not interrupt playback');
   clock = 32000; await run('poll()'); assert.equal(node('#video').src, '', 'Long outages fail closed');
@@ -58,6 +61,22 @@ async function main() {
   assert.equal(node('#video').currentTime, 300, 'In-sync drift keeps currentTime untouched');
   assert.equal(node('#video').playbackRate, 1.0, 'In-sync drift maintains normal 1.0x playback speed');
 
-  console.log('PASS Cinema player: permission loss, transient vs prolonged network outage, local-ended isolation, no reload on seek, and smooth adaptive-rate sync.');
+  // Background reauth updates session token without reloading media
+  prime();
+  run(`
+    currentClientId = '999';
+    discordSdk = {
+      commands: {
+        authorize: async () => ({ code: 'new-auth-code' }),
+        authenticate: async () => ({})
+      }
+    };
+  `);
+  response = { status: 200, data: { session: 'refreshed-session-token', access_token: 'new-oauth' } };
+  await run('tryReauth()');
+  assert.equal(run('session'), 'refreshed-session-token', 'tryReauth successfully updates session token');
+  assert.equal(node('#video').src, show.mediaPath, 'tryReauth keeps video src intact');
+
+  console.log('PASS Cinema player: permission loss, 401 session resilience, transient vs prolonged network outage, local-ended isolation, no reload on seek, and smooth adaptive-rate sync.');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

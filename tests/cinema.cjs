@@ -187,6 +187,13 @@ async function main() {
   assert.equal((await request('/cinema-api/guilds/111/state', { headers: viewerHeaders })).status, 403);
   const disabled = transport(createDashboard(client, { env: { ...env, CINEMA_ENABLED: 'false' }, fetch: fetchApi }));
   assert.equal((await disabled('/activity/')).status, 503);
+
+  // Test persistent session across server restart
+  await post({ ...activeShowConfig, enabled: true, revision: cinema.getConfig('111').revision });
+  viewerRoles.add('777');
+  const restartedDashboard = transport(createDashboard(client, { env, fetch: fetchApi }));
+  const restoredStateRes = await restartedDashboard('/cinema-api/guilds/111/state', { headers: viewerHeaders });
+  assert.equal(restoredStateRes.status, 200, 'Session persists across dashboard/server restart via SQLite');
   process.env.CINEMA_ENABLED = 'true'; process.env.CLIENT_ID = '999'; process.env.TOKEN = 'fake'; delete process.env.GUILD_ID;
   let deployed;
   await deployCommands([{ data: { name: 'existing', description: 'Existing command' } }], { put: async (_, { body }) => { deployed = body; } });

@@ -560,23 +560,30 @@ async function poll() {
     consecutivePollErrors++;
     console.warn(`[CINEMA POLL] Thử lại (${consecutivePollErrors}):`, error.message);
 
-    if ([401, 403, 404].includes(error.status) || (lastStateAt && performance.now() - lastStateAt > 30000)) {
+    if ([403, 404].includes(error.status) || (lastStateAt && performance.now() - lastStateAt > 30000)) {
       clearVideo();
       status.textContent = error.message;
-    }
-    if (!current || !hasStarted) {
-      if (consecutivePollErrors >= 3) {
-        status.textContent = `${error.message}. Đang thử kết nối lại...`;
+    } else if (error.status === 401) {
+      console.warn('[CINEMA] Phiên xem cần làm mới trong nền, giữ nguyên video phát...');
+      if (!current || !hasStarted) {
+        if (consecutivePollErrors >= 3) {
+          status.textContent = `${error.message}. Đang thử kết nối lại...`;
+        }
+      }
+      // Tự động gia hạn phiên trong nền mà không làm gián đoạn phim
+      if (discordSdk) {
+        tryReauth().catch(() => {});
       }
     } else {
-      if (consecutivePollErrors >= 5) {
-        showToast('⚠️ Mất kết nối tới máy chủ. Đang tự động kết nối lại...');
+      if (!current || !hasStarted) {
+        if (consecutivePollErrors >= 3) {
+          status.textContent = `${error.message}. Đang thử kết nối lại...`;
+        }
+      } else {
+        if (consecutivePollErrors >= 5) {
+          showToast('⚠️ Mất kết nối tới máy chủ. Đang tự động kết nối lại...');
+        }
       }
-    }
-
-    // Nếu lỗi 401 (phiên hết hạn), tự động gia hạn phiên trong nền mà không làm gián đoạn phim
-    if (error.status === 401 && discordSdk) {
-      tryReauth().catch(() => {});
     }
   } finally {
     if (!stopped) setTimeout(poll, 4000);

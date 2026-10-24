@@ -10,6 +10,79 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
   const cleanClientId = String(env.CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
   const cleanClientSecret = String(env.DISCORD_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
   const appOrigin = `https://${cleanClientId}.discordsays.com`;
+
+  let dbInstance = null;
+  function getDbSafe() {
+    if (dbInstance) return dbInstance;
+    try {
+      const { getDb } = require('../utils/database');
+      const d = getDb();
+      if (d) {
+        d.prepare(`
+          CREATE TABLE IF NOT EXISTS cinema_sessions (
+            token_hash TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            expires INTEGER NOT NULL
+          )
+        `).run();
+        dbInstance = d;
+        return dbInstance;
+      }
+    } catch {}
+    return null;
+  }
+
+  function saveSession(tokenHash, userId, expires) {
+    sessions.set(tokenHash, { userId, expires });
+    try {
+      const d = getDbSafe();
+      if (d) {
+        d.prepare(`
+          INSERT INTO cinema_sessions (token_hash, user_id, expires)
+          VALUES (?, ?, ?)
+          ON CONFLICT(token_hash) DO UPDATE SET
+            user_id = excluded.user_id,
+            expires = excluded.expires
+        `).run(tokenHash, userId, expires);
+      }
+    } catch (e) {
+      console.warn('[CINEMA] Không thể lưu session vào SQLite:', e.message);
+    }
+  }
+
+  function getSession(tokenHash) {
+    let val = sessions.get(tokenHash);
+    if (val) {
+      if (val.expires <= Date.now()) {
+        sessions.delete(tokenHash);
+        try {
+          const d = getDbSafe();
+          if (d) d.prepare('DELETE FROM cinema_sessions WHERE token_hash = ?').run(tokenHash);
+        } catch {}
+        return null;
+      }
+      return val;
+    }
+    try {
+      const d = getDbSafe();
+      if (d) {
+        const row = d.prepare('SELECT user_id, expires FROM cinema_sessions WHERE token_hash = ?').get(tokenHash);
+        if (row) {
+          if (row.expires > Date.now()) {
+            const loaded = { userId: row.user_id, expires: row.expires };
+            sessions.set(tokenHash, loaded);
+            return loaded;
+          } else {
+            d.prepare('DELETE FROM cinema_sessions WHERE token_hash = ?').run(tokenHash);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[CINEMA] Không thể đọc session từ SQLite:', e.message);
+    }
+    return null;
+  }
+
   return async function handle(req, res, route) {
     if (route === '/activity') route = '/activity/';
     const isDiscordClient = req.headers.referer?.includes('discordsays.com') || req.headers.origin?.includes('discordsays.com');
@@ -31,6 +104,12 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
     if (!route.startsWith('/cinema-api/') && !route.startsWith('/activity/') && !isActivityAsset) return false;
     if (env.CINEMA_ENABLED !== 'true') fail(503, 'Cinema chưa được bật bởi chủ bot.');
     for (const [key, value] of sessions) if (value.expires <= Date.now()) sessions.delete(key);
+    if (Math.random() < 0.05) {
+      try {
+        const d = getDbSafe();
+        if (d) d.prepare('DELETE FROM cinema_sessions WHERE expires <= ?').run(Date.now());
+      } catch {}
+    }
     if (isActivityAsset || route.startsWith('/activity/')) {
       if (req.method !== 'GET' || !activityAssetMap[route]) fail(404, 'Không tìm thấy Activity.');
       const [file, mime] = activityAssetMap[route];
@@ -84,7 +163,8 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
       const user = await userResponse.json();
       if (!/^\d+$/.test(user.id) || !token.access_token || !Number.isFinite(token.expires_in) || token.expires_in <= 0) fail(401, 'Phiên Discord không hợp lệ.');
       const session = crypto.randomBytes(32).toString('hex');
-      sessions.set(hash(session), { userId: user.id, expires: Date.now() + Math.min(token.expires_in, 3600) * 1000 });
+      const sessionExpires = Date.now() + 86400 * 1000;
+      saveSession(hash(session), user.id, sessionExpires);
       // The SDK requires the user's short-lived OAuth token for authenticate(). No bot secret is returned.
       json(res, 200, { session, access_token: token.access_token });
       return true;
@@ -92,7 +172,7 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
     const seekMatch = /^\/cinema-api\/guilds\/(\d+)\/seek$/.exec(route);
     if (seekMatch && req.method === 'POST') {
       const token = (req.headers.authorization || '').match(/^Bearer ([a-f0-9]{64})$/)?.[1];
-      const value = token && sessions.get(hash(token));
+      const value = token && getSession(hash(token));
       if (!value || !value.userId) fail(401, 'Phiên xem đã hết hạn. Hãy mở lại Activity.');
       rateLimit(`cinema-seek:${value.userId}`, 60);
       const guild = client.guilds.cache.get(seekMatch[1]);
@@ -116,7 +196,7 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
     const endMatch = /^\/cinema-api\/guilds\/(\d+)\/ended$/.exec(route);
     if (endMatch && req.method === 'POST') {
       const token = (req.headers.authorization || '').match(/^Bearer ([a-f0-9]{64})$/)?.[1];
-      const value = token && sessions.get(hash(token));
+      const value = token && getSession(hash(token));
       if (!value || !value.userId) fail(401, 'Phiên xem đã hết hạn.');
       rateLimit(`cinema-ended:${value.userId}`, 10);
       const input = await body(req);
@@ -147,7 +227,7 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
     const match = /^\/cinema-api\/guilds\/(\d+)\/state$/.exec(route);
     if (!match || req.method !== 'GET') fail(404, 'Không tìm thấy API Cinema.');
     const token = (req.headers.authorization || '').match(/^Bearer ([a-f0-9]{64})$/)?.[1];
-    const value = token && sessions.get(hash(token));
+    const value = token && getSession(hash(token));
     if (!value) fail(401, 'Phiên xem đã hết hạn. Hãy mở lại Activity.');
     rateLimit(`cinema-viewer:${value.userId}`, 30);
     const guild = client.guilds.cache.get(match[1]);
