@@ -7,7 +7,9 @@ const cinema = require('../utils/cinema');
 function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLimit }) {
   const sessions = new Map();
   const hash = value => crypto.createHash('sha256').update(value).digest('hex');
-  const appOrigin = `https://${env.CLIENT_ID}.discordsays.com`;
+  const cleanClientId = String(env.CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
+  const cleanClientSecret = String(env.DISCORD_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
+  const appOrigin = `https://${cleanClientId}.discordsays.com`;
   return async function handle(req, res, route) {
     if (route === '/activity') route = '/activity/';
     const isDiscordClient = req.headers.referer?.includes('discordsays.com') || req.headers.origin?.includes('discordsays.com');
@@ -43,9 +45,9 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
       res.end(fs.readFileSync(target));
       return true;
     }
-    if (req.method === 'GET' && route === '/cinema-api/config') { json(res, 200, { clientId: env.CLIENT_ID }); return true; }
+    if (req.method === 'GET' && route === '/cinema-api/config') { json(res, 200, { clientId: cleanClientId }); return true; }
     if (req.method === 'POST' && route === '/cinema-api/session') {
-      if (!env.CLIENT_ID || !env.DISCORD_CLIENT_SECRET) fail(503, 'Cinema chưa được cấu hình OAuth.');
+      if (!cleanClientId || !cleanClientSecret) fail(503, 'Cinema chưa được cấu hình OAuth (Thiếu CLIENT_ID hoặc DISCORD_CLIENT_SECRET trong biến môi trường).');
       const origin = (req.headers.origin || '').replace(/\/$/, '');
       if (origin !== appOrigin) fail(403, 'Hãy mở Cinema từ Discord Activity.');
       // Do not trust X-Forwarded-For without a configured trusted reverse proxy.
@@ -55,10 +57,25 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
       if (!input || typeof input.code !== 'string' || !input.code || input.code.length > 2048) fail(400, 'Thiếu mã đăng nhập Activity.');
       const response = await fetchApi('https://discord.com/api/v10/oauth2/token', {
         method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ client_id: env.CLIENT_ID, client_secret: env.DISCORD_CLIENT_SECRET, grant_type: 'authorization_code', code: input.code }),
+        body: new URLSearchParams({ client_id: cleanClientId, client_secret: cleanClientSecret, grant_type: 'authorization_code', code: input.code.trim() }),
         signal: AbortSignal.timeout(12000),
       });
-      if (!response.ok) fail(401, 'Mã đăng nhập hết hạn. Hãy mở lại Activity.');
+      if (!response.ok) {
+        let errText = '';
+        let errJson = null;
+        try {
+          errText = await response.text();
+          errJson = JSON.parse(errText);
+        } catch {}
+        console.error('[CINEMA OAUTH ERROR] Discord token exchange failed:', response.status, errText || errJson);
+        if (errJson?.error === 'invalid_client') {
+          fail(500, 'Lỗi cấu hình Discord OAuth: DISCORD_CLIENT_SECRET trên server không chính xác (hãy kiểm tra lại Client Secret trong Discord Developer Portal -> OAuth2).');
+        } else if (errJson?.error === 'invalid_grant') {
+          fail(401, 'Mã đăng nhập Discord đã hết hạn hoặc đã được sử dụng. Hãy mở lại Activity hoặc bấm Thử lại.');
+        } else {
+          fail(401, errJson?.error_description || errJson?.error || 'Mã đăng nhập hết hạn. Hãy mở lại Activity.');
+        }
+      }
       const token = await response.json();
       const userResponse = await fetchApi('https://discord.com/api/v10/users/@me', {
         headers: { Authorization: `Bearer ${token.access_token}` }, signal: AbortSignal.timeout(12000),

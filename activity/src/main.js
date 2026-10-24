@@ -619,13 +619,19 @@ async function tryReauth() {
 }
 
 // SDK Initialization
+let isStarting = false;
 async function start() {
+  if (isStarting) return;
+  isStarting = true;
   try {
+    status.textContent = 'Đang kết nối tới rạp chiếu...';
     const { clientId } = await request('/config');
     if (!clientId) throw new Error('Chủ bot chưa cấu hình Client ID.');
     currentClientId = clientId;
-    discordSdk = new DiscordSDK(clientId);
-    await discordSdk.ready();
+    if (!discordSdk) {
+      discordSdk = new DiscordSDK(clientId);
+      await discordSdk.ready();
+    }
     if (!discordSdk.guildId) throw new Error('Hãy mở Cinema trong một server Discord.');
     guildId = discordSdk.guildId;
     channelId = discordSdk.channelId || null;
@@ -654,8 +660,32 @@ async function start() {
   } catch (error) {
     clearVideo();
     status.textContent = error.message;
+    const isAuthErr = error.status === 401 || (error.message && (error.message.includes('hết hạn') || error.message.includes('đăng nhập') || error.message.includes('OAuth')));
+    if (isAuthErr && typeof document.createElement === 'function') {
+      try {
+        const btn = document.createElement('button');
+        btn.id = 'btn-reconnect';
+        btn.textContent = '🔄 Thử kết nối lại';
+        btn.className = 'btn-staff-pill';
+        btn.style.marginLeft = '10px';
+        btn.style.cursor = 'pointer';
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          isStarting = false;
+          start();
+        };
+        status.append(btn);
+      } catch {}
+    }
+  } finally {
+    isStarting = false;
   }
 }
+
+window.vnlRetryStart = () => {
+  isStarting = false;
+  start();
+};
 
 window.addEventListener('pagehide', () => {
   stopped = true;
