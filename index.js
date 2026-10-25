@@ -147,6 +147,14 @@ client.on(
     if (message.webhookId) return;
     if (message.author.bot) return;
 
+    // Xử lý trả lời tin nhắn đơn hàng Shop (Quote Reply hoặc !rep <orderId> <nội dung>)
+    try {
+      const { handleMessageReply } = require('./utils/shopOrderReply');
+      if (await handleMessageReply(message)) return;
+    } catch (err) {
+      console.error('[SHOP ORDER REPLY ERROR]', err);
+    }
+
     // Tự động thả emoji vào các kênh cấu hình (ví dụ: kênh quotes)
     try {
       require('./utils/autoReaction').handleMessage(message);
@@ -274,6 +282,14 @@ if (
 client.on(
   Events.InteractionCreate,
   async (interaction) => {
+    if (interaction.customId?.startsWith('reply_order:') || interaction.customId?.startsWith('rep_modal:')) {
+      try {
+        const { handleInteraction } = require('./utils/shopOrderReply');
+        if (await handleInteraction(interaction)) return;
+      } catch (err) {
+        console.error('[SHOP ORDER INTERACTION ERROR]', err);
+      }
+    }
     if ((interaction.isStringSelectMenu?.() || interaction.isUserSelectMenu?.() || interaction.isButton?.() || interaction.isModalSubmit?.()) && interaction.customId?.startsWith('ticket:')) {
       try { await require('./utils/ticketSystem').handleInteraction(interaction); }
       catch (error) {
