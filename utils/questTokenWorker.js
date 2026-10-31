@@ -697,6 +697,17 @@ function isQuestActive(quest) {
   if (isExcludedQuest(quest)) return false;
 
   const cfg = quest.config || quest;
+  const tasks = extractQuestTasks(quest);
+  const hasTasks = Object.keys(tasks).length > 0;
+  const hasConfig = Boolean(
+    cfg.messages ||
+    cfg.task_config_v2 ||
+    cfg.task_config ||
+    cfg.video_metadata ||
+    isVideoQuest(quest)
+  );
+  if (!hasTasks && !hasConfig) return false;
+
   const now = Date.now();
 
   const exp = cfg.expires_at || cfg.expiresAt || quest.expires_at || quest.expiresAt;
@@ -934,7 +945,7 @@ async function fetchQuests(token) {
     }
   } catch {}
 
-  // 2. Quét thêm các placement chính của get-decisions (cả Desktop & Mobile) và mobile /quests/@me
+  // 2. Quét thêm các placement chính của get-decisions (placements 11, 3, 1) và mobile /quests/@me
   const hbSessionId = randomUUID();
   const adSessionId = randomUUID();
   const discoveryRequests = [
@@ -950,39 +961,22 @@ async function fetchQuests(token) {
       url: `https://discord.com/api/v9/quests/get-decisions?placement=1&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
       platform: 'desktop',
     },
-    {
-      url: `https://discord.com/api/v9/quests/get-decisions?placement=11&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-      platform: 'mobile',
-    },
-    {
-      url: `https://discord.com/api/v9/quests/get-decisions?placement=1&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-      platform: 'mobile',
-    },
     { url: 'https://discord.com/api/v9/quests/@me', platform: 'mobile' },
   ];
 
   const settled = await Promise.allSettled(
     discoveryRequests.map(async (req) => {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const r = await f(req.url, {
-            method: 'GET',
-            headers: getHeaders(token, 'https://discord.com/quest-home', req.platform),
-            signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(6000) : undefined,
-          });
-          if (r.ok) return await safeJson(r);
-          if (r.status === 429 && attempt === 0) {
-            const errJson = await safeJson(r);
-            const wait = Math.min(3000, Number(errJson?.retry_after || 1) * 1000);
-            await sleep(wait);
-            continue;
-          }
-          return null;
-        } catch {
-          return null;
-        }
+      try {
+        const r = await f(req.url, {
+          method: 'GET',
+          headers: getHeaders(token, 'https://discord.com/quest-home', req.platform),
+          signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(5000) : undefined,
+        });
+        if (r.ok) return await safeJson(r);
+        return null;
+      } catch {
+        return null;
       }
-      return null;
     })
   );
 
@@ -992,43 +986,26 @@ async function fetchQuests(token) {
     }
   }
 
-  // 3. Với các quest từ get-decisions thiếu config hoặc thiếu task_config, fetch chi tiết từng quest
+  // 3. Kết quả danh sách Quest: lọc các nhiệm vụ hợp lệ có config/tasks thực tế (loại trừ banner ID trống)
   const resultList = [];
   for (const [id, q] of questMap.entries()) {
     if (excludedIds.has(id)) continue;
-    let enriched = q;
-    const hasTasks = Object.keys(extractQuestTasks(enriched)).length > 0;
-    if (!hasTasks) {
-      try {
-        let detailRes = await f(`https://discord.com/api/v9/quests/${id}`, {
-          method: 'GET',
-          headers: getHeaders(token, 'https://discord.com/quest-home', 'desktop'),
-          signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(5000) : undefined,
-        });
-        if (!detailRes.ok) {
-          detailRes = await f(`https://discord.com/api/v9/quests/${id}`, {
-            method: 'GET',
-            headers: getHeaders(token, 'https://discord.com/quest-home', 'mobile'),
-            signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(5000) : undefined,
-          });
-        }
-        if (detailRes.ok) {
-          const detail = await safeJson(detailRes);
-          if (detail) {
-            const cfg = detail.config || detail;
-            enriched = {
-              ...enriched,
-              ...detail,
-              id,
-              config: cfg,
-              user_status: detail.user_status || enriched.user_status || null,
-            };
-          }
-        }
-      } catch {}
-    }
-    if (!isExcludedQuest(enriched)) {
-      resultList.push(enriched);
+    if (isExcludedQuest(q)) continue;
+    const tasks = extractQuestTasks(q);
+    const hasTasks = Object.keys(tasks).length > 0;
+    const hasConfig = Boolean(
+      q.config?.messages ||
+      q.config?.task_config_v2 ||
+      q.config?.task_config ||
+      q.config?.video_metadata ||
+      q.messages ||
+      q.task_config_v2 ||
+      q.task_config ||
+      q.video_metadata ||
+      isVideoQuest(q)
+    );
+    if (hasTasks || hasConfig) {
+      resultList.push(q);
     }
   }
 
@@ -1158,6 +1135,11 @@ async function enrollQuest(token, questId, platformOrQuest = 0, maybeQuest = nul
         const errData = await safeJson(res);
         const errMsg = String(errData?.message || '').toLowerCase();
         lastErrorText = errData?.message || `HTTP ${res.status}`;
+
+        if (res.status === 404) {
+          // Quest không tồn tại trên platform này, không cần thử các body khác
+          break;
+        }
 
         // Đã đăng ký trước đó -> coi như enroll thành công
         if (

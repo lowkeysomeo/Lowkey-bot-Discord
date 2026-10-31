@@ -1063,7 +1063,7 @@ setWebSocketImplementation(MockWebSocket);
         finalEditReply = payload;
       },
     };
-    await executeAutoQuestFlow(mockFlowInteraction, 'user-timer-test', 'TimerTestUser', 'valid_token_xyz');
+    await executeAutoQuestFlow(mockFlowInteraction, 'valid_token_xyz', 'user-timer-test', 'TimerTestUser');
     // Chờ 1400ms để đảm bảo nếu có pendingTimer bị leak thì nó đã fire
     await new Promise((resolve) => setTimeout(resolve, 1400));
     assert(finalEditReply && finalEditReply.embeds && finalEditReply.embeds.length > 0, 'executeAutoQuestFlow không được để timer ghi đè mất embed kết quả');
