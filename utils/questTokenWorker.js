@@ -106,7 +106,7 @@ function getSuperProperties(platformType = 'desktop') {
         browser_user_agent: '',
         browser_version: '',
         os_version: '18.2',
-        client_build_number: 365420,
+        client_build_number: 643186,
         client_event_source: null,
         design_id: 0,
       }
@@ -114,17 +114,17 @@ function getSuperProperties(platformType = 'desktop') {
         os: 'Windows',
         browser: 'Discord Client',
         release_channel: 'stable',
-        client_version: '1.0.9175',
+        client_version: '1.0.9264',
         os_version: '10.0.22631',
         os_arch: 'x64',
         app_arch: 'x64',
         system_locale: 'vi-VN',
         has_client_mods: false,
         browser_user_agent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9175 Chrome/128.0.6613.186 Electron/32.2.7 Safari/537.36',
-        browser_version: '32.2.7',
-        client_build_number: 365420,
-        native_build_number: 56214,
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9264 Chrome/148.0.7778.280 Electron/42.11.15 Safari/537.36',
+        browser_version: '42.11.15',
+        client_build_number: 643186,
+        native_build_number: 95452,
         client_event_source: null,
       };
   return Buffer.from(JSON.stringify(props), 'utf8').toString('base64');
@@ -514,9 +514,9 @@ function getQuestProgressSeconds(quest) {
     return getQuestTargetSeconds(quest);
   }
 
+  let maxVal = 0;
   const progressMap = userStatus.progress;
   if (progressMap && typeof progressMap === 'object') {
-    let maxVal = 0;
     for (const key of ALL_SUPPORTED_TASK_KEYS) {
       const entry = progressMap[key];
       if (entry && typeof entry === 'object') {
@@ -534,13 +534,14 @@ function getQuestProgressSeconds(quest) {
         maxVal = entry;
       }
     }
-    if (maxVal > 0) return maxVal;
   }
 
   const streamProgress = Number(
     userStatus.stream_progress_seconds ?? userStatus.streamProgressSeconds ?? 0
   );
-  return streamProgress > 0 ? streamProgress : 0;
+  if (streamProgress > maxVal) maxVal = streamProgress;
+
+  return maxVal > 0 ? maxVal : 0;
 }
 
 function getQuestApplicationInfo(quest) {
@@ -870,7 +871,7 @@ async function fetchQuests(token) {
     }
   } catch {}
 
-  // 2. Quét thêm tất cả các placement của get-decisions & decision (bao gồm cả Mobile header để bắt Mobile Video Quest mới ra)
+  // 2. Quét thêm tất cả các placement của get-decisions (bao gồm cả Mobile header để bắt Mobile Video Quest mới ra)
   const hbSessionId = randomUUID();
   const adSessionId = randomUUID();
   const discoveryRequests = [
@@ -899,17 +900,30 @@ async function fetchQuests(token) {
       platform: 'mobile',
     },
     { url: 'https://discord.com/api/v9/quests/@me', platform: 'mobile' },
-    { url: 'https://discord.com/api/v9/quests/decision?placement=11', platform: 'desktop' },
-    { url: 'https://discord.com/api/v9/quests/decision?placement=3', platform: 'desktop' },
   ];
 
   const settled = await Promise.allSettled(
-    discoveryRequests.map((req) =>
-      f(req.url, {
-        method: 'GET',
-        headers: getHeaders(token, 'https://discord.com/quest-home', req.platform),
-      }).then(async (r) => (r.ok ? safeJson(r) : null))
-    )
+    discoveryRequests.map(async (req) => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const r = await f(req.url, {
+            method: 'GET',
+            headers: getHeaders(token, 'https://discord.com/quest-home', req.platform),
+          });
+          if (r.ok) return await safeJson(r);
+          if (r.status === 429 && attempt === 0) {
+            const errJson = await safeJson(r);
+            const wait = Math.min(3000, Number(errJson?.retry_after || 1) * 1000);
+            await sleep(wait);
+            continue;
+          }
+          return null;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    })
   );
 
   for (const item of settled) {
@@ -1275,7 +1289,8 @@ async function completeVideoQuest(token, quest, options = {}) {
   const targetSeconds = Math.max(1, Number(videoInfo?.targetSeconds || getQuestTargetSeconds(quest) || 60));
   const platformType = isMobileVideoOnlyQuest(quest) ? 'mobile' : 'desktop';
   const isFastTest = Boolean(options.fastTest);
-  const stepDelayMs = isFastTest ? 5 : Math.max(250, Number(options.videoStepDelayMs ?? 1000));
+  const rawDelay = options.videoStepDelayMs !== undefined ? options.videoStepDelayMs : options.heartbeatDelayMs;
+  const stepDelayMs = isFastTest ? 5 : (rawDelay !== undefined ? Math.max(1, Number(rawDelay)) : 1000);
   const stepSeconds = isFastTest ? 15 : Math.max(5, Math.min(15, Number(options.videoStepSeconds ?? 10)));
   // Mặc định KHÔNG claim trừ khi options.autoClaim === true
   const shouldClaim = options.autoClaim === true;
@@ -1427,7 +1442,7 @@ async function completeSingleQuest(token, quest, options = {}) {
   const appInfo = getQuestApplicationInfo(quest);
   const targetSeconds = Math.max(1, getQuestTargetSeconds(quest));
   const isFastTest = Boolean(options.fastTest);
-  const heartbeatDelayMs = isFastTest ? 10 : Math.max(500, Number(options.heartbeatDelayMs ?? 20000));
+  const heartbeatDelayMs = isFastTest ? 10 : (options.heartbeatDelayMs !== undefined ? Math.max(1, Number(options.heartbeatDelayMs)) : 20000);
   // Mặc định KHÔNG claim trừ khi options.autoClaim === true
   const shouldClaim = options.autoClaim === true;
 
@@ -1513,7 +1528,7 @@ async function completeSingleQuest(token, quest, options = {}) {
         if (updatedProgress > currentSeconds) {
           currentSeconds = updatedProgress;
         } else {
-          currentSeconds = Math.min(targetSeconds, currentSeconds + (isFastTest ? 300 : 30));
+          currentSeconds = Math.min(targetSeconds, currentSeconds + (isFastTest || heartbeatDelayMs <= 100 ? 300 : 30));
         }
 
         if (hbRes.data.completed_at || currentSeconds >= targetSeconds) {
@@ -1644,6 +1659,8 @@ async function runAutoQuestForToken(token, options = {}) {
     // PHASE 1: Tự động nhận (Enroll) toàn bộ nhiệm vụ Video & Game chưa nhận
     let newlyEnrolledInPass = 0;
     for (const q of activeQuests) {
+      const qid = String(q.id);
+      if (resultsMap.has(qid) && resultsMap.get(qid).completed) continue;
       if (isQuestCompleted(q)) continue;
       if (!q.user_status?.enrolled_at) {
         const enrollRes = await enrollQuest(cleanToken, q.id, q);
@@ -1680,6 +1697,11 @@ async function runAutoQuestForToken(token, options = {}) {
     const alreadyDoneQuests = [];
 
     for (const q of activeQuests) {
+      const qid = String(q.id);
+      if (resultsMap.has(qid) && resultsMap.get(qid).completed) {
+        continue;
+      }
+
       if (isQuestCompleted(q)) {
         alreadyDoneQuests.push(q);
         continue;

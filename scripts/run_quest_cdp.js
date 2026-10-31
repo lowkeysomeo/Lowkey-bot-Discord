@@ -9,7 +9,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, execSync } = require('node:child_process');
 const readline = require('node:readline');
-const { QUEST_SCRIPT } = require('../utils/questManager');
+const SCRIPT_PATH = path.join(__dirname, 'quest_desktop_script.js');
+let QUEST_SCRIPT = '';
+try {
+  QUEST_SCRIPT = fs.readFileSync(SCRIPT_PATH, 'utf8');
+} catch (e) {
+  console.warn('[ERROR] Khong the nap scripts/quest_desktop_script.js:', e.message);
+}
 
 const TOKEN_CACHE_PATH = path.join(__dirname, '..', 'data', 'saved_quest_token.txt');
 

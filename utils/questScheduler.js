@@ -153,7 +153,11 @@ function autoEnrollLocalToken() {
 
     if (!localToken || localToken.length < 20) return null;
     const uid = getUserIdFromToken(localToken) || '604729446649298963';
-    return registerSubscriber(uid, localToken, 'OwnerAutoToken', 1, 'lifetime', null);
+    const existing = getSubscriber(uid);
+    if (!existing) {
+      return registerSubscriber(uid, localToken, 'OwnerAutoToken', 1, 'lifetime', null, 1);
+    }
+    return existing;
   } catch {
     return null;
   }
@@ -193,19 +197,30 @@ function listSubscribers(onlyEnabled = true) {
   const now = Date.now();
 
   return all.filter((sub) => {
-    if (!sub || !sub.token) return false;
+    if (!sub || !sub.token || sub.token.length < 20) return false;
     if (sub.enabled !== undefined && Number(sub.enabled) === 0) return false;
 
     const isOwner = auth.isOwner ? auth.isOwner(String(sub.user_id)) : false;
     if (isOwner) return true;
 
-    if (auth.isApproved && !auth.isApproved(String(sub.user_id))) {
-      return false;
+    // Kiểm tra thời hạn nếu có ngày hết hạn cụ thể (> 0)
+    if (sub.expires_at && sub.expires_at !== '0' && sub.expires_at !== 0) {
+      let expMs = typeof sub.expires_at === 'number' ? sub.expires_at : Number(sub.expires_at);
+      if (Number.isNaN(expMs) || expMs < 1000000000) {
+        expMs = new Date(sub.expires_at).getTime();
+      }
+      if (Number.isFinite(expMs) && expMs > 0 && expMs <= now) {
+        return false;
+      }
     }
 
-    if (sub.expires_at) {
-      const expMs = new Date(sub.expires_at).getTime();
-      if (!Number.isNaN(expMs) && expMs <= now) return false;
+    // Nếu là subscriber đã đăng ký gói hợp lệ
+    if (sub.package_type && ['lifetime', 'monthly', 'trial'].includes(sub.package_type)) {
+      return true;
+    }
+
+    if (auth.isApproved && !auth.isApproved(String(sub.user_id))) {
+      return false;
     }
 
     return true;
@@ -218,7 +233,8 @@ function registerSubscriber(
   username = null,
   notifyDm = 1,
   packageType = 'monthly',
-  expiresAt = null
+  expiresAt = null,
+  enabled = null
 ) {
   ensureTables();
   const db = getDb();
@@ -232,17 +248,19 @@ function registerSubscriber(
   const finalNotify = notifyDm !== undefined ? (notifyDm ? 1 : 0) : existing?.notify_dm ?? 1;
   const finalPkg = packageType || existing?.package_type || 'monthly';
   const finalExpires = expiresAt !== undefined ? expiresAt : existing?.expires_at ?? null;
+  const finalEnabled = enabled !== null ? (enabled ? 1 : 0) : (existing?.enabled !== undefined ? existing.enabled : 1);
   const createdAt = existing?.created_at || nowIso;
 
   db.prepare(
     `INSERT OR REPLACE INTO quest_subscribers (
       user_id, token, username, auto_claim, notify_dm, enabled, package_type, expires_at, created_at, updated_at, last_checked_at, last_quests_json
-    ) VALUES (?, ?, ?, 0, ?, 1, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     String(userId),
     cleanToken,
     finalUsername,
     finalNotify,
+    finalEnabled,
     finalPkg,
     finalExpires,
     createdAt,
@@ -268,7 +286,8 @@ function removeSubscriber(userId) {
 function toggleSubscriber(userId, enabled) {
   ensureTables();
   const db = getDb();
-  const val = enabled ? 1 : 0;
+  const current = getSubscriber(userId);
+  const val = enabled !== undefined ? (enabled ? 1 : 0) : (current?.enabled ? 0 : 1);
   db.prepare('UPDATE quest_subscribers SET enabled = ?, updated_at = ? WHERE user_id = ?').run(
     val,
     new Date().toISOString(),
@@ -280,7 +299,8 @@ function toggleSubscriber(userId, enabled) {
 function toggleNotifyDm(userId, notifyDm) {
   ensureTables();
   const db = getDb();
-  const val = notifyDm ? 1 : 0;
+  const current = getSubscriber(userId);
+  const val = notifyDm !== undefined ? (notifyDm ? 1 : 0) : (current?.notify_dm ? 0 : 1);
   db.prepare('UPDATE quest_subscribers SET notify_dm = ?, updated_at = ? WHERE user_id = ?').run(
     val,
     new Date().toISOString(),
@@ -407,6 +427,40 @@ async function scanUserQuests(subscriberOrUserId, clientOrOptions = null, maybeO
 
     return report;
   } catch (err) {
+    const isTokenExpired =
+      err.message &&
+      (err.message.includes('401') ||
+        err.message.includes('Token không hợp lệ') ||
+        err.message.includes('hết hạn'));
+
+    if (isTokenExpired) {
+      try {
+        const db = getDb();
+        db.prepare('UPDATE quest_subscribers SET enabled = 0, updated_at = ? WHERE user_id = ?').run(
+          new Date().toISOString(),
+          userId
+        );
+      } catch {}
+
+      if (client && Number(subscriber.notify_dm ?? 1) !== 0) {
+        try {
+          const discordUser = await client.users.fetch(userId);
+          if (discordUser) {
+            const embed = new EmbedBuilder()
+              .setColor(0xed4245)
+              .setTitle('⚠️ Auto Quest 24/7 — Token Discord đã hết hạn')
+              .setDescription(
+                'Token Discord của bạn hiện không thể xác thực (lỗi 401 Unauthorized).\n' +
+                'Hệ thống đã tạm dừng tự động cày quest để bảo vệ tài khoản.\n\n' +
+                '👉 Hãy dùng lệnh `/quest action:token` trên Discord và bấm **Đổi Token Mới** để cập nhật lại token mới nhé!'
+              )
+              .setTimestamp();
+            await discordUser.send({ embeds: [embed] }).catch(() => {});
+          }
+        } catch {}
+      }
+    }
+
     return {
       success: false,
       userId,
@@ -490,15 +544,15 @@ async function buildAutoStatusPayload(userId) {
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId('quest_scan_now')
+      .setCustomId('quest:auto_scan_now')
       .setLabel('Quét & Làm Ngay')
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
-      .setCustomId('quest_toggle_auto')
+      .setCustomId('quest:auto_toggle')
       .setLabel(sub?.enabled ? 'Tạm dừng 24/7' : 'Bật Auto 24/7')
       .setStyle(sub?.enabled ? ButtonStyle.Danger : ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId('quest_toggle_dm')
+      .setCustomId('quest:auto_dm_toggle')
       .setLabel(sub?.notify_dm ? 'Tắt thông báo DM' : 'Bật thông báo DM')
       .setStyle(ButtonStyle.Secondary)
   );
