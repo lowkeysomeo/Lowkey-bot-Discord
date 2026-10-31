@@ -49,8 +49,14 @@ const GAME_TASK_KEYS = [
   'PLAY_ON_DESKTOP_V2',
   'PLAY_ON_XBOX',
   'PLAY_ON_PLAYSTATION',
-  'STREAM_ON_DESKTOP',
+  'PLAY_ON_MOBILE',
+  'PLAY_ON_MOBILE_OR_DESKTOP',
   'PLAY_ACTIVITY',
+  'PLAY_GAME',
+  'PLAY_ANYWHERE',
+  'STREAM_ON_DESKTOP',
+  'STREAM_ON_MOBILE',
+  'STREAM_ANYWHERE',
   'ACHIEVEMENT_IN_GAME',
 ];
 
@@ -75,7 +81,10 @@ function normalizeToken(rawToken) {
   if (!rawToken || typeof rawToken !== 'string') return '';
   return rawToken
     .trim()
-    .replace(/^["']+|["']+$/g, '')
+    .replace(/^Token:\s*/i, '')
+    .replace(/^Bearer\s+/i, '')
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .replace(/^Token:\s*/i, '')
     .replace(/^Bearer\s+/i, '')
     .trim();
 }
@@ -133,20 +142,23 @@ function getSuperProperties(platformType = 'desktop') {
 function getHeaders(rawToken, referer = 'https://discord.com/quest-home', platformType = 'desktop') {
   const token = normalizeToken(rawToken);
   const isMobile = platformType === 'mobile';
-  return {
+  const headers = {
     Authorization: token,
     'Content-Type': 'application/json',
     Accept: '*/*',
     'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
     'User-Agent': isMobile
       ? 'Discord-iOS/264.0 (iPhone; iOS 18.2; Scale/3.00)'
-      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9175 Chrome/128.0.6613.186 Electron/32.2.7 Safari/537.36',
+      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) discord/1.0.9264 Chrome/148.0.7778.280 Electron/42.11.15 Safari/537.36',
     'X-Super-Properties': getSuperProperties(platformType),
     'X-Discord-Locale': 'vi',
     'X-Discord-Timezone': 'Asia/Ho_Chi_Minh',
-    Origin: 'https://discord.com',
-    Referer: referer,
   };
+  if (!isMobile) {
+    headers.Origin = 'https://discord.com';
+    headers.Referer = referer || 'https://discord.com/quest-home';
+  }
+  return headers;
 }
 
 async function safeJson(res) {
@@ -277,20 +289,31 @@ class DiscordUserGateway {
   }
 
   sendIdentify(activityInfo) {
+    const isMobile = Boolean(activityInfo?.isMobile);
     this.sendJson({
       op: 2,
       d: {
         token: this.token,
         capabilities: 16381,
-        properties: {
-          os: 'Windows',
-          browser: 'Discord Client',
-          device: '',
-          system_locale: 'vi-VN',
-          client_version: '1.0.9175',
-          release_channel: 'stable',
-          client_build_number: 365420,
-        },
+        properties: isMobile
+          ? {
+              os: 'iOS',
+              browser: 'Discord iOS',
+              device: 'iPhone16,2',
+              system_locale: 'vi-VN',
+              client_version: '264.0',
+              release_channel: 'stable',
+              client_build_number: 643186,
+            }
+          : {
+              os: 'Windows',
+              browser: 'Discord Client',
+              device: '',
+              system_locale: 'vi-VN',
+              client_version: '1.0.9264',
+              release_channel: 'stable',
+              client_build_number: 643186,
+            },
         presence: {
           status: 'online',
           since: 0,
@@ -407,6 +430,35 @@ function isVideoQuest(quest) {
 function isMobileVideoOnlyQuest(quest) {
   const tasks = extractQuestTasks(quest);
   return Boolean(tasks.WATCH_VIDEO_ON_MOBILE && !tasks.WATCH_VIDEO && !tasks.WATCH_VIDEO_DESKTOP);
+}
+
+function isMobileQuest(quest) {
+  if (!quest || typeof quest !== 'object') return false;
+  const tasks = extractQuestTasks(quest);
+  if (
+    tasks.PLAY_ON_MOBILE ||
+    tasks.PLAY_ON_MOBILE_OR_DESKTOP ||
+    tasks.WATCH_VIDEO_ON_MOBILE ||
+    tasks.STREAM_ON_MOBILE
+  ) {
+    return true;
+  }
+  const cfg = quest.config || quest;
+  const features = cfg?.features || [];
+  if (
+    features.includes('MOBILE_QUEST') ||
+    features.includes('PLAY_ON_MOBILE') ||
+    features.includes('MOBILE_ONLY')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function isMobileVideoQuest(quest) {
+  if (!quest || typeof quest !== 'object') return false;
+  const tasks = extractQuestTasks(quest);
+  return Boolean(tasks.WATCH_VIDEO_ON_MOBILE || (isVideoQuest(quest) && isMobileQuest(quest)));
 }
 
 function getVideoTaskInfo(quest) {
@@ -574,7 +626,8 @@ function getQuestApplicationInfo(quest) {
       'Discord Quest Game';
   }
 
-  let isStream = Boolean(tasks.STREAM_ON_DESKTOP);
+  const isStream = Boolean(tasks.STREAM_ON_DESKTOP || tasks.STREAM_ON_MOBILE || tasks.STREAM_ANYWHERE);
+  const isMobile = isMobileQuest(quest);
   let taskType = null;
 
   for (const key of GAME_TASK_KEYS) {
@@ -604,8 +657,9 @@ function getQuestApplicationInfo(quest) {
     name: appName,
     appName: appName,
     applicationName: appName,
-    taskType: taskType || (isVideoQuest(quest) ? 'WATCH_VIDEO' : 'PLAY_ON_DESKTOP'),
+    taskType: taskType || (isVideoQuest(quest) ? 'WATCH_VIDEO' : (isMobile ? 'PLAY_ON_MOBILE' : 'PLAY_ON_DESKTOP')),
     isStream,
+    isMobile,
   };
 }
 
@@ -871,7 +925,7 @@ async function fetchQuests(token) {
     }
   } catch {}
 
-  // 2. Quét thêm tất cả các placement của get-decisions (bao gồm cả Mobile header để bắt Mobile Video Quest mới ra)
+  // 2. Quét thêm tất cả các placement của get-decisions (cả Desktop & Mobile headers để không sót bất kỳ Video/Game Quest nào)
   const hbSessionId = randomUUID();
   const adSessionId = randomUUID();
   const discoveryRequests = [
@@ -897,6 +951,26 @@ async function fetchQuests(token) {
     },
     {
       url: `https://discord.com/api/v9/quests/get-decisions?placement=11&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+      platform: 'mobile',
+    },
+    {
+      url: `https://discord.com/api/v9/quests/get-decisions?placement=1&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+      platform: 'mobile',
+    },
+    {
+      url: `https://discord.com/api/v9/quests/get-decisions?placement=3&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+      platform: 'mobile',
+    },
+    {
+      url: `https://discord.com/api/v9/quests/get-decisions?placement=4&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+      platform: 'mobile',
+    },
+    {
+      url: `https://discord.com/api/v9/quests/get-decisions?placement=0&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
+      platform: 'mobile',
+    },
+    {
+      url: `https://discord.com/api/v9/quests/get-decisions?placement=12&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
       platform: 'mobile',
     },
     { url: 'https://discord.com/api/v9/quests/@me', platform: 'mobile' },
@@ -940,10 +1014,16 @@ async function fetchQuests(token) {
     const hasTasks = Object.keys(extractQuestTasks(enriched)).length > 0;
     if (!hasTasks) {
       try {
-        const detailRes = await f(`https://discord.com/api/v9/quests/${id}`, {
+        let detailRes = await f(`https://discord.com/api/v9/quests/${id}`, {
           method: 'GET',
-          headers: getHeaders(token),
+          headers: getHeaders(token, 'https://discord.com/quest-home', 'desktop'),
         });
+        if (!detailRes.ok) {
+          detailRes = await f(`https://discord.com/api/v9/quests/${id}`, {
+            method: 'GET',
+            headers: getHeaders(token, 'https://discord.com/quest-home', 'mobile'),
+          });
+        }
         if (detailRes.ok) {
           const detail = await safeJson(detailRes);
           if (detail) {
@@ -986,12 +1066,13 @@ async function enrollQuest(token, questId, platformOrQuest = 0, maybeQuest = nul
 
   const tasks = questObj ? extractQuestTasks(questObj) : {};
   const isVideo = questObj ? isVideoQuest(questObj) : (platform === -1 || platform === null || platform === false);
-  const isMobileVideo = questObj ? isMobileVideoOnlyQuest(questObj) : false;
-  const platformType = isMobileVideo ? 'mobile' : 'desktop';
+  const isMobileVideo = questObj ? Boolean(tasks.WATCH_VIDEO_ON_MOBILE || isMobileVideoOnlyQuest(questObj)) : false;
+  const isMobileGame = Boolean(tasks.PLAY_ON_MOBILE || tasks.PLAY_ON_MOBILE_OR_DESKTOP || tasks.STREAM_ON_MOBILE);
+  const isMobile = isMobileVideo || isMobileGame || platform === 2;
 
   let selectedPlatform = platform;
   if (questObj && !isVideo) {
-    if (tasks.PLAY_ON_MOBILE || tasks.WATCH_VIDEO_ON_MOBILE) {
+    if (tasks.PLAY_ON_MOBILE || tasks.WATCH_VIDEO_ON_MOBILE || tasks.STREAM_ON_MOBILE) {
       selectedPlatform = 2;
     } else if (tasks.PLAY_ON_PLAYSTATION || tasks.PLAY_ON_XBOX) {
       selectedPlatform = 1;
@@ -1004,43 +1085,72 @@ async function enrollQuest(token, questId, platformOrQuest = 0, maybeQuest = nul
   const rawMeta = questObj?.traffic_metadata_raw || questObj?.metadata_raw || null;
 
   const enrollBodies = [];
-  if (sealed) {
+  if (isMobile) {
+    if (sealed) {
+      enrollBodies.push(
+        {
+          location: 11,
+          platform: selectedPlatform,
+          is_targeted: true,
+          metadata_raw: rawMeta,
+          metadata_sealed: sealed,
+          traffic_metadata_raw: rawMeta,
+          traffic_metadata_sealed: sealed,
+        },
+        { location: 1, platform: selectedPlatform, traffic_metadata_sealed: sealed },
+        { location: 11, traffic_metadata_sealed: sealed },
+        { location: 3, traffic_metadata_sealed: sealed }
+      );
+    }
     enrollBodies.push(
-      {
-        location: 11,
-        is_targeted: true,
-        metadata_raw: rawMeta,
-        metadata_sealed: sealed,
-        traffic_metadata_raw: rawMeta,
-        traffic_metadata_sealed: sealed,
-      },
-      { location: 11, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed },
-      { location: 3, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed }
+      { location: 11, platform: selectedPlatform },
+      { location: 1, platform: selectedPlatform },
+      { platform: selectedPlatform },
+      { location: 11 },
+      { location: 1 },
+      { location: 3 },
+      { location: 0 },
+      {}
     );
-  }
+  } else {
+    if (sealed) {
+      enrollBodies.push(
+        {
+          location: 11,
+          is_targeted: true,
+          metadata_raw: rawMeta,
+          metadata_sealed: sealed,
+          traffic_metadata_raw: rawMeta,
+          traffic_metadata_sealed: sealed,
+        },
+        { location: 11, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed },
+        { location: 3, is_targeted: false, metadata_sealed: null, traffic_metadata_sealed: sealed }
+      );
+    }
 
-  enrollBodies.push(
-    { location: 11, is_targeted: false, metadata_raw: null, metadata_sealed: null },
-    { location: 3, is_targeted: false, metadata_raw: null, metadata_sealed: null },
-    { location: 11, is_targeted: false, metadata_sealed: null },
-    { location: 3, is_targeted: false, metadata_sealed: null },
-    { location: 11 },
-    { location: 3 },
-    { location: 1 },
-    { location: 0 },
-    {}
-  );
+    enrollBodies.push(
+      { location: 11, is_targeted: false, metadata_raw: null, metadata_sealed: null },
+      { location: 3, is_targeted: false, metadata_raw: null, metadata_sealed: null },
+      { location: 11, is_targeted: false, metadata_sealed: null },
+      { location: 3, is_targeted: false, metadata_sealed: null },
+      { location: 11 },
+      { location: 3 },
+      { location: 1 },
+      { location: 0 },
+      {}
+    );
 
-  if (!isVideo) {
-    enrollBodies.push({ location: 11, platform: selectedPlatform, is_targeted: false, metadata_sealed: null });
-    enrollBodies.push({ platform: selectedPlatform });
+    if (!isVideo) {
+      enrollBodies.push({ location: 11, platform: selectedPlatform, is_targeted: false, metadata_sealed: null });
+      enrollBodies.push({ platform: selectedPlatform });
+    }
   }
 
   let enrolledData = null;
   let lastStatus = 0;
   let lastErrorText = '';
 
-  const platformOrder = isMobileVideo ? ['mobile', 'desktop'] : ['desktop', 'mobile'];
+  const platformOrder = isMobile ? ['mobile', 'desktop'] : ['desktop', 'mobile'];
 
   outerLoop: for (const pType of platformOrder) {
     for (const bodyObj of enrollBodies) {
@@ -1193,6 +1303,8 @@ async function sendHeartbeat(token, questId, streamKey = null, options = {}) {
   const effectiveUserId = options.userId || getUserIdFromToken(token) || '0';
   const fakeChannelId = options.channelId || '1000000000000000000';
   const selfCallKey = `call:${fakeChannelId}:${effectiveUserId}`;
+  const isMobile = Boolean(options.isMobile || options.platformType === 'mobile');
+  const platformOrder = isMobile ? ['mobile', 'desktop'] : ['desktop', 'mobile'];
 
   const candidateBodies = [];
   if (streamKey && applicationId) {
@@ -1228,29 +1340,32 @@ async function sendHeartbeat(token, questId, streamKey = null, options = {}) {
   let lastStatus = 0;
   let lastData = null;
 
-  for (const bodyObj of candidateBodies) {
-    try {
-      const res = await f(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
-        method: 'POST',
-        headers: getHeaders(token),
-        body: JSON.stringify(bodyObj),
-      });
-      lastStatus = res.status;
-      lastData = await safeJson(res);
+  for (const pType of platformOrder) {
+    for (const bodyObj of candidateBodies) {
+      try {
+        const res = await f(`https://discord.com/api/v9/quests/${questId}/heartbeat`, {
+          method: 'POST',
+          headers: getHeaders(token, 'https://discord.com/quest-home', pType),
+          body: JSON.stringify(bodyObj),
+        });
+        lastStatus = res.status;
+        lastData = await safeJson(res);
 
-      if (res.ok) {
-        return {
-          ok: true,
-          status: res.status,
-          data: lastData,
-        };
-      }
+        if (res.ok) {
+          return {
+            ok: true,
+            status: res.status,
+            data: lastData,
+            platform: pType,
+          };
+        }
 
-      if (res.status === 429) {
-        const retryMs = Number(lastData?.retry_after || 2) * 1000;
-        await sleep(Math.min(8000, Math.max(1500, retryMs)));
-      }
-    } catch {}
+        if (res.status === 429) {
+          const retryMs = Number(lastData?.retry_after || 2) * 1000;
+          await sleep(Math.min(8000, Math.max(1500, retryMs)));
+        }
+      } catch {}
+    }
   }
 
   return {
@@ -1262,18 +1377,28 @@ async function sendHeartbeat(token, questId, streamKey = null, options = {}) {
 
 async function claimQuestReward(token, questId, platform = 0) {
   const f = getFetch();
-  const bodies = [{ platform, location: 11 }, { platform }, {}];
-  for (const body of bodies) {
-    try {
-      const res = await f(`https://discord.com/api/v9/quests/${questId}/claim-reward`, {
-        method: 'POST',
-        headers: getHeaders(token),
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        return { ok: true, success: true, data: await safeJson(res) };
-      }
-    } catch {}
+  const isMobile = platform === 2;
+  const platformOrder = isMobile ? ['mobile', 'desktop'] : ['desktop', 'mobile'];
+  const bodies = [
+    { platform, location: 11 },
+    { platform, location: 1 },
+    { platform },
+    {},
+  ];
+
+  for (const pType of platformOrder) {
+    for (const body of bodies) {
+      try {
+        const res = await f(`https://discord.com/api/v9/quests/${questId}/claim-reward`, {
+          method: 'POST',
+          headers: getHeaders(token, 'https://discord.com/quest-home', pType),
+          body: JSON.stringify(body),
+        });
+        if (res.ok) {
+          return { ok: true, success: true, data: await safeJson(res) };
+        }
+      } catch {}
+    }
   }
   return { ok: false, success: false };
 }
@@ -1287,7 +1412,8 @@ async function completeVideoQuest(token, quest, options = {}) {
   const questName = getQuestDisplayName(quest);
   const videoInfo = getVideoTaskInfo(quest);
   const targetSeconds = Math.max(1, Number(videoInfo?.targetSeconds || getQuestTargetSeconds(quest) || 60));
-  const platformType = isMobileVideoOnlyQuest(quest) ? 'mobile' : 'desktop';
+  const tasks = extractQuestTasks(quest);
+  let platformType = tasks.WATCH_VIDEO_ON_MOBILE || isMobileVideoOnlyQuest(quest) ? 'mobile' : 'desktop';
   const isFastTest = Boolean(options.fastTest);
   const rawDelay = options.videoStepDelayMs !== undefined ? options.videoStepDelayMs : options.heartbeatDelayMs;
   const stepDelayMs = isFastTest ? 5 : (rawDelay !== undefined ? Math.max(1, Number(rawDelay)) : 1000);
@@ -1316,7 +1442,7 @@ async function completeVideoQuest(token, quest, options = {}) {
   if (isQuestCompleted(quest)) {
     let claimed = Boolean(quest.user_status?.claimed_at);
     if (!claimed && shouldClaim) {
-      const claimRes = await claimQuestReward(token, questId, 0);
+      const claimRes = await claimQuestReward(token, questId, platformType === 'mobile' ? 2 : 0);
       claimed = Boolean(claimRes.ok);
     }
     return {
@@ -1350,7 +1476,14 @@ async function completeVideoQuest(token, quest, options = {}) {
 
   // Gửi mốc khởi đầu (nếu đang ở 0s) để kích hoạt phiên xem video trên server Discord
   if (currentSeconds <= 0) {
-    await sendVideoProgress(token, questId, Math.min(1, targetSeconds), platformType);
+    let initRes = await sendVideoProgress(token, questId, Math.min(1, targetSeconds), platformType);
+    if (!initRes.ok) {
+      const fallbackPlatform = platformType === 'desktop' ? 'mobile' : 'desktop';
+      const fb = await sendVideoProgress(token, questId, Math.min(1, targetSeconds), fallbackPlatform);
+      if (fb.ok) {
+        platformType = fallbackPlatform;
+      }
+    }
   }
 
   let serverCompleted = false;
@@ -1361,10 +1494,14 @@ async function completeVideoQuest(token, quest, options = {}) {
     safetyCounter++;
     currentSeconds = Math.min(targetSeconds, currentSeconds + stepSeconds);
 
-    const res = await sendVideoProgress(token, questId, currentSeconds, platformType);
-    if (!res.ok && platformType === 'desktop') {
-      // Fallback sang mobile header nếu video yêu cầu mobile
-      await sendVideoProgress(token, questId, currentSeconds, 'mobile');
+    let res = await sendVideoProgress(token, questId, currentSeconds, platformType);
+    if (!res.ok) {
+      const fallbackPlatform = platformType === 'desktop' ? 'mobile' : 'desktop';
+      const fb = await sendVideoProgress(token, questId, currentSeconds, fallbackPlatform);
+      if (fb.ok) {
+        platformType = fallbackPlatform;
+        res = fb;
+      }
     }
 
     if (res.data && typeof res.data === 'object') {
@@ -1392,7 +1529,15 @@ async function completeVideoQuest(token, quest, options = {}) {
   }
 
   // Chốt mốc cuối cùng tại đúng targetSeconds để đảm bảo server ghi nhận 100%
-  const finalRes = await sendVideoProgress(token, questId, targetSeconds, platformType);
+  let finalRes = await sendVideoProgress(token, questId, targetSeconds, platformType);
+  if (!finalRes.ok) {
+    const fallbackPlatform = platformType === 'desktop' ? 'mobile' : 'desktop';
+    const fb = await sendVideoProgress(token, questId, targetSeconds, fallbackPlatform);
+    if (fb.ok) {
+      platformType = fallbackPlatform;
+      finalRes = fb;
+    }
+  }
   if (finalRes.data && typeof finalRes.data === 'object') {
     quest.user_status = { ...(quest.user_status || {}), ...finalRes.data };
     if (finalRes.data.completed_at) serverCompleted = true;
@@ -1400,7 +1545,7 @@ async function completeVideoQuest(token, quest, options = {}) {
 
   let claimed = false;
   if (shouldClaim) {
-    const claimRes = await claimQuestReward(token, questId, 0);
+    const claimRes = await claimQuestReward(token, questId, platformType === 'mobile' ? 2 : 0);
     claimed = Boolean(claimRes.ok);
   }
 
@@ -1437,6 +1582,7 @@ async function completeSingleQuest(token, quest, options = {}) {
 
   const tasks = extractQuestTasks(quest);
   const isActivity = Boolean(tasks.PLAY_ACTIVITY);
+  const isMobile = isMobileQuest(quest);
   const questId = String(quest.id);
   const questName = getQuestDisplayName(quest);
   const appInfo = getQuestApplicationInfo(quest);
@@ -1467,7 +1613,7 @@ async function completeSingleQuest(token, quest, options = {}) {
   if (isQuestCompleted(quest)) {
     let claimed = Boolean(quest.user_status?.claimed_at);
     if (!claimed && shouldClaim) {
-      const claimRes = await claimQuestReward(token, questId, 0);
+      const claimRes = await claimQuestReward(token, questId, isMobile ? 2 : 0);
       claimed = Boolean(claimRes.ok);
     }
     return {
@@ -1515,6 +1661,7 @@ async function completeSingleQuest(token, quest, options = {}) {
       const hbRes = await sendHeartbeat(token, questId, streamKey, {
         applicationId: appInfo?.id,
         userId,
+        isMobile,
         terminal: false,
       });
 
@@ -1543,7 +1690,7 @@ async function completeSingleQuest(token, quest, options = {}) {
           const f = getFetch();
           const checkRes = await f('https://discord.com/api/v9/quests/@me', {
             method: 'GET',
-            headers: getHeaders(token),
+            headers: getHeaders(token, 'https://discord.com/quest-home', isMobile ? 'mobile' : 'desktop'),
           });
           if (checkRes.ok) {
             const payload = await safeJson(checkRes);
@@ -1583,6 +1730,7 @@ async function completeSingleQuest(token, quest, options = {}) {
     await sendHeartbeat(token, questId, streamKey, {
       applicationId: appInfo?.id,
       userId,
+      isMobile,
       terminal: true,
     });
   } finally {
@@ -1591,7 +1739,7 @@ async function completeSingleQuest(token, quest, options = {}) {
 
   let claimed = false;
   if (completed && shouldClaim) {
-    const claimRes = await claimQuestReward(token, questId, 0);
+    const claimRes = await claimQuestReward(token, questId, isMobile ? 2 : 0);
     claimed = Boolean(claimRes.ok);
   }
 
@@ -1783,6 +1931,8 @@ module.exports = {
   DiscordUserGateway,
   extractQuestTasks,
   isVideoQuest,
+  isMobileQuest,
+  isMobileVideoQuest,
   isMobileVideoOnlyQuest,
   getVideoTaskInfo,
   getQuestProgressSeconds,

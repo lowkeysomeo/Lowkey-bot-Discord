@@ -34,6 +34,8 @@ const {
   getQuestProgressSeconds,
   getQuestApplicationInfo,
   isVideoQuest,
+  isMobileQuest,
+  isMobileVideoQuest,
   getVideoTaskInfo,
   extractQuestTasks,
 } = require('../utils/questTokenWorker');
@@ -562,6 +564,22 @@ setWebSocketImplementation(MockWebSocket);
     const mobileVidRes = await completeSingleQuest('valid_token_xyz', mobileVideoQuest, { heartbeatDelayMs: 10 });
     assert.equal(mobileVidRes.completed, true);
     assert.equal(mobileVidRes.type, 'video');
+
+    // Kiểm tra các helper nhận diện nhiệm vụ Mobile và đọc tiến độ task mobile
+    assert.equal(isMobileQuest(mobileGameQuest), true, 'mobileGameQuest phải được nhận diện là Mobile Quest');
+    assert.equal(isMobileQuest(mobileVideoQuest), true, 'mobileVideoQuest phải được nhận diện là Mobile Quest');
+    assert.equal(isMobileVideoQuest(mobileVideoQuest), true, 'mobileVideoQuest phải là Mobile Video Quest');
+    assert.equal(isMobileVideoQuest(mobileGameQuest), false, 'mobileGameQuest không phải là Mobile Video Quest');
+
+    const mobileWithProgress = {
+      ...mobileGameQuest,
+      user_status: {
+        progress: {
+          PLAY_ON_MOBILE: { value: 450 },
+        },
+      },
+    };
+    assert.equal(getQuestProgressSeconds(mobileWithProgress), 450, 'getQuestProgressSeconds phải đọc được giá trị tiến độ PLAY_ON_MOBILE');
 
     // 9.5 Kiểm tra helper isVideoQuest và getVideoTaskInfo
     const desktopVideoQuest = {
