@@ -1038,6 +1038,36 @@ setWebSocketImplementation(MockWebSocket);
     const discoveredFromBanner = await fetchQuests('valid_token_xyz');
     assert(discoveredFromBanner.some((q) => q.id === '1342624440894361624'), 'fetchQuests phải khám phá được Magic Star Trek từ placement=3 (Banner Desktop)');
     setFetchImplementation(mainMockFetch);
+
+    // 9.21 Kiểm tra onProgress phát đủ các bước (auth, fetch, enroll/progress)
+    const progressSteps = [];
+    const testProgressReport = await runAutoQuestForToken('valid_token_xyz', {
+      fastTest: true,
+      onProgress: (p) => {
+        progressSteps.push(p.step);
+      },
+    });
+    assert.equal(testProgressReport.success, true);
+    assert(progressSteps.includes('auth'), 'onProgress phải phát ra step: auth');
+    assert(progressSteps.includes('fetch'), 'onProgress phải phát ra step: fetch');
+
+    // 9.22 Kiểm tra executeAutoQuestFlow không bị pendingTimer ghi đè mất Embed kết quả
+    const { executeAutoQuestFlow } = require('../utils/questManager');
+    let finalEditReply = null;
+    const mockFlowInteraction = {
+      user: { id: 'user-timer-test', username: 'TimerTestUser' },
+      isButton: () => false,
+      deferReply: async () => {},
+      deferUpdate: async () => {},
+      editReply: async (payload) => {
+        finalEditReply = payload;
+      },
+    };
+    await executeAutoQuestFlow(mockFlowInteraction, 'user-timer-test', 'TimerTestUser', 'valid_token_xyz');
+    // Chờ 1400ms để đảm bảo nếu có pendingTimer bị leak thì nó đã fire
+    await new Promise((resolve) => setTimeout(resolve, 1400));
+    assert(finalEditReply && finalEditReply.embeds && finalEditReply.embeds.length > 0, 'executeAutoQuestFlow không được để timer ghi đè mất embed kết quả');
+    assert.equal(finalEditReply.content, null, 'Sau khi hoàn tất, content phải là null và embed phải được giữ nguyên');
   } finally {
     setFetchImplementation(null);
   }

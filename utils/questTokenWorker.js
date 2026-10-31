@@ -21,7 +21,15 @@ function setWebSocketImplementation(wsClass) {
 
 function getFetch() {
   if (customFetchImpl) return customFetchImpl;
-  if (typeof globalThis.fetch === 'function') return globalThis.fetch.bind(globalThis);
+  if (typeof globalThis.fetch === 'function') {
+    return (url, options = {}) => {
+      const opts = { ...options };
+      if (!opts.signal && typeof AbortSignal?.timeout === 'function') {
+        opts.signal = AbortSignal.timeout(8000);
+      }
+      return globalThis.fetch(url, opts);
+    };
+  }
   throw new Error('Môi trường Node.js không hỗ trợ fetch.');
 }
 
@@ -918,6 +926,7 @@ async function fetchQuests(token) {
     const resMain = await f('https://discord.com/api/v9/quests/@me', {
       method: 'GET',
       headers: getHeaders(token, 'https://discord.com/quest-home', 'desktop'),
+      signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(6000) : undefined,
     });
     if (resMain.ok) {
       const dataMain = await safeJson(resMain);
@@ -925,7 +934,7 @@ async function fetchQuests(token) {
     }
   } catch {}
 
-  // 2. Quét thêm tất cả các placement của get-decisions (cả Desktop & Mobile headers để không sót bất kỳ Video/Game Quest nào)
+  // 2. Quét thêm các placement chính của get-decisions (cả Desktop & Mobile) và mobile /quests/@me
   const hbSessionId = randomUUID();
   const adSessionId = randomUUID();
   const discoveryRequests = [
@@ -942,35 +951,11 @@ async function fetchQuests(token) {
       platform: 'desktop',
     },
     {
-      url: `https://discord.com/api/v9/quests/get-decisions?placement=4&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-      platform: 'desktop',
-    },
-    {
-      url: `https://discord.com/api/v9/quests/get-decisions?placement=0&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-      platform: 'desktop',
-    },
-    {
       url: `https://discord.com/api/v9/quests/get-decisions?placement=11&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
       platform: 'mobile',
     },
     {
       url: `https://discord.com/api/v9/quests/get-decisions?placement=1&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-      platform: 'mobile',
-    },
-    {
-      url: `https://discord.com/api/v9/quests/get-decisions?placement=3&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-      platform: 'mobile',
-    },
-    {
-      url: `https://discord.com/api/v9/quests/get-decisions?placement=4&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-      platform: 'mobile',
-    },
-    {
-      url: `https://discord.com/api/v9/quests/get-decisions?placement=0&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
-      platform: 'mobile',
-    },
-    {
-      url: `https://discord.com/api/v9/quests/get-decisions?placement=12&client_heartbeat_session_id=${hbSessionId}&client_ad_session_id=${adSessionId}`,
       platform: 'mobile',
     },
     { url: 'https://discord.com/api/v9/quests/@me', platform: 'mobile' },
@@ -983,6 +968,7 @@ async function fetchQuests(token) {
           const r = await f(req.url, {
             method: 'GET',
             headers: getHeaders(token, 'https://discord.com/quest-home', req.platform),
+            signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(6000) : undefined,
           });
           if (r.ok) return await safeJson(r);
           if (r.status === 429 && attempt === 0) {
@@ -1017,11 +1003,13 @@ async function fetchQuests(token) {
         let detailRes = await f(`https://discord.com/api/v9/quests/${id}`, {
           method: 'GET',
           headers: getHeaders(token, 'https://discord.com/quest-home', 'desktop'),
+          signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(5000) : undefined,
         });
         if (!detailRes.ok) {
           detailRes = await f(`https://discord.com/api/v9/quests/${id}`, {
             method: 'GET',
             headers: getHeaders(token, 'https://discord.com/quest-home', 'mobile'),
+            signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(5000) : undefined,
           });
         }
         if (detailRes.ok) {
@@ -1521,6 +1509,8 @@ async function completeVideoQuest(token, quest, options = {}) {
         currentSeconds: Math.round(currentSeconds),
         targetSeconds,
         percent,
+        index: options.index,
+        total: options.total,
       });
     }
 
@@ -1654,6 +1644,7 @@ async function completeSingleQuest(token, quest, options = {}) {
 
   let completed = false;
   let attempts = 0;
+  let consecutiveHbFailures = 0;
 
   try {
     while (currentSeconds < targetSeconds && attempts < maxAttempts) {
@@ -1666,6 +1657,7 @@ async function completeSingleQuest(token, quest, options = {}) {
       });
 
       if (hbRes.ok && hbRes.data && typeof hbRes.data === 'object') {
+        consecutiveHbFailures = 0;
         quest.user_status = {
           ...(quest.user_status || {}),
           ...hbRes.data,
@@ -1682,15 +1674,22 @@ async function completeSingleQuest(token, quest, options = {}) {
           completed = true;
         }
       } else if (isFastTest && hbRes.ok) {
+        consecutiveHbFailures = 0;
         currentSeconds = targetSeconds;
         completed = true;
       } else {
+        consecutiveHbFailures++;
+        if (consecutiveHbFailures >= 3 && !isFastTest) {
+          // Discord từ chối nhận heartbeat cho Game Quest này (yêu cầu chạy trực tiếp qua ứng dụng game/desktop)
+          break;
+        }
         // Nếu heartbeat trả lỗi tạm thời, thử refresh tiến độ từ API quest detail
         try {
           const f = getFetch();
           const checkRes = await f('https://discord.com/api/v9/quests/@me', {
             method: 'GET',
             headers: getHeaders(token, 'https://discord.com/quest-home', isMobile ? 'mobile' : 'desktop'),
+            signal: typeof AbortSignal?.timeout === 'function' ? AbortSignal.timeout(5000) : undefined,
           });
           if (checkRes.ok) {
             const payload = await safeJson(checkRes);
@@ -1715,6 +1714,8 @@ async function completeSingleQuest(token, quest, options = {}) {
           currentSeconds: Math.round(currentSeconds),
           targetSeconds,
           percent,
+          index: options.index,
+          total: options.total,
         });
       }
 
@@ -1752,14 +1753,16 @@ async function completeSingleQuest(token, quest, options = {}) {
     completed,
     claimed,
     readyToClaim: completed && !claimed,
-    requiresDesktop: false,
+    requiresDesktop: !completed,
     currentSeconds: Math.min(targetSeconds, Math.round(currentSeconds)),
     progressSeconds: Math.min(targetSeconds, Math.round(currentSeconds)),
     targetSeconds,
     progressPercent: Math.min(100, Math.round((currentSeconds / targetSeconds) * 100)),
     message: completed
       ? (claimed ? 'Đã hoàn thành 100% thời gian chơi & Nhận thưởng thành công!' : 'Hoàn thành 100% Game Quest (Không tự động Claim)')
-      : `Tiến độ đạt ${Math.round(currentSeconds)}/${targetSeconds}s (sẽ tiếp tục ở chu kỳ quét kế tiếp)`,
+      : (consecutiveHbFailures >= 3
+          ? 'Nhiệm vụ Game yêu cầu mở trực tiếp trên Discord Desktop (không thể giả lập heartbeat stream)'
+          : `Tiến độ đạt ${Math.round(currentSeconds)}/${targetSeconds}s (sẽ tiếp tục ở chu kỳ quét kế tiếp)`),
   };
 }
 
@@ -1799,6 +1802,16 @@ async function runAutoQuestForToken(token, options = {}) {
   let totalEnrolledCount = 0;
 
   for (let pass = 1; pass <= maxPasses; pass++) {
+    if (typeof runOptions.onProgress === 'function') {
+      runOptions.onProgress({
+        step: 'fetch',
+        message:
+          pass === 1
+            ? 'Đang quét danh sách nhiệm vụ Video & Game trên Discord...'
+            : `Đang quét vét nhiệm vụ vòng ${pass}...`,
+      });
+    }
+
     let allQuests = await fetchQuests(cleanToken);
     let activeQuests = allQuests.filter((q) => isQuestActive(q));
 
@@ -1811,6 +1824,12 @@ async function runAutoQuestForToken(token, options = {}) {
       if (resultsMap.has(qid) && resultsMap.get(qid).completed) continue;
       if (isQuestCompleted(q)) continue;
       if (!q.user_status?.enrolled_at) {
+        if (typeof runOptions.onProgress === 'function') {
+          runOptions.onProgress({
+            step: 'enroll',
+            message: `Đang nhận nhiệm vụ: ${getQuestDisplayName(q)}...`,
+          });
+        }
         const enrollRes = await enrollQuest(cleanToken, q.id, q);
         if (enrollRes.ok) {
           newlyEnrolledInPass++;
@@ -1863,19 +1882,25 @@ async function runAutoQuestForToken(token, options = {}) {
     }
 
     // PHASE 2: Hoàn thành 100% toàn bộ Video Quests trước (vì Video Quest xử lý rất nhanh)
-    for (const vq of pendingVideoQuests) {
+    for (let i = 0; i < pendingVideoQuests.length; i++) {
+      const vq = pendingVideoQuests[i];
       const res = await completeVideoQuest(cleanToken, vq, {
         ...runOptions,
         userId: user.id,
+        index: i + 1,
+        total: pendingVideoQuests.length,
       });
       resultsMap.set(String(vq.id), res);
     }
 
     // PHASE 3: Hoàn thành 100% toàn bộ Game / Stream / Activity Quests
-    for (const gq of pendingGameQuests) {
+    for (let i = 0; i < pendingGameQuests.length; i++) {
+      const gq = pendingGameQuests[i];
       const res = await completeSingleQuest(cleanToken, gq, {
         ...runOptions,
         userId: user.id,
+        index: i + 1,
+        total: pendingGameQuests.length,
       });
       resultsMap.set(String(gq.id), res);
     }

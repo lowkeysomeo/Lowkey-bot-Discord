@@ -620,9 +620,13 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
 
   let lastUpdate = 0;
   let pendingTimer = null;
+  let isDone = false;
+
   const updateProgress = (text) => {
+    if (isDone) return;
     const now = Date.now();
     const doUpdate = async () => {
+      if (isDone) return;
       lastUpdate = Date.now();
       await interaction.editReply({ content: text, embeds: [], components: [] }).catch(() => {});
     };
@@ -636,7 +640,9 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
     } else if (!pendingTimer) {
       pendingTimer = setTimeout(() => {
         pendingTimer = null;
-        doUpdate();
+        if (!isDone) {
+          doUpdate();
+        }
       }, 1200 - (now - lastUpdate));
     }
   };
@@ -646,19 +652,29 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
       autoClaim: false,
       heartbeatDelayMs: 1200,
       onProgress: (p) => {
+        if (isDone) return;
         if (p.step === 'auth' || p.step === 'fetch') {
           updateProgress(`🔄 ${p.message}`);
+        } else if (p.step === 'enroll') {
+          updateProgress(`📥 ${p.message}`);
         } else if (p.step === 'quest_start') {
           const typeBadge = p.type === 'video' ? '🎬 [Video]' : '🎮 [Game]';
           updateProgress(`${typeBadge} ${p.message}`);
         } else if (p.step === 'progress') {
           const typeIcon = p.type === 'video' ? '🎬' : '🎮';
+          const progressIndex = p.index && p.total ? `[${p.index}/${p.total}] ` : '';
           updateProgress(
-            `⏳ [${p.index}/${p.total}] ${typeIcon} **${p.questName}**: Đang hoàn thành (${p.percent}% - ${p.currentSeconds}/${p.targetSeconds}s)...`
+            `⏳ ${progressIndex}${typeIcon} **${p.questName}**: Đang hoàn thành (${p.percent}% - ${p.currentSeconds}/${p.targetSeconds}s)...`
           );
         }
       },
     });
+
+    isDone = true;
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
+    }
 
     const isAllCompleted = report.totalQuests > 0 && report.completedCount === report.totalQuests;
     const videoCount = report.results.filter((r) => r.type === 'video').length;
@@ -729,6 +745,12 @@ async function executeAutoQuestFlow(interaction, token, userId, username) {
 
     return interaction.editReply({ content: null, embeds: [resultEmbed], components: [resultRow] });
   } catch (err) {
+    isDone = true;
+    if (pendingTimer) {
+      clearTimeout(pendingTimer);
+      pendingTimer = null;
+    }
+
     const isTokenExpired =
       err.message &&
       (err.message.includes('401') ||
