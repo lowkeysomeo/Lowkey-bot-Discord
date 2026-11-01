@@ -4,7 +4,7 @@ const BOT_TOKEN = process.env.TOKEN || '';
 const ORDER_ID_REGEX = /\b(VNL-[A-Za-z0-9]+)\b/i;
 const COMMAND_REGEX = /^!(?:rep|reply)\s+([A-Za-z0-9-]+)\s+([\s\S]+)$/i;
 
-async function sendReplyToShop({ authorId, authorName, orderId, replyText }) {
+async function sendReplyToShop({ authorId, authorName, orderId, replyText, imageUrl = "" }) {
   const url = `${SHOP_URL}/api/discord/reply`;
   const res = await fetch(url, {
     method: 'POST',
@@ -17,6 +17,7 @@ async function sendReplyToShop({ authorId, authorName, orderId, replyText }) {
       authorName,
       orderId,
       replyText,
+      imageUrl,
     }),
   });
 
@@ -68,7 +69,8 @@ async function handleMessageReply(message) {
     }
   }
 
-  if (!orderId || !replyText) return false;
+  const attachmentUrl = message.attachments?.first()?.url || "";
+  if (!orderId || (!replyText && !attachmentUrl)) return false;
 
   try {
     await message.channel.sendTyping().catch(() => {});
@@ -79,7 +81,8 @@ async function handleMessageReply(message) {
       authorId,
       authorName,
       orderId,
-      replyText,
+      replyText: replyText || (attachmentUrl ? "[Hình ảnh]" : ""),
+      imageUrl: attachmentUrl,
     });
 
     if (ok && data?.success) {
