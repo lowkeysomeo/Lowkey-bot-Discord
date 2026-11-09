@@ -57,7 +57,7 @@ function createDashboard(client, options = {}) {
   const origin = env.DASHBOARD_URL ? new URL(env.DASHBOARD_URL).origin : '';
   const secure = origin.startsWith('https:');
   const local = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-  const configured = Boolean(cleanClientSecret && cleanClientId && (secure || local));
+  const configured = Boolean(cleanClientSecret && cleanClientId && origin);
   const setCookie = (name, value, seconds) => `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${seconds}${secure ? '; Secure' : ''}`;
   function prune() {
     const now = Date.now();
@@ -759,7 +759,8 @@ function startDashboard(client) {
   try { server = createDashboard(client); }
   catch { console.error('[DASHBOARD] Invalid DASHBOARD_URL. Bot continues without dashboard.'); return; }
   server.on('error', error => console.error('[DASHBOARD] Server error:', error.code));
-  server.listen(Number(process.env.PORT || 3000), '0.0.0.0', () => console.log('[DASHBOARD] Web server ready.'));
+  const port = Number(process.env.PORT || process.env.SERVER_PORT || 3000);
+  server.listen(port, '0.0.0.0', () => console.log(`[DASHBOARD] Web server ready on port ${port}.`));
   return server;
 }
 module.exports = { createDashboard, startDashboard, canManage };
