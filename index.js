@@ -142,10 +142,20 @@ client.once(
 client.on(
   Events.MessageCreate,
   async (message) => {
+    if (message.author?.bot) return;
+    if (message.webhookId) return;
+
+    // Xử lý lệnh !ip cho server Minecraft
+    const text = (message.content || '').trim().toLowerCase();
+    if (text === '!ip' || text.startsWith('!ip ')) {
+      const { IP_MESSAGE } = require('./commands/fun/ip');
+      return message.reply({ content: IP_MESSAGE, allowedMentions: { repliedUser: false } }).catch(() => {
+        message.channel.send({ content: IP_MESSAGE }).catch(() => {});
+      });
+    }
+
     if (!message.guild) return;
     if (await require('./utils/securitySystem').message(message)) return;
-    if (message.webhookId) return;
-    if (message.author.bot) return;
 
     // Xử lý trả lời tin nhắn đơn hàng Shop (Quote Reply hoặc !rep <orderId> <nội dung>)
     try {
