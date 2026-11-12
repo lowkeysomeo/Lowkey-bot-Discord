@@ -124,10 +124,11 @@ function createDashboard(client, options = {}) {
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     if (isSecure()) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+    let route = '';
     try {
       prune();
       const url = new URL(req.url, 'http://internal');
-      const route = url.pathname;
+      route = url.pathname;
       if (await activity(req, res, route)) return;
       // A direct management URL must pass the same server-side authorization as its API.
       const premiumPage = /^\/premium\/guilds\/(\d+)\/cinema$/.exec(route);
