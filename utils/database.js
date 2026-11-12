@@ -18,16 +18,67 @@ function resolveDatabasePath() {
   return path.join(localDataDir, 'vietnam-legacy.sqlite');
 }
 
+function openDatabaseWithRecovery(targetPath) {
+  try {
+    const instance = new Database(targetPath);
+    instance.pragma('journal_mode = WAL');
+    instance.pragma('foreign_keys = ON');
+    instance.pragma('busy_timeout = 5000');
+    const check = instance.pragma('quick_check');
+    if (check && check[0] && check[0].quick_check !== 'ok') {
+      throw new Error(`Database quick_check failed: ${JSON.stringify(check)}`);
+    }
+    return instance;
+  } catch (err) {
+    if (err.message && (err.message.includes('malformed') || err.message.includes('corrupt') || err.message.includes('quick_check'))) {
+      console.warn(`[DB RECOVERY] Phat hien database bi loi: ${err.message}. Dang tien hanh tu dong khac phuc...`);
+      const walPath = `${targetPath}-wal`;
+      const shmPath = `${targetPath}-shm`;
+      try { if (fs.existsSync(walPath)) fs.unlinkSync(walPath); } catch {}
+      try { if (fs.existsSync(shmPath)) fs.unlinkSync(shmPath); } catch {}
+
+      try {
+        const retryInstance = new Database(targetPath);
+        retryInstance.pragma('journal_mode = WAL');
+        retryInstance.pragma('foreign_keys = ON');
+        retryInstance.pragma('busy_timeout = 5000');
+        const retryCheck = retryInstance.pragma('quick_check');
+        if (retryCheck && retryCheck[0] && retryCheck[0].quick_check === 'ok') {
+          console.log('[DB RECOVERY] Da khac phuc thanh cong xung dot WAL journal!');
+          return retryInstance;
+        }
+      } catch (retryErr) {
+        console.warn(`[DB RECOVERY] Don WAL chua du: ${retryErr.message}. Tiep tuc backup file cu va tao database moi...`);
+      }
+
+      const backupPath = `${targetPath}.corrupted.${Date.now()}`;
+      try {
+        if (fs.existsSync(targetPath)) {
+          fs.renameSync(targetPath, backupPath);
+          console.warn(`[DB RECOVERY] Da sao luu database hong sang: ${backupPath}`);
+        }
+      } catch (renameErr) {
+        try { fs.unlinkSync(targetPath); } catch {}
+      }
+
+      const freshInstance = new Database(targetPath);
+      freshInstance.pragma('journal_mode = WAL');
+      freshInstance.pragma('foreign_keys = ON');
+      freshInstance.pragma('busy_timeout = 5000');
+      console.log('[DB RECOVERY] Da tao database moi thanh cong!');
+      return freshInstance;
+    }
+    throw err;
+  }
+}
+
 function initializeDatabase() {
   if (db) return db;
 
   databasePath = resolveDatabasePath();
   fs.mkdirSync(path.dirname(databasePath), { recursive: true });
 
-  db = new Database(databasePath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  db.pragma('busy_timeout = 5000');
+  db = openDatabaseWithRecovery(databasePath);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS chat_levels (
