@@ -68,6 +68,9 @@ module.exports.data = {
 };
 
 module.exports.execute = async (interaction) => {
+  const { guardGeneralChat } = require('../../utils/guardGeneralChat');
+  if (await guardGeneralChat(interaction, 'mở cửa hàng')) return;
+
   const action = interaction.options?.getString?.('action') || 'panel';
 
   if (action === 'panel') {

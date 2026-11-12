@@ -353,9 +353,16 @@ function buildInfoPayload() {
 }
 
 async function handleButtonInteraction(interaction) {
+  const { guardGeneralChat } = require('./guardGeneralChat');
+  if (await guardGeneralChat(interaction, 'thao tác hướng dẫn và lệnh bot')) return;
+
   const action = interaction.customId.replace('quest:', '');
   const userObj = interaction.user || interaction.member || {};
   const userId = userObj.id || null;
+  const isEphemeral = Boolean(
+    interaction.message?.flags?.has?.(64) ||
+    (typeof interaction.message?.flags === 'number' && (interaction.message.flags & 64))
+  );
 
   if (action === 'modal') {
     const { isApproved, buildAccessGatePayload } = require('./questAuth');
@@ -425,16 +432,25 @@ async function handleButtonInteraction(interaction) {
 
   if (action === 'token_guide') {
     const payload = buildTokenGuidePayload();
+    if (!isEphemeral && typeof interaction.reply === 'function') {
+      return interaction.reply({ flags: 64, ...payload });
+    }
     return interaction.update({ content: null, ...payload });
   }
 
   if (action === 'hub') {
     const payload = buildMainHubPayload(interaction.guildId, userId);
+    if (!isEphemeral && typeof interaction.reply === 'function') {
+      return interaction.reply({ flags: 64, ...payload });
+    }
     return interaction.update({ content: null, ...payload });
   }
 
   if (action === 'script') {
     const payload = buildScriptPayload();
+    if (!isEphemeral && typeof interaction.reply === 'function') {
+      return interaction.reply({ flags: 64, ...payload });
+    }
     try {
       return await interaction.update(payload);
     } catch (e) {
@@ -447,6 +463,9 @@ async function handleButtonInteraction(interaction) {
 
   if (action === 'info') {
     const payload = buildInfoPayload();
+    if (!isEphemeral && typeof interaction.reply === 'function') {
+      return interaction.reply({ flags: 64, ...payload });
+    }
     return interaction.update({ content: null, ...payload });
   }
 

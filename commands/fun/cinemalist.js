@@ -224,6 +224,9 @@ function buildActionRows(currentTab, page, totalPages, khoCount, upcomingCount) 
 async function execute(interaction) {
   if (!interaction.inGuild()) return;
 
+  const { guardGeneralChat } = require('../../utils/guardGeneralChat');
+  if (await guardGeneralChat(interaction, 'xem danh sách phim')) return;
+
   if (process.env.CINEMA_ENABLED !== 'true') {
     return interaction.reply({
       content: 'Chức năng Cinema chưa được bật bởi chủ bot.',

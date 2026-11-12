@@ -40,6 +40,9 @@ module.exports.data = {
 };
 
 module.exports.execute = async (interaction) => {
+  const { guardGeneralChat } = require('../../utils/guardGeneralChat');
+  if (await guardGeneralChat(interaction, 'dùng lệnh và xem hướng dẫn')) return;
+
   const action = interaction.options?.getString?.('action') || 'hub';
   const { isApproved, isOwner, buildAccessGatePayload, buildAdminListPayload } = require('../../utils/questAuth');
   const userId = interaction.user?.id || interaction.member?.id || null;
@@ -122,12 +125,12 @@ module.exports.execute = async (interaction) => {
 
   if (action === 'script') {
     const payload = buildScriptPayload();
-    return interaction.reply(payload);
+    return interaction.reply({ flags: 64, ...payload });
   }
 
   if (action === 'info') {
     const payload = buildInfoPayload();
-    return interaction.reply(payload);
+    return interaction.reply({ flags: 64, ...payload });
   }
 
   if (action === 'stream') {
@@ -179,5 +182,5 @@ module.exports.execute = async (interaction) => {
 
   // Default: hub
   const payload = buildMainHubPayload(interaction.guildId, userId);
-  return interaction.reply(payload);
+  return interaction.reply({ flags: 64, ...payload });
 };
