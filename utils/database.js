@@ -19,8 +19,9 @@ function resolveDatabasePath() {
 }
 
 function openDatabaseWithRecovery(targetPath) {
+  let instance = null;
   try {
-    const instance = new Database(targetPath);
+    instance = new Database(targetPath);
     instance.pragma('journal_mode = WAL');
     instance.pragma('foreign_keys = ON');
     instance.pragma('busy_timeout = 5000');
@@ -30,6 +31,10 @@ function openDatabaseWithRecovery(targetPath) {
     }
     return instance;
   } catch (err) {
+    if (instance) {
+      try { instance.close(); } catch {}
+      instance = null;
+    }
     if (err.message && (err.message.includes('malformed') || err.message.includes('corrupt') || err.message.includes('quick_check'))) {
       console.warn(`[DB RECOVERY] Phat hien database bi loi: ${err.message}. Dang tien hanh tu dong khac phuc...`);
       const walPath = `${targetPath}-wal`;
@@ -37,8 +42,9 @@ function openDatabaseWithRecovery(targetPath) {
       try { if (fs.existsSync(walPath)) fs.unlinkSync(walPath); } catch {}
       try { if (fs.existsSync(shmPath)) fs.unlinkSync(shmPath); } catch {}
 
+      let retryInstance = null;
       try {
-        const retryInstance = new Database(targetPath);
+        retryInstance = new Database(targetPath);
         retryInstance.pragma('journal_mode = WAL');
         retryInstance.pragma('foreign_keys = ON');
         retryInstance.pragma('busy_timeout = 5000');
@@ -47,7 +53,13 @@ function openDatabaseWithRecovery(targetPath) {
           console.log('[DB RECOVERY] Da khac phuc thanh cong xung dot WAL journal!');
           return retryInstance;
         }
+        try { retryInstance.close(); } catch {}
+        retryInstance = null;
       } catch (retryErr) {
+        if (retryInstance) {
+          try { retryInstance.close(); } catch {}
+          retryInstance = null;
+        }
         console.warn(`[DB RECOVERY] Don WAL chua du: ${retryErr.message}. Tiep tuc backup file cu va tao database moi...`);
       }
 
@@ -70,6 +82,30 @@ function openDatabaseWithRecovery(targetPath) {
     }
     throw err;
   }
+}
+
+function resetCorruptedDatabase() {
+  console.warn('[DB RECOVERY] Thuc hien khoi phuc va tao lai database...');
+  if (db) {
+    try { db.close(); } catch {}
+    db = null;
+  }
+  const targetPath = databasePath || resolveDatabasePath();
+  const walPath = `${targetPath}-wal`;
+  const shmPath = `${targetPath}-shm`;
+  try { if (fs.existsSync(walPath)) fs.unlinkSync(walPath); } catch {}
+  try { if (fs.existsSync(shmPath)) fs.unlinkSync(shmPath); } catch {}
+
+  const backupPath = `${targetPath}.corrupted.${Date.now()}`;
+  try {
+    if (fs.existsSync(targetPath)) {
+      fs.renameSync(targetPath, backupPath);
+      console.warn(`[DB RECOVERY] Da sao luu database hong sang: ${backupPath}`);
+    }
+  } catch (e) {
+    try { fs.unlinkSync(targetPath); } catch {}
+  }
+  return initializeDatabase();
 }
 
 function initializeDatabase() {
@@ -518,4 +554,5 @@ module.exports = {
   getDb,
   getDatabasePath,
   repairLegacyUserIds,
+  resetCorruptedDatabase,
 };

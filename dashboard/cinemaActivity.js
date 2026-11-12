@@ -7,9 +7,9 @@ const cinema = require('../utils/cinema');
 function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLimit }) {
   const sessions = new Map();
   const hash = value => crypto.createHash('sha256').update(value).digest('hex');
-  const cleanClientId = String(env.CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
-  const cleanClientSecret = String(env.DISCORD_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
-  const appOrigin = `https://${cleanClientId}.discordsays.com`;
+  const getClientId = () => String(env.CLIENT_ID || process.env.CLIENT_ID || client?.user?.id || client?.application?.id || '').trim().replace(/^["']|["']$/g, '');
+  const getClientSecret = () => String(env.DISCORD_CLIENT_SECRET || process.env.DISCORD_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
+  const getAppOrigin = () => `https://${getClientId()}.discordsays.com`;
 
   let dbInstance = null;
   function getDbSafe() {
@@ -28,7 +28,25 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
         dbInstance = d;
         return dbInstance;
       }
-    } catch {}
+    } catch (e) {
+      if (e.message && (e.message.includes('malformed') || e.message.includes('corrupt'))) {
+        try {
+          const { resetCorruptedDatabase } = require('../utils/database');
+          const d = resetCorruptedDatabase();
+          if (d) {
+            d.prepare(`
+              CREATE TABLE IF NOT EXISTS cinema_sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                expires INTEGER NOT NULL
+              )
+            `).run();
+            dbInstance = d;
+            return dbInstance;
+          }
+        } catch {}
+      }
+    }
     return null;
   }
 
@@ -124,11 +142,11 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
       res.end(fs.readFileSync(target));
       return true;
     }
-    if (req.method === 'GET' && route === '/cinema-api/config') { json(res, 200, { clientId: cleanClientId }); return true; }
+    if (req.method === 'GET' && route === '/cinema-api/config') { json(res, 200, { clientId: getClientId() }); return true; }
     if (req.method === 'POST' && route === '/cinema-api/session') {
-      if (!cleanClientId || !cleanClientSecret) fail(503, 'Cinema chưa được cấu hình OAuth (Thiếu CLIENT_ID hoặc DISCORD_CLIENT_SECRET trong biến môi trường).');
+      if (!getClientId() || !getClientSecret()) fail(503, 'Cinema chưa được cấu hình OAuth (Thiếu CLIENT_ID hoặc DISCORD_CLIENT_SECRET trong biến môi trường).');
       const origin = (req.headers.origin || '').replace(/\/$/, '');
-      if (origin !== appOrigin) fail(403, 'Hãy mở Cinema từ Discord Activity.');
+      if (origin !== getAppOrigin()) fail(403, 'Hãy mở Cinema từ Discord Activity.');
       // Do not trust X-Forwarded-For without a configured trusted reverse proxy.
       rateLimit(`cinema-login:${req.socket.remoteAddress}`, 30);
       if (sessions.size >= 5000) fail(503, 'Cinema đang đầy. Hãy thử lại.');
@@ -136,7 +154,7 @@ function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLim
       if (!input || typeof input.code !== 'string' || !input.code || input.code.length > 2048) fail(400, 'Thiếu mã đăng nhập Activity.');
       const response = await fetchApi('https://discord.com/api/v10/oauth2/token', {
         method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ client_id: cleanClientId, client_secret: cleanClientSecret, grant_type: 'authorization_code', code: input.code.trim() }),
+        body: new URLSearchParams({ client_id: getClientId(), client_secret: getClientSecret(), grant_type: 'authorization_code', code: input.code.trim() }),
         signal: AbortSignal.timeout(12000),
       });
       if (!response.ok) {

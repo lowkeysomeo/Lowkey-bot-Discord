@@ -21,7 +21,7 @@ const {
   AttachmentBuilder,
 } = require('discord.js');
 
-const { getDb } = require('./database');
+const { getDb, resetCorruptedDatabase } = require('./database');
 
 const DEPLOYED_BANNER = 'https://cdn.discordapp.com/attachments/1555212722638032936/1559104825046859906/VNL_BANNER_DO.png?ex=6ad128c5&is=6acfd745&hm=87d6030e68b7125c701a0697d05fd0f1ba739b9a148d086083c1273435f1e0ce&';
 
@@ -92,8 +92,7 @@ const DEPLOYED_VNL_CONFIG = {
   options: DEPLOYED_VNL_OPTIONS,
 };
 
-function db() {
-  const d = getDb();
+function ensureTicketSchema(d) {
   d.exec(`
     CREATE TABLE IF NOT EXISTS ticket_config (
       guild_id TEXT PRIMARY KEY,
@@ -158,7 +157,6 @@ function db() {
         DEPLOYED_VNL_CONFIG.messageId
       );
     } else if (!existing.message_id || !existing.banner_url || !existing.options_json || existing.options_json.includes('nitro_boost')) {
-      // Khôi phục lại cấu hình ticket đã triển khai trước đó nếu đang ở trạng thái rỗng hoặc thiếu
       d.prepare(`
         UPDATE ticket_config SET
           channel_id = ?,
@@ -190,9 +188,27 @@ function db() {
         mainGuildId
       );
     }
-  } catch {}
+  } catch (err) {
+    if (err.message && (err.message.includes('malformed') || err.message.includes('corrupt'))) {
+      throw err;
+    }
+  }
+}
 
-  return d;
+function db() {
+  try {
+    const d = getDb();
+    ensureTicketSchema(d);
+    return d;
+  } catch (err) {
+    if (err.message && (err.message.includes('malformed') || err.message.includes('corrupt'))) {
+      console.warn('[TICKET SYSTEM] Phat hien database bi loi malformed, tien hanh tu dong reset...');
+      const d = resetCorruptedDatabase();
+      ensureTicketSchema(d);
+      return d;
+    }
+    throw err;
+  }
 }
 
 /**

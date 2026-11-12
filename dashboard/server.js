@@ -52,13 +52,16 @@ function createDashboard(client, options = {}) {
   const sessions = new Map();
   const states = new Map();
   const limits = new Map();
-  const cleanClientId = String(env.CLIENT_ID || '').trim().replace(/^["']|["']$/g, '');
-  const cleanClientSecret = String(env.DISCORD_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
-  const origin = env.DASHBOARD_URL ? new URL(env.DASHBOARD_URL).origin : '';
-  const secure = origin.startsWith('https:');
-  const local = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-  const configured = Boolean(cleanClientSecret && cleanClientId && origin);
-  const setCookie = (name, value, seconds) => `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${seconds}${secure ? '; Secure' : ''}`;
+  const getClientId = () => String(env.CLIENT_ID || process.env.CLIENT_ID || client?.user?.id || client?.application?.id || '').trim().replace(/^["']|["']$/g, '');
+  const getClientSecret = () => String(env.DISCORD_CLIENT_SECRET || process.env.DISCORD_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
+  const getOrigin = () => {
+    const raw = env.DASHBOARD_URL || process.env.DASHBOARD_URL || '';
+    if (!raw) return '';
+    try { return new URL(raw).origin; } catch { return ''; }
+  };
+  const isSecure = () => getOrigin().startsWith('https:');
+  const isConfigured = () => Boolean(getClientSecret() && getClientId() && getOrigin());
+  const setCookie = (name, value, seconds) => `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${seconds}${isSecure() ? '; Secure' : ''}`;
   function prune() {
     const now = Date.now();
     for (const map of [sessions, states, limits]) for (const [key, value] of map) if (value.expires <= now) map.delete(key);
@@ -94,7 +97,8 @@ function createDashboard(client, options = {}) {
     return value;
   }
   function csrf(req, value) {
-    if (req.headers.origin !== origin || req.headers['x-csrf-token'] !== value.csrf) fail(403, 'Yêu cầu không hợp lệ. Hãy tải lại trang.');
+    const currentOrigin = getOrigin();
+    if (req.headers.origin !== currentOrigin || req.headers['x-csrf-token'] !== value.csrf) fail(403, 'Yêu cầu không hợp lệ. Hãy tải lại trang.');
   }
   async function managedGuild(id, value) {
     const guilds = await userGuilds(value.token);
@@ -103,7 +107,7 @@ function createDashboard(client, options = {}) {
     if (!guild) fail(404, 'Hãy mời bot vào server này trước.');
     return guild;
   }
-  const invite = id => `https://discord.com/oauth2/authorize?client_id=${cleanClientId || ''}&scope=bot%20applications.commands&permissions=309506198528&integration_type=0${id ? `&guild_id=${id}` : ''}`;
+  const invite = id => `https://discord.com/oauth2/authorize?client_id=${getClientId() || ''}&scope=bot%20applications.commands&permissions=309506198528&integration_type=0${id ? `&guild_id=${id}` : ''}`;
   function json(res, status, value) { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(value)); }
   function redirect(res, location, cookies) {
     res.writeHead(302, { Location: location, ...(cookies ? { 'Set-Cookie': cookies } : {}) }); res.end();
@@ -115,7 +119,7 @@ function createDashboard(client, options = {}) {
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
-    if (secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+    if (isSecure()) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
     try {
       prune();
       const url = new URL(req.url, 'http://internal');
@@ -139,28 +143,30 @@ function createDashboard(client, options = {}) {
         return res.end(QUEST_SCRIPT);
       }
       if (req.method === 'GET' && route === '/auth/discord') {
-        if (!configured) fail(503, 'Đăng nhập Discord chưa được cấu hình.');
+        if (!isConfigured()) fail(503, 'Đăng nhập Discord chưa được cấu hình.');
         rateLimit(`login:${req.socket.remoteAddress}`, 30);
         if (states.size > 5000) fail(503, 'Hãy thử lại sau.');
         const state = random();
         const browserKey = random();
         states.set(hash(state), { browser: hash(browserKey), expires: Date.now() + 600000 });
-        const params = new URLSearchParams({ client_id: cleanClientId, response_type: 'code', scope: 'identify guilds',
-          redirect_uri: `${origin}/auth/callback`, state });
+        const originUrl = getOrigin();
+        const params = new URLSearchParams({ client_id: getClientId(), response_type: 'code', scope: 'identify guilds',
+          redirect_uri: `${originUrl}/auth/callback`, state });
         return redirect(res, `https://discord.com/oauth2/authorize?${params}`, setCookie('vnl_oauth', browserKey, 600));
       }
       if (req.method === 'GET' && route === '/auth/callback') {
         const key = hash(url.searchParams.get('state') || '');
         const pending = states.get(key);
         states.delete(key);
-        if (!configured || !pending || pending.browser !== hash(cookie(req, 'vnl_oauth'))) fail(400, 'Phiên đăng nhập không hợp lệ. Hãy thử lại từ trang chủ.');
+        if (!isConfigured() || !pending || pending.browser !== hash(cookie(req, 'vnl_oauth'))) fail(400, 'Phiên đăng nhập không hợp lệ. Hãy thử lại từ trang chủ.');
         if (url.searchParams.has('error')) return redirect(res, '/?login=cancelled', setCookie('vnl_oauth', '', 0));
         const code = url.searchParams.get('code');
         if (!code) fail(400, 'Thiếu mã đăng nhập.');
+        const originUrl = getOrigin();
         const response = await fetchApi('https://discord.com/api/v10/oauth2/token', {
           method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({ client_id: cleanClientId, client_secret: cleanClientSecret,
-            grant_type: 'authorization_code', code: code.trim(), redirect_uri: `${origin}/auth/callback` }), signal: AbortSignal.timeout(12000),
+          body: new URLSearchParams({ client_id: getClientId(), client_secret: getClientSecret(),
+            grant_type: 'authorization_code', code: code.trim(), redirect_uri: `${originUrl}/auth/callback` }), signal: AbortSignal.timeout(12000),
         });
         if (!response.ok) {
           let errText = '';
@@ -173,7 +179,7 @@ function createDashboard(client, options = {}) {
           if (errJson?.error === 'invalid_client') {
             fail(500, 'Lỗi cấu hình Discord OAuth: DISCORD_CLIENT_SECRET trên server không chính xác (hãy kiểm tra lại Client Secret trong Discord Developer Portal -> OAuth2).');
           } else if (errJson?.error === 'invalid_grant') {
-            fail(400, `Lỗi xác thực OAuth: Mã đăng nhập đã hết hạn hoặc Redirect URI không khớp. Hãy đảm bảo Redirect URI "${origin}/auth/callback" đã được thêm chính xác vào mục OAuth2 -> Redirects trong Discord Developer Portal.`);
+            fail(400, `Lỗi xác thực OAuth: Mã đăng nhập đã hết hạn hoặc Redirect URI không khớp. Hãy đảm bảo Redirect URI "${originUrl}/auth/callback" đã được thêm chính xác vào mục OAuth2 -> Redirects trong Discord Developer Portal.`);
           } else {
             fail(401, errJson?.error_description || errJson?.error || 'Không thể đăng nhập. Hãy thử lại.');
           }
@@ -191,7 +197,7 @@ function createDashboard(client, options = {}) {
         let value;
         try { value = session(req); } catch { /* Chưa đăng nhập. */ }
         const isOwner = isBotOwner(value?.user?.id);
-        return json(res, 200, { user: value?.user || null, csrf: value?.csrf, configured, ready: client.isReady(), invite: invite(), isOwner });
+        return json(res, 200, { user: value?.user || null, csrf: value?.csrf, configured: isConfigured(), ready: client.isReady(), invite: invite(), isOwner });
       }
       if (req.method === 'POST' && route === '/api/sepay/webhook') {
         try {

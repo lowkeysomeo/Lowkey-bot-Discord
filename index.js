@@ -301,8 +301,19 @@ client.on(
       }
     }
     if ((interaction.isStringSelectMenu?.() || interaction.isUserSelectMenu?.() || interaction.isButton?.() || interaction.isModalSubmit?.()) && interaction.customId?.startsWith('ticket:')) {
-      try { await require('./utils/ticketSystem').handleInteraction(interaction); }
-      catch (error) {
+      try {
+        await require('./utils/ticketSystem').handleInteraction(interaction);
+      } catch (error) {
+        if (error.message && (error.message.includes('malformed') || error.message.includes('corrupt'))) {
+          console.warn('[TICKET INTERACTION] Database malformed, dang tu dong khoi phuc va thu lai...');
+          try {
+            require('./utils/database').resetCorruptedDatabase();
+            await require('./utils/ticketSystem').handleInteraction(interaction);
+            return;
+          } catch (retryErr) {
+            console.error('[TICKET INTERACTION RETRY ERROR]', retryErr);
+          }
+        }
         console.error('[TICKET INTERACTION ERROR]', error);
         const payload = { content: 'Có lỗi xảy ra khi xử lý ticket. Vui lòng thử lại sau.', flags: 64 };
         if (interaction.deferred) await interaction.editReply(payload).catch(() => {});
