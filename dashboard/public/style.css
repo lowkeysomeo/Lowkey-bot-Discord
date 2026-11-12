@@ -3,24 +3,27 @@
 
 :root {
   color-scheme: dark;
-  --bg: #0c0e15;
-  --sidebar: #11131c;
-  --panel: #161925;
-  --panel-hover: #1c202f;
-  --line: #222636;
-  --line-light: #2e3348;
-  --line-focus: #4f46e5;
-  --text: #f1f3f9;
-  --text-secondary: #c2c7db;
-  --muted: #8287a0;
-  --accent: #6366f1;
-  --accent-hover: #7579f6;
-  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-  --accent-glow: rgba(99, 102, 241, 0.25);
+  --bg: #090c13;
+  --sidebar: #0e111a;
+  --panel: #131722;
+  --panel-hover: #191f2e;
+  --line: #1c2233;
+  --line-light: #283149;
+  --line-focus: #ef4444;
+  --text: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --muted: #78829d;
+  --accent: #ef4444;
+  --accent-hover: #dc2626;
+  --accent-gradient: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  --accent-glow: rgba(239, 68, 68, 0.28);
+  --gold: #f59e0b;
+  --gold-bright: #fbbf24;
+  --gold-glow: rgba(245, 158, 11, 0.28);
   --green: #10b981;
   --green-bg: rgba(16, 185, 129, 0.12);
-  --red: #f43f5e;
-  --red-bg: rgba(244, 63, 94, 0.12);
+  --red: #ef4444;
+  --red-bg: rgba(239, 68, 68, 0.12);
   --amber: #f59e0b;
   --amber-bg: rgba(245, 158, 11, 0.12);
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
@@ -124,12 +127,12 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
   flex-shrink: 0;
   width: 38px;
   height: 38px;
-  background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+  background: linear-gradient(135deg, #ef4444 0%, #f59e0b 100%);
   border-radius: 11px;
   font-size: 20px;
   font-weight: 800;
   color: #ffffff;
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.4);
 }
 
 .picker-wrap {
@@ -257,7 +260,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 }
 
 .nav button.active {
-  background: linear-gradient(90deg, rgba(99, 102, 241, 0.16) 0%, rgba(99, 102, 241, 0.04) 100%);
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.16) 0%, rgba(245, 158, 11, 0.04) 100%);
   color: #ffffff;
   font-weight: 600;
   border-left: 3px solid var(--accent);
@@ -265,8 +268,8 @@ button:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible
 }
 
 .nav button.active .icon {
-  color: #818cf8;
-  filter: drop-shadow(0 0 6px rgba(99, 102, 241, 0.5));
+  color: #ef4444;
+  filter: drop-shadow(0 0 6px rgba(239, 68, 68, 0.5));
 }
 
 .side-bottom {
@@ -1342,3 +1345,620 @@ td:last-child {
 }
 /* Premium Cinema */
 .cinema-card{padding:24px;margin-bottom:20px}.cinema-check{display:flex;align-items:center;gap:10px;margin:14px 0}.cinema-check input{width:auto;flex:none}.cinema-roles{display:flex;flex-wrap:wrap;gap:0 22px}.cinema-show{border:1px solid #504761;border-radius:12px;padding:18px;margin:18px 0}.cinema-show legend{padding:0 8px}.cinema-card label>input:not([type=checkbox]),.cinema-card label>select,.cinema-card label>textarea{display:block;width:100%;margin-top:8px}
+
+/* ============================================================
+   VIETNAM LEGACY DASHBOARD - MODERN DYNO-INSPIRED SYSTEM
+   ============================================================ */
+
+/* Nút quay lại danh sách máy chủ */
+.side-back-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 550;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+.side-back-btn:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ffffff;
+  border-color: rgba(239, 68, 68, 0.35);
+  transform: translateX(-2px);
+}
+.side-back-btn .back-arrow {
+  font-size: 14px;
+  color: var(--accent);
+  transition: transform 0.2s ease;
+}
+.side-back-btn:hover .back-arrow {
+  transform: translateX(-3px);
+}
+
+/* Thẻ thông tin máy chủ hiện tại trên sidebar */
+.side-server-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(245, 158, 11, 0.04) 100%);
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  border-radius: 11px;
+}
+.side-server-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ef4444 0%, #f59e0b 100%);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-weight: 750;
+  font-size: 16px;
+  flex-shrink: 0;
+  overflow: hidden;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.35);
+}
+.side-server-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.side-server-details {
+  min-width: 0;
+  flex: 1;
+}
+.side-server-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.side-server-sub {
+  font-size: 11px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+.side-server-sub .status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+/* Thanh điều hướng nhanh Minecraft trên Topbar */
+.mc-topbar-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 20px;
+  font-size: 12px;
+  color: #fbd38d;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.mc-topbar-pill:hover {
+  background: rgba(245, 158, 11, 0.16);
+  border-color: rgba(245, 158, 11, 0.6);
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.25);
+  transform: translateY(-1px);
+}
+.mc-topbar-pill .mc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+.mc-topbar-pill .mc-tag {
+  font-weight: 800;
+  font-size: 10px;
+  background: #ef4444;
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+.mc-topbar-pill .mc-val {
+  font-weight: 600;
+  color: #ffffff;
+}
+.mc-topbar-pill .mc-copy-icon {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+/* Banner Hero VietNam Legacy */
+.vnl-hero-banner {
+  position: relative;
+  background: linear-gradient(135deg, rgba(28, 12, 16, 0.92) 0%, rgba(18, 22, 34, 0.95) 55%, rgba(20, 24, 38, 0.95) 100%);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 18px;
+  padding: 26px 30px;
+  margin-bottom: 24px;
+  overflow: hidden;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.vnl-hero-banner::before {
+  content: '';
+  position: absolute;
+  top: -50px;
+  right: -50px;
+  width: 280px;
+  height: 280px;
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.18) 0%, transparent 70%);
+  pointer-events: none;
+}
+.vnl-hero-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  position: relative;
+  z-index: 1;
+}
+.vnl-hero-left {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-width: 0;
+}
+.vnl-hero-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #ef4444 0%, #f59e0b 100%);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  font-size: 32px;
+  font-weight: 800;
+  flex-shrink: 0;
+  overflow: hidden;
+  box-shadow: 0 0 22px rgba(239, 68, 68, 0.4);
+  border: 2px solid rgba(255, 255, 255, 0.15);
+}
+.vnl-hero-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.vnl-hero-info {
+  min-width: 0;
+}
+.vnl-hero-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.vnl-tag {
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.8px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  text-transform: uppercase;
+}
+.vnl-tag.red {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ff8080;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+.vnl-tag.gold {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+.vnl-tag.green {
+  background: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+.vnl-hero-info h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  color: #ffffff;
+  letter-spacing: -0.4px;
+}
+.vnl-hero-desc {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #94a3b8;
+  max-width: 580px;
+  line-height: 1.5;
+}
+
+/* Khối Minecraft Widget trong Hero */
+.mc-server-box {
+  background: rgba(11, 14, 23, 0.85);
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  border-radius: 14px;
+  padding: 14px 18px;
+  min-width: 250px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.3);
+}
+.mc-server-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 11px;
+  font-weight: 750;
+}
+.mc-badge {
+  color: #fbbf24;
+  letter-spacing: 0.6px;
+}
+.mc-status-online {
+  color: #34d399;
+  font-weight: 700;
+}
+.mc-row-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+.mc-row-item:last-child {
+  margin-bottom: 0;
+}
+.mc-row-item:hover {
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.45);
+}
+.mc-row-label {
+  font-size: 11px;
+  color: #94a3b8;
+}
+.mc-row-val {
+  font-size: 12.5px;
+  font-weight: 750;
+  color: #ffffff;
+  font-family: monospace;
+}
+.mc-row-copy {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* Thống kê 4 cột */
+.stats.stats-4 {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 26px;
+}
+
+/* Trung tâm quản lý Modules */
+.modules-section {
+  margin-top: 10px;
+}
+.modules-header {
+  margin-bottom: 20px;
+}
+.modules-title-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.modules-title-wrap h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: -0.2px;
+}
+.title-star {
+  color: #f59e0b;
+  font-size: 18px;
+}
+.modules-title-wrap p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.module-search-wrap {
+  position: relative;
+  min-width: 270px;
+  flex: 1;
+  max-width: 360px;
+}
+.module-search-input {
+  width: 100%;
+  padding: 9px 14px 9px 36px;
+  background: #131722;
+  border: 1px solid var(--line-light);
+  border-radius: 9px;
+  color: #ffffff;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+.module-search-input:focus {
+  border-color: var(--accent);
+  background: #171d2b;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.25);
+  outline: none;
+}
+.search-icon-svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted);
+  pointer-events: none;
+}
+.modules-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cat-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cat-pill {
+  padding: 7px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #131722;
+  border: 1px solid var(--line);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.cat-pill:hover {
+  background: #1b2130;
+  color: #ffffff;
+  border-color: var(--line-light);
+}
+.cat-pill.active {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  color: #ffffff;
+  border-color: #ef4444;
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.4);
+}
+
+/* Lưới module cards */
+.modules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 18px;
+  margin-top: 16px;
+}
+.module-card {
+  background: linear-gradient(180deg, #151a27 0%, #11141f 100%);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+  transition: all 0.22s ease;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  position: relative;
+}
+.module-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(239, 68, 68, 0.35);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3), 0 0 14px rgba(239, 68, 68, 0.14);
+}
+.mod-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mod-head-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.mod-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.mod-icon.icon-red {
+  background: rgba(239, 68, 68, 0.14);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.mod-icon.icon-gold {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.mod-icon.icon-blue {
+  background: rgba(59, 130, 246, 0.14);
+  color: #60a5fa;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+.mod-icon.icon-green {
+  background: rgba(16, 185, 129, 0.14);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.mod-icon.icon-purple {
+  background: rgba(139, 92, 246, 0.14);
+  color: #c084fc;
+  border-color: rgba(139, 92, 246, 0.3);
+}
+.mod-icon.icon-pink {
+  background: rgba(236, 72, 153, 0.14);
+  color: #f472b6;
+  border-color: rgba(236, 72, 153, 0.3);
+}
+.mod-meta {
+  min-width: 0;
+}
+.mod-title {
+  font-size: 14.5px;
+  font-weight: 750;
+  color: #ffffff;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mod-badge {
+  display: inline-block;
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: 0.6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-top: 3px;
+  text-transform: uppercase;
+}
+.mod-badge.red { background: rgba(239, 68, 68, 0.16); color: #f87171; }
+.mod-badge.gold { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
+.mod-badge.blue { background: rgba(59, 130, 246, 0.16); color: #60a5fa; }
+.mod-badge.green { background: rgba(16, 185, 129, 0.16); color: #34d399; }
+.mod-badge.purple { background: rgba(139, 92, 246, 0.16); color: #c084fc; }
+.mod-badge.pink { background: rgba(236, 72, 153, 0.16); color: #f472b6; }
+
+.mod-badge-pill {
+  font-size: 10px;
+  font-weight: 650;
+  color: #34d399;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  padding: 3px 8px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+/* Switch Toggle chuẩn đẹp phong cách Discord / Dyno */
+.vnl-switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.vnl-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.vnl-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #242a3a;
+  border: 1px solid var(--line-light);
+  transition: 0.22s ease;
+  border-radius: 24px;
+}
+.vnl-slider::before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #94a3b8;
+  transition: 0.22s ease;
+  border-radius: 50%;
+}
+.vnl-switch input:checked + .vnl-slider {
+  background-color: #10b981;
+  border-color: #059669;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+}
+.vnl-switch input:checked + .vnl-slider::before {
+  transform: translateX(20px);
+  background-color: #ffffff;
+}
+
+.mod-desc {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #94a3b8;
+  margin: 0;
+  min-height: 40px;
+}
+.mod-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+.mod-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 650;
+  border-radius: 7px;
+  background: #1b2030;
+  color: #e2e8f0;
+  border: 1px solid var(--line-light);
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+.mod-btn:hover {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #ef4444;
+  box-shadow: 0 2px 10px rgba(239, 68, 68, 0.35);
+  transform: translateY(-1px);
+}
+
+@media (max-width: 1100px) {
+  .vnl-hero-content {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .mc-server-box {
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .stats.stats-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
