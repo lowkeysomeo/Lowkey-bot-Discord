@@ -31,13 +31,13 @@ async function runTests() {
     { input: '!IP', match: true },
     { input: '  !ip  ', match: true },
     { input: '!ip sv', match: true },
+    { input: '!ip\nMinecraft', match: true },
     { input: '!iphone', match: false },
     { input: 'hello !ip', match: false },
   ];
 
   for (const tc of testCases) {
-    const text = (tc.input || '').trim().toLowerCase();
-    const isMatch = text === '!ip' || text.startsWith('!ip ');
+    const isMatch = /^!ip(\s|$)/i.test((tc.input || '').trim());
     assert.equal(isMatch, tc.match, `Trường hợp "${tc.input}" kỳ vọng match=${tc.match}`);
   }
 

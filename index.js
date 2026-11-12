@@ -146,11 +146,11 @@ client.on(
     if (message.webhookId) return;
 
     // Xử lý lệnh !ip cho server Minecraft
-    const text = (message.content || '').trim().toLowerCase();
-    if (text === '!ip' || text.startsWith('!ip ')) {
+    const rawContent = (message.content || '').trim();
+    if (/^!ip(\s|$)/i.test(rawContent)) {
       const { IP_MESSAGE } = require('./commands/fun/ip');
       return message.reply({ content: IP_MESSAGE, allowedMentions: { repliedUser: false } }).catch(() => {
-        message.channel.send({ content: IP_MESSAGE }).catch(() => {});
+        message.channel?.send?.({ content: IP_MESSAGE }).catch(() => {});
       });
     }
 
@@ -427,7 +427,7 @@ client.on(
     }
 
 
-    if (!interaction.inGuild()) {
+    if (!interaction.inGuild() && interaction.commandName !== 'ip') {
       return interaction.reply({ content: 'Lệnh này chỉ dùng trong server.', flags: 64 });
     }
 

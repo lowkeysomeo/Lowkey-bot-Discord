@@ -11,6 +11,7 @@ process.env.LEVEL_CHANNEL_ID = 'home-level';
 process.env.VNL_BOOSTER_ROLE_ID = 'home-booster';
 process.env.TOKEN = 'test-token';
 process.env.CLIENT_ID = 'test-app';
+process.env.DASHBOARD_ENABLED = 'false';
 delete process.env.MONTHLY_RANK_CHANNEL_ID;
 const { Collection, Events, ChannelType } = require('discord.js');
 const { getGuildSetting, setGuildSetting } = require('../utils/guildSettings');
@@ -128,5 +129,6 @@ async function main() {
   assert.equal(getDb().prepare('SELECT completed FROM monthly_results WHERE guild_id = ?').get('home').completed, 0);
   getDb().close();
   console.log('PASS: multi-server Chat/Voice XP, per-server cooldown and exclusions, scoped settings, admin validation, global deployment, DM guard, isolated monthly rollover');
+  process.exit(0);
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
