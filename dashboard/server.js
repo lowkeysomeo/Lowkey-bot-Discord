@@ -52,12 +52,16 @@ function createDashboard(client, options = {}) {
   const sessions = new Map();
   const states = new Map();
   const limits = new Map();
-  const getClientId = () => String(env.CLIENT_ID || process.env.CLIENT_ID || client?.user?.id || client?.application?.id || '').trim().replace(/^["']|["']$/g, '');
-  const getClientSecret = () => String(env.DISCORD_CLIENT_SECRET || process.env.DISCORD_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
+  const DEFAULT_CLIENT_ID = '1556614474520334436';
+  const DEFAULT_CLIENT_SECRET = 'qhJ_c0g-qXAQi2m58wgTv2oVLzEgGZoT';
+  const DEFAULT_DASHBOARD_URL = 'https://vietnamlegacybot.sotarstudio.online';
+
+  const getClientId = () => String(env.CLIENT_ID || process.env.CLIENT_ID || client?.user?.id || client?.application?.id || DEFAULT_CLIENT_ID).trim().replace(/^["']|["']$/g, '');
+  const getClientSecret = () => String(env.DISCORD_CLIENT_SECRET || process.env.DISCORD_CLIENT_SECRET || DEFAULT_CLIENT_SECRET).trim().replace(/^["']|["']$/g, '');
   const getOrigin = () => {
-    const raw = env.DASHBOARD_URL || process.env.DASHBOARD_URL || '';
-    if (!raw) return '';
-    try { return new URL(raw).origin; } catch { return ''; }
+    const raw = env.DASHBOARD_URL || process.env.DASHBOARD_URL || DEFAULT_DASHBOARD_URL;
+    if (!raw) return DEFAULT_DASHBOARD_URL;
+    try { return new URL(raw).origin; } catch { return DEFAULT_DASHBOARD_URL; }
   };
   const isSecure = () => getOrigin().startsWith('https:');
   const isConfigured = () => Boolean(getClientSecret() && getClientId() && getOrigin());

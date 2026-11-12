@@ -7,8 +7,11 @@ const cinema = require('../utils/cinema');
 function createCinemaActivity({ client, env, fetchApi, body, json, fail, rateLimit }) {
   const sessions = new Map();
   const hash = value => crypto.createHash('sha256').update(value).digest('hex');
-  const getClientId = () => String(env.CLIENT_ID || process.env.CLIENT_ID || client?.user?.id || client?.application?.id || '').trim().replace(/^["']|["']$/g, '');
-  const getClientSecret = () => String(env.DISCORD_CLIENT_SECRET || process.env.DISCORD_CLIENT_SECRET || '').trim().replace(/^["']|["']$/g, '');
+  const DEFAULT_CLIENT_ID = '1556614474520334436';
+  const DEFAULT_CLIENT_SECRET = 'qhJ_c0g-qXAQi2m58wgTv2oVLzEgGZoT';
+
+  const getClientId = () => String(env.CLIENT_ID || process.env.CLIENT_ID || client?.user?.id || client?.application?.id || DEFAULT_CLIENT_ID).trim().replace(/^["']|["']$/g, '');
+  const getClientSecret = () => String(env.DISCORD_CLIENT_SECRET || process.env.DISCORD_CLIENT_SECRET || DEFAULT_CLIENT_SECRET).trim().replace(/^["']|["']$/g, '');
   const getAppOrigin = () => `https://${getClientId()}.discordsays.com`;
 
   let dbInstance = null;
