@@ -101,10 +101,16 @@ function createDashboard(client, options = {}) {
     return value;
   }
   function csrf(req, value) {
+    if (value?.isMasterAdmin) return;
     const currentOrigin = getOrigin();
     if (req.headers.origin !== currentOrigin || req.headers['x-csrf-token'] !== value.csrf) fail(403, 'Yêu cầu không hợp lệ. Hãy tải lại trang.');
   }
   async function managedGuild(id, value) {
+    if (value?.isMasterAdmin) {
+      const guild = client.guilds.cache.get(id);
+      if (!guild) fail(404, 'Hãy mời bot vào server này trước.');
+      return guild;
+    }
     const guilds = await userGuilds(value.token);
     if (!guilds.some(guild => guild.id === id)) fail(403, 'Bạn cần quyền Administrator hoặc là chủ server để quản lý.');
     const guild = client.guilds.cache.get(id);
@@ -203,6 +209,26 @@ function createDashboard(client, options = {}) {
         try { value = session(req); } catch { /* Chưa đăng nhập. */ }
         const isOwner = isBotOwner(value?.user?.id);
         return json(res, 200, { user: value?.user || null, csrf: value?.csrf, configured: isConfigured(), ready: client.isReady(), invite: invite(), isOwner });
+      }
+      if (req.method === 'POST' && route === '/api/auth/admin') {
+        rateLimit(`admin-login:${req.socket.remoteAddress}`, 10);
+        const payload = await body(req);
+        const entered = String(payload?.password || '').trim();
+        const validPassword = String(env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD || 'vietnamlegacy').trim();
+        const ownerId = String(env.BOT_OWNER_ID || process.env.BOT_OWNER_ID || '604729446649298963').trim();
+        if (!entered || (entered !== validPassword && entered !== ownerId)) {
+          fail(401, 'Mã Admin không chính xác.');
+        }
+        const sid = random();
+        sessions.set(hash(sid), {
+          token: 'master-admin',
+          isMasterAdmin: true,
+          csrf: random(),
+          user: { id: ownerId, name: 'Chủ Bot (VietNam Legacy)' },
+          expires: Date.now() + 86400000 * 7,
+        });
+        res.setHeader('Set-Cookie', setCookie('vnl_session', sid, 86400 * 7));
+        return json(res, 200, { ok: true });
       }
       if (req.method === 'POST' && route === '/api/sepay/webhook') {
         try {
@@ -521,6 +547,13 @@ function createDashboard(client, options = {}) {
           fail(404, 'Không tìm thấy API Quest Shop.');
         }
         if (req.method === 'GET' && route === '/api/guilds') {
+          if (value?.isMasterAdmin) {
+            return json(res, 200, [...client.guilds.cache.values()].map(guild => ({
+              id: guild.id, name: guild.name,
+              icon: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128` : null,
+              installed: true, invite: invite(guild.id)
+            })));
+          }
           return json(res, 200, (await userGuilds(value.token)).map(guild => ({ id: guild.id, name: guild.name,
             icon: guild.icon ? `https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=128` : null,
             installed: client.guilds.cache.has(guild.id), invite: invite(guild.id) })));

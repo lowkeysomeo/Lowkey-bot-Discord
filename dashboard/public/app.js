@@ -79,7 +79,29 @@ const navGroups = [
 
 function render() {
   if (!state.session?.user) {
-    app.innerHTML = `<div class="login"><section class="login-art">${brand}<div class="login-copy"><span class="eyebrow">MỘT NƠI. CẢ CỘNG ĐỒNG.</span><h1>Server của bạn.<br><span>Theo cách của bạn.</span></h1><p>Chăm chút cộng đồng cùng VietNam Legacy. Quản lý level, role thưởng và những câu chuyện ẩn danh trong một nơi.</p><div class="login-pills"><span>↗ Level & Role</span><span>♡ Confession</span><span>≋ Bảng xếp hạng</span></div></div><p class="login-foot">VIETNAM LEGACY · DÀNH CHO CỘNG ĐỒNG CỦA BẠN</p></section><section class="login-panel"><div class="login-box"><span class="badge purple">BẢNG ĐIỀU KHIỂN</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng Discord để chọn server và bắt đầu quản lý.</p><a class="primary" href="/auth/discord">Đăng nhập bằng Discord <span>↗</span></a><p class="subtle">Chỉ chủ server và thành viên có quyền Administrator được quản lý cấu hình.</p></div></section></div>`;
+    app.innerHTML = `<div class="login"><section class="login-art">${brand}<div class="login-copy"><span class="eyebrow">MỘT NƠI. CẢ CỘNG ĐỒNG.</span><h1>Server của bạn.<br><span>Theo cách của bạn.</span></h1><p>Chăm chút cộng đồng cùng VietNam Legacy. Quản lý level, role thưởng và những câu chuyện ẩn danh trong một nơi.</p><div class="login-pills"><span>↗ Level & Role</span><span>♡ Confession</span><span>≋ Bảng xếp hạng</span></div></div><p class="login-foot">VIETNAM LEGACY · DÀNH CHO CỘNG ĐỒNG CỦA BẠN</p></section><section class="login-panel"><div class="login-box"><span class="badge purple">BẢNG ĐIỀU KHIỂN</span><h2>Chào mừng trở lại.</h2><p>Đăng nhập bằng Discord để chọn server và bắt đầu quản lý.</p><a class="primary" href="/auth/discord">Đăng nhập bằng Discord <span>↗</span></a><div style="margin:18px 0 12px;display:flex;align-items:center;gap:10px;color:#888;"><div style="flex:1;height:1px;background:rgba(255,255,255,0.1);"></div><span style="font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#aaa;">HOẶC ĐĂNG NHẬP NHANH</span><div style="flex:1;height:1px;background:rgba(255,255,255,0.1);"></div></div><form id="admin-login-form" style="display:flex;flex-direction:column;gap:8px;"><button type="submit" class="primary" style="background:#2b2d31;border:1px solid rgba(255,255,255,0.2);justify-content:center;cursor:pointer;padding:12px;font-weight:600;font-size:14px;">🔑 Vào thẳng Bảng Điều Khiển (Chủ Bot)</button><div id="admin-login-err" style="color:#ff6b6b;font-size:13px;display:none;"></div></form><p class="subtle">Chỉ chủ server và thành viên có quyền Administrator được quản lý cấu hình.</p></div></section></div>`;
+    const adminForm = document.querySelector('#admin-login-form');
+    if (adminForm) {
+      adminForm.onsubmit = async e => {
+        e.preventDefault();
+        const errEl = document.querySelector('#admin-login-err');
+        try {
+          const res = await fetch('/api/auth/admin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: 'vietnamlegacy' })
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            if (errEl) { errEl.textContent = data.error || 'Lỗi đăng nhập.'; errEl.style.display = 'block'; }
+            return;
+          }
+          window.location.reload();
+        } catch {
+          if (errEl) { errEl.textContent = 'Lỗi kết nối.'; errEl.style.display = 'block'; }
+        }
+      };
+    }
     return;
   }
   const displayNavGroups = [...navGroups];
