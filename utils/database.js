@@ -303,6 +303,7 @@ function initializeDatabase() {
 
   migrateLegacyJsonIfNeeded();
   repairLegacyUserIds(db);
+  autoSalvageBackupsIfNeeded(db);
   return db;
 }
 
@@ -546,6 +547,112 @@ function repairLegacyUserIds(database) {
 
     tx(badVoiceRows);
     console.log(`[DB MIGRATION] Đã sửa và gộp ${badVoiceRows.length} bản ghi voice_levels có user_id lỗi.`);
+  }
+}
+
+
+function autoSalvageBackupsIfNeeded(database) {
+  try {
+    const targetPath = databasePath || resolveDatabasePath();
+    const dataDir = path.dirname(targetPath);
+    if (!fs.existsSync(dataDir)) return;
+
+    const entries = fs.readdirSync(dataDir);
+    const backupFiles = entries.filter(name =>
+      (name.includes('.corrupted') || name.endsWith('.bak') || name.endsWith('.old') || name.includes('.backup')) &&
+      name !== path.basename(targetPath)
+    );
+
+    if (backupFiles.length === 0) return;
+
+    console.log(`[DB AUTO-SALVAGE] Tìm thấy ${backupFiles.length} file sao lưu/hỏng cũ trong thư mục data. Bắt đầu tự động khôi phục level...`);
+
+    const insertChat = database.prepare(`
+      INSERT INTO chat_levels (guild_id, user_id, level, xp, total_xp, monthly_xp, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (guild_id, user_id) DO UPDATE SET
+        level = MAX(chat_levels.level, excluded.level),
+        xp = CASE WHEN excluded.total_xp >= chat_levels.total_xp THEN excluded.xp ELSE chat_levels.xp END,
+        total_xp = MAX(chat_levels.total_xp, excluded.total_xp),
+        monthly_xp = MAX(chat_levels.monthly_xp, excluded.monthly_xp),
+        updated_at = MAX(chat_levels.updated_at, excluded.updated_at)
+    `);
+
+    const insertVoice = database.prepare(`
+      INSERT INTO voice_levels (guild_id, user_id, level, xp, total_xp, monthly_xp, minutes, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (guild_id, user_id) DO UPDATE SET
+        level = MAX(voice_levels.level, excluded.level),
+        xp = CASE WHEN excluded.total_xp >= voice_levels.total_xp THEN excluded.xp ELSE voice_levels.xp END,
+        total_xp = MAX(voice_levels.total_xp, excluded.total_xp),
+        monthly_xp = MAX(voice_levels.monthly_xp, excluded.monthly_xp),
+        minutes = MAX(voice_levels.minutes, excluded.minutes),
+        updated_at = MAX(voice_levels.updated_at, excluded.updated_at)
+    `);
+
+    let totalChatRecovered = 0;
+    let totalVoiceRecovered = 0;
+
+    for (const bFile of backupFiles) {
+      const fullPath = path.join(dataDir, bFile);
+      let sourceDb = null;
+      try {
+        sourceDb = new Database(fullPath, { readonly: true, fileMustExist: true });
+      } catch (err) {
+        continue;
+      }
+
+      let chatRows = [];
+      let voiceRows = [];
+      try {
+        chatRows = sourceDb.prepare('SELECT guild_id, user_id, level, xp, total_xp, monthly_xp, updated_at FROM chat_levels').all();
+      } catch {}
+
+      try {
+        voiceRows = sourceDb.prepare('SELECT guild_id, user_id, level, xp, total_xp, monthly_xp, minutes, updated_at FROM voice_levels').all();
+      } catch {}
+
+      try { sourceDb.close(); } catch {}
+
+      if (chatRows.length === 0 && voiceRows.length === 0) continue;
+
+      const mergeTx = database.transaction(() => {
+        for (const row of chatRows) {
+          if (!row.user_id) continue;
+          insertChat.run(
+            String(row.guild_id || process.env.GUILD_ID || '1555173619129122866'),
+            String(row.user_id),
+            row.level || 1,
+            row.xp || 0,
+            row.total_xp || 0,
+            row.monthly_xp || 0,
+            row.updated_at || Date.now()
+          );
+          totalChatRecovered++;
+        }
+        for (const row of voiceRows) {
+          if (!row.user_id) continue;
+          insertVoice.run(
+            String(row.guild_id || process.env.GUILD_ID || '1555173619129122866'),
+            String(row.user_id),
+            row.level || 1,
+            row.xp || 0,
+            row.total_xp || 0,
+            row.monthly_xp || 0,
+            row.minutes || 0,
+            row.updated_at || Date.now()
+          );
+          totalVoiceRecovered++;
+        }
+      });
+      mergeTx();
+    }
+
+    if (totalChatRecovered > 0 || totalVoiceRecovered > 0) {
+      console.log(`[DB AUTO-SALVAGE] Đã khôi phục thành công: ${totalChatRecovered} Chat level, ${totalVoiceRecovered} Voice level vào database!`);
+    }
+  } catch (err) {
+    console.warn('[DB AUTO-SALVAGE] Lỗi khôi phục tự động:', err.message);
   }
 }
 
