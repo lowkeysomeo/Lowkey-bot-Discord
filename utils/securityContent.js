@@ -245,6 +245,19 @@ function hasSuspiciousAd(text) {
   return HAS_ANY_URL.test(norm) && AD_KEYWORDS.test(norm);
 }
 
+function formatSafeSnippet(text, maxLen = 200) {
+  const clean = String(text || '')
+    .replace(/<@!?(\d{17,20})>/g, '[@user:$1]')
+    .replace(/<@&(\d{17,20})>/g, '[@role:$1]')
+    .replace(/@everyone/gi, '@\u200Beveryone')
+    .replace(/@here/gi, '@\u200Bhere')
+    .replace(/`/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return '';
+  return clean.length > maxLen ? `${clean.slice(0, maxLen - 1)}…` : clean;
+}
+
 async function inspect(msg, tools) {
   if (!msg.guild || !msg.author || msg.author.bot || !msg.member) return false;
   const o = getOptions(msg.guild.id);
@@ -304,7 +317,8 @@ async function inspect(msg, tools) {
       }
     }
 
-    const mentions = directUsersCount + (msg.mentions?.roles?.size || 0);
+    const roleMentionsCount = msg.mentions?.roles?.size || 0;
+    const mentions = directUsersCount + roleMentionsCount;
     const isEveryoneMention = Boolean(msg.mentions?.everyone);
     const isMassMention = mentions >= o.securityMentionLimit;
     const mass = o.securitySpam && o.securityMentionEnabled && (isMassMention || isEveryoneMention);
@@ -320,9 +334,6 @@ async function inspect(msg, tools) {
       action = 'timeout';
     } else if (mass) {
       violation = isEveryoneMention ? 'tag @everyone/@here' : 'tag hàng loạt';
-      if (!isEveryoneMention) {
-        violationDetail = ` (${directUsersCount} user, ${msg.mentions?.roles?.size || 0} role)`;
-      }
       violationCategory = 'mention';
       action = 'timeout';
     } else if (burst) {
@@ -331,6 +342,10 @@ async function inspect(msg, tools) {
     } else if (duplicate) {
       violation = 'lặp nội dung nhiều lần';
       violationCategory = 'duplicate';
+    }
+
+    if (violationCategory === 'mention') {
+      violationDetail = ` (user: ${directUsersCount}, role: ${roleMentionsCount}, @everyone/@here: ${isEveryoneMention ? 'có' : 'không'})`;
     }
   }
 
@@ -365,9 +380,12 @@ async function inspect(msg, tools) {
     if (violationCategory === 'mention') resetRecentMentions(msg.guild.id, msg.author.id);
   }
 
+  const safeSnippet = formatSafeSnippet(msg.content);
+  const snippetLine = safeSnippet ? `\n> ${canDelete ? 'Nội dung đã xóa' : 'Nội dung'}: \`${safeSnippet}\`` : '';
+
   try {
     if (action === 'timeout') await tools.punish(msg.member, 'timeout', 'Bảo vệ chat: ' + violation, timeoutMs);
-    await tools.alert(msg.guild, msg.author.id + ' tại <#' + msg.channelId + '>: ' + violation + violationDetail + '. ' + (action === 'timeout' ? 'Timeout ' + durationText + '.' : 'Chỉ xóa tin vi phạm.') + (!canDelete ? ' Bot thiếu quyền xóa tin.' : ''));
+    await tools.alert(msg.guild, msg.author.id + ' tại <#' + msg.channelId + '>: ' + violation + violationDetail + '. ' + (action === 'timeout' ? 'Timeout ' + durationText + '.' : 'Chỉ xóa tin vi phạm.') + (!canDelete ? ' Bot thiếu quyền xóa tin.' : '') + snippetLine);
   } catch (error) {
     await tools.alert(msg.guild, 'Không xử lý được ' + msg.author.id + ': ' + error.message);
   } finally {
@@ -387,6 +405,7 @@ module.exports = {
   clearInviteCache,
   exempt,
   normalize,
+  formatSafeSnippet,
   extractUserMentions,
   getMaxSingleUserMentions,
   trackAndCheckContinuousMentions,

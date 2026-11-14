@@ -158,7 +158,7 @@ assert.equal(await security.message(direct5Msg), true, 'Tag 5 người trực ti
 const { clearInviteCache } = require('../utils/securityContent');
 clearInviteCache();
 const numericGuildId = '1555173619129122866';
-let voiceGuildTimeouts = 0, lastTimeoutReason = '';
+let voiceGuildTimeouts = 0, lastTimeoutReason = '', lastAlertText = '';
 const voiceGuild = {
   id: numericGuildId,
   ownerId: 'owner',
@@ -174,7 +174,7 @@ const voiceGuild = {
       throw err;
     }
   },
-  channels: { fetch: async () => ({ send: async () => {} }) }
+  channels: { fetch: async () => ({ send: async (payload) => { lastAlertText = payload?.content || ''; } }) }
 };
 const makeVoiceGuildMsg = (id, content, extra = {}) => ({
   guild: voiceGuild,
@@ -194,6 +194,7 @@ const makeVoiceGuildMsg = (id, content, extra = {}) => ({
 });
 saveOptions(numericGuildId, {
   securityEnabled: true,
+  securityLogChannel: '999999999999999999',
   securityInvites: true,
   securityInviteAction: 'timeout',
   securitySpam: true,
@@ -211,11 +212,29 @@ assert.equal(lastTimeoutReason, 'Bảo vệ chat: quảng cáo server khác (lin
 assert.equal(await security.message(makeVoiceGuildMsg('u-other-2', 'https://discord.gg/voice-this-server và https://discord.gg/other-server')), true, 'Tin nhắn trộn link server mình + link server khác vẫn phải bị chặn');
 assert.equal(await security.message(makeVoiceGuildMsg('u-other-3', 'https://discord.gg/unknown-404')), true, 'Link mời không tồn tại/không xác minh được vẫn phải bị chặn');
 
-// Kiểm tra tách riêng lý do @everyone/@here
-await security.message(makeVoiceGuildMsg('u-everyone', '@here', {
+// Kiểm tra tách riêng lý do @everyone/@here và log chi tiết trong kênh bảo vệ
+await security.message(makeVoiceGuildMsg('u-everyone', '@here vào chơi', {
   mentions: { users: new Map(), roles: new Map(), everyone: true }
 }));
 assert.equal(lastTimeoutReason, 'Bảo vệ chat: tag @everyone/@here', '@everyone/@here phải ghi đúng lý do riêng thay vì tag hàng loạt');
+assert(lastAlertText.includes('(user: 0, role: 0, @everyone/@here: có)'), 'Log bảo vệ phải ghi rõ số lượng user/role/everyone');
+assert(lastAlertText.includes('Nội dung đã xóa:') && lastAlertText.includes('@\u200Bhere vào chơi'), 'Log bảo vệ phải kèm nội dung đã che mention');
+
+await security.message(makeVoiceGuildMsg('u-mass-log', '<@111111111111111111> <@222222222222222222> <@333333333333333333> <@444444444444444444> <@&555555555555555555>', {
+  mentions: {
+    users: new Map([
+      ['111111111111111111', { id: '111111111111111111' }],
+      ['222222222222222222', { id: '222222222222222222' }],
+      ['333333333333333333', { id: '333333333333333333' }],
+      ['444444444444444444', { id: '444444444444444444' }]
+    ]),
+    roles: new Map([['555555555555555555', { id: '555555555555555555' }]]),
+    everyone: false
+  }
+}));
+assert.equal(lastTimeoutReason, 'Bảo vệ chat: tag hàng loạt');
+assert(lastAlertText.includes('(user: 4, role: 1, @everyone/@here: không)'), 'Log bảo vệ phải ghi rõ user/role đã bắt');
+assert(lastAlertText.includes('[@user:111111111111111111]') && lastAlertText.includes('[@role:555555555555555555]'), 'Log bảo vệ phải che mention thành [@user:...] / [@role:...]');
 
 console.log('PASS security-content: invite, ad web, ngoại lệ, chỉnh sửa, đếm spam, lặp nhiều kênh, tag 3 lần/1 tin, tag liên tục 2m, tái phạm 24h và bỏ qua reply mention.');
 })().catch(e=>{console.error(e);process.exitCode=1;});
