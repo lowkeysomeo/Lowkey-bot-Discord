@@ -4,13 +4,12 @@ const {
   EmbedBuilder,
 } = require('discord.js');
 const path = require('path');
-const fs = require('fs');
 const { getDb, getDatabasePath } = require('../../utils/database');
 const { salvageFromFile, findBackupFiles } = require('../../scripts/salvage_levels');
 
 module.exports.data = new SlashCommandBuilder()
   .setName('restorelevels')
-  .setDescription('Admin: Tự động khôi phục dữ liệu level tổng từ các bản sao lưu/hỏng cũ')
+  .setDescription('Admin: Tự động khôi phục dữ liệu level tổng từ các bản sao lưu/hỏng/.trashbin')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
 module.exports.execute = async (interaction) => {
@@ -24,28 +23,32 @@ module.exports.execute = async (interaction) => {
     const backupFiles = findBackupFiles(dataDir);
     if (!backupFiles || backupFiles.length === 0) {
       return interaction.editReply({
-        content: '⚠️ Không tìm thấy file sao lưu (`.corrupted` hoặc `.bak`) nào trong thư mục `data/` trên hosting.',
+        content: '⚠️ Không tìm thấy file sao lưu (`.corrupted`, `.bak`, hoặc `-wal`) nào trong `data/` hoặc `.trashbin/`.',
       });
     }
 
     let totalChat = 0;
     let totalVoice = 0;
+    let totalChatUpgraded = 0;
+    let totalVoiceUpgraded = 0;
 
     for (const file of backupFiles) {
       const res = salvageFromFile(file, targetDb);
-      totalChat += res.chatRestored;
-      totalVoice += res.voiceRestored;
+      totalChat += res.chatRestored || 0;
+      totalVoice += res.voiceRestored || 0;
+      totalChatUpgraded += res.chatUpgraded || 0;
+      totalVoiceUpgraded += res.voiceUpgraded || 0;
     }
 
     const embed = new EmbedBuilder()
       .setColor('#2ecc71')
       .setTitle('🎉 Khôi phục dữ liệu Level thành công!')
       .setDescription(
-        `Đã quét **${backupFiles.length}** file sao lưu và nạp ghép dữ liệu an toàn vào hệ thống:\n` +
-        `• **Chat Levels khôi phục:** ${totalChat} thành viên\n` +
-        `• **Voice Levels khôi phục:** ${totalVoice} thành viên`
+        `Đã quét **${backupFiles.length}** file nguồn (bao gồm cả \`data/\` và \`.trashbin/\`):\n` +
+        `• **Chat Levels đã đọc:** ${totalChat} bản ghi (**+${totalChatUpgraded}** được khôi phục / tăng thêm)\n` +
+        `• **Voice Levels đã đọc:** ${totalVoice} bản ghi (**+${totalVoiceUpgraded}** được khôi phục / tăng thêm)`
       )
-      .setFooter({ text: 'Dữ liệu được hợp nhất theo nguyên tắc MAX (không bị mất điểm mới).' })
+      .setFooter({ text: 'Dữ liệu được hợp nhất theo nguyên tắc MAX (luôn giữ tổng XP cao nhất).' })
       .setTimestamp();
 
     await interaction.editReply({ embeds: [embed] });
