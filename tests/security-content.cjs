@@ -154,5 +154,68 @@ const direct5Msg = {
 };
 assert.equal(await security.message(direct5Msg), true, 'Tag 5 người trực tiếp không phải reply phải bị phạt');
 
+// Kiểm tra link mời / link voice của CHÍNH SERVER hiện tại không bị chặn nhầm
+const { clearInviteCache } = require('../utils/securityContent');
+clearInviteCache();
+const numericGuildId = '1555173619129122866';
+let voiceGuildTimeouts = 0, lastTimeoutReason = '';
+const voiceGuild = {
+  id: numericGuildId,
+  ownerId: 'owner',
+  vanityURLCode: 'vietnamlegacy',
+  invites: { cache: new Map([['cached-voice', { guildId: numericGuildId }]]) },
+  client: {
+    user: { id: 'self' },
+    fetchInvite: async (code) => {
+      if (code === 'voice-this-server') return { guild: { id: numericGuildId } };
+      if (code === 'other-server') return { guild: { id: '999999999999999999' } };
+      const err = new Error('Unknown Invite');
+      err.code = 10006;
+      throw err;
+    }
+  },
+  channels: { fetch: async () => ({ send: async () => {} }) }
+};
+const makeVoiceGuildMsg = (id, content, extra = {}) => ({
+  guild: voiceGuild,
+  channelId: '111111111111111111',
+  channel: {},
+  author: { id, bot: false },
+  member: {
+    moderatable: true,
+    timeout: async (_ms, reason) => { voiceGuildTimeouts++; lastTimeoutReason = reason; },
+    roles: { cache: new Map() }
+  },
+  content,
+  mentions: { users: new Map(), roles: new Map() },
+  deletable: true,
+  delete: async () => {},
+  ...extra
+});
+saveOptions(numericGuildId, {
+  securityEnabled: true,
+  securityInvites: true,
+  securityInviteAction: 'timeout',
+  securitySpam: true,
+  securityMentionEnabled: true,
+  securityTimeoutMinutes: 10
+});
+assert.equal(await security.message(makeVoiceGuildMsg('u-voice-1', 'Vào voice server chơi nè https://discord.gg/voice-this-server')), false, 'Link voice cùng server (qua fetchInvite) không được chặn');
+assert.equal(await security.message(makeVoiceGuildMsg('u-voice-2', 'https://discord.gg/cached-voice')), false, 'Link voice trong invites.cache của cùng server không được chặn');
+assert.equal(await security.message(makeVoiceGuildMsg('u-voice-3', 'Tham gia server tại https://discord.com/invite/VietNamLegacy?event=123')), false, 'Vanity URL của chính server không được chặn');
+assert.equal(await security.message(makeVoiceGuildMsg('u-voice-4', `Link vào server voice: https://discord.com/channels/${numericGuildId}/1555496053204058215`)), false, 'Link kênh voice trực tiếp của chính server không được chặn');
+assert.equal(voiceGuildTimeouts, 0, 'Không được timeout khi gửi link cùng server');
+
+assert.equal(await security.message(makeVoiceGuildMsg('u-other-1', 'https://discord.gg/other-server')), true, 'Link mời server khác vẫn phải bị chặn');
+assert.equal(lastTimeoutReason, 'Bảo vệ chat: quảng cáo server khác (link mời)');
+assert.equal(await security.message(makeVoiceGuildMsg('u-other-2', 'https://discord.gg/voice-this-server và https://discord.gg/other-server')), true, 'Tin nhắn trộn link server mình + link server khác vẫn phải bị chặn');
+assert.equal(await security.message(makeVoiceGuildMsg('u-other-3', 'https://discord.gg/unknown-404')), true, 'Link mời không tồn tại/không xác minh được vẫn phải bị chặn');
+
+// Kiểm tra tách riêng lý do @everyone/@here
+await security.message(makeVoiceGuildMsg('u-everyone', '@here', {
+  mentions: { users: new Map(), roles: new Map(), everyone: true }
+}));
+assert.equal(lastTimeoutReason, 'Bảo vệ chat: tag @everyone/@here', '@everyone/@here phải ghi đúng lý do riêng thay vì tag hàng loạt');
+
 console.log('PASS security-content: invite, ad web, ngoại lệ, chỉnh sửa, đếm spam, lặp nhiều kênh, tag 3 lần/1 tin, tag liên tục 2m, tái phạm 24h và bỏ qua reply mention.');
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -5,6 +5,7 @@ const { getDb } = require('./database');
 
 const cooldown = new Map();
 const recentMentions = new Map();
+const inviteGuildCache = new Map();
 const ids = value => new Set(String(value || '').split(/[\s,]+/).filter(x => /^\d{17,20}$/.test(x)));
 
 function getSecurityDb() {
@@ -114,11 +115,120 @@ function normalize(text) {
   return value;
 }
 
+const OFFICIAL_DISCORD_INVITE_RE = /(?:^|[^a-z0-9_.-])((?:https?:\/\/)?(?:(?:www|ptb|canary)\.)?(?:discord\.gg\/|(?:discord\.com|discordapp\.com)\/invite\/)([a-z0-9-_]+)(?:\?[^\s)>\]]*)?)/gi;
+const EXTERNAL_INVITE_RE = /(?:^|[^a-z0-9_.-])(?:https?:\/\/)?(?:www\.)?(?:dsc\.gg\/|discord\.me\/|discord\.io\/|discord\.link\/|invite\.gg\/|t\.me\/|telegram\.me\/|guilded\.gg\/|revolt\.chat\/)[a-z0-9-_]+/i;
+
+function extractDiscordInvites(text) {
+  const norm = normalize(text);
+  const matches = [];
+  for (const m of norm.matchAll(OFFICIAL_DISCORD_INVITE_RE)) {
+    matches.push({ url: m[1], code: m[2] });
+  }
+  return matches;
+}
+
 function hasInvite(text) {
   const norm = normalize(text);
-  const discordRegex = /(?:^|[^a-z0-9_.-])(?:https?:\/\/)?(?:www\.)?(?:discord\.gg\/|(?:discord\.com|discordapp\.com)\/invite\/|dsc\.gg\/|discord\.me\/|discord\.io\/|discord\.link\/|invite\.gg\/)[a-z0-9-_]+/i;
-  const otherPlatformRegex = /(?:^|[^a-z0-9_.-])(?:https?:\/\/)?(?:www\.)?(?:t\.me\/|telegram\.me\/|guilded\.gg\/|revolt\.chat\/)[a-z0-9-_]+/i;
-  return discordRegex.test(norm) || otherPlatformRegex.test(norm);
+  return extractDiscordInvites(norm).length > 0 || EXTERNAL_INVITE_RE.test(norm);
+}
+
+function setInviteCache(code, guildId, ttlMs = 300000) {
+  if (inviteGuildCache.size >= 5000) inviteGuildCache.delete(inviteGuildCache.keys().next().value);
+  inviteGuildCache.set(code, { guildId, expiresAt: Date.now() + ttlMs });
+}
+
+function clearInviteCache() {
+  inviteGuildCache.clear();
+}
+
+async function resolveInviteGuildId(guild, code) {
+  if (!guild || !code) return undefined;
+  const guildId = String(guild.id || '');
+  if (guild.vanityURLCode && code.toLowerCase() === String(guild.vanityURLCode).toLowerCase()) {
+    return guildId;
+  }
+
+  const cachedGuildInvite = guild.invites?.cache?.get?.(code);
+  if (cachedGuildInvite) {
+    return String(cachedGuildInvite.guildId || cachedGuildInvite.guild?.id || guildId);
+  }
+
+  const cached = inviteGuildCache.get(code);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.guildId;
+  }
+
+  if (typeof guild.client?.fetchInvite === 'function') {
+    try {
+      const fetched = await guild.client.fetchInvite(code);
+      const targetGuildId = fetched?.guildId || fetched?.guild?.id || null;
+      const resolved = targetGuildId ? String(targetGuildId) : null;
+      setInviteCache(code, resolved, 300000);
+      return resolved;
+    } catch (error) {
+      if (error?.code === 10006 || error?.status === 404) {
+        setInviteCache(code, null, 60000);
+        return null;
+      }
+      // Fall through to guild.invites.fetch if transient error
+    }
+  }
+
+  if (typeof guild.invites?.fetch === 'function') {
+    try {
+      const guildInvites = await guild.invites.fetch();
+      const found = guildInvites?.get?.(code);
+      if (found) {
+        const resolved = String(found.guildId || found.guild?.id || guildId);
+        setInviteCache(code, resolved, 300000);
+        return resolved;
+      }
+    } catch {}
+  }
+
+  return undefined;
+}
+
+function stripSameGuildLinks(text, guildId, sameGuildInviteUrls) {
+  let clean = normalize(text);
+  for (const url of [...sameGuildInviteUrls].sort((a, b) => b.length - a.length)) {
+    clean = clean.split(url).join(' ');
+  }
+  if (/^\d{17,20}$/.test(String(guildId || ''))) {
+    const channelOrEventRe = new RegExp(`(?:https?:\\/\\/)?(?:(?:www|ptb|canary)\\.)?(?:discord\\.com|discordapp\\.com)\\/(?:channels|events)\\/${guildId}(?:\\/[^\\s]*)?`, 'gi');
+    clean = clean.replace(channelOrEventRe, ' ');
+  }
+  return clean;
+}
+
+async function analyzeInviteAndAd(msg) {
+  const norm = normalize(msg.content);
+  if (EXTERNAL_INVITE_RE.test(norm)) {
+    return { isInvite: true, isSuspiciousAd: false };
+  }
+
+  const discordInvites = extractDiscordInvites(norm);
+  const guildId = String(msg.guild?.id || '');
+  const sameGuildInviteUrls = [];
+
+  if (discordInvites.length > 0) {
+    const uniqueCodes = [...new Set(discordInvites.map(item => item.code))];
+    const resolvedByCode = new Map();
+    for (const code of uniqueCodes) {
+      resolvedByCode.set(code, await resolveInviteGuildId(msg.guild, code));
+    }
+
+    for (const item of discordInvites) {
+      const targetGuildId = resolvedByCode.get(item.code);
+      if (!targetGuildId || targetGuildId !== guildId) {
+        return { isInvite: true, isSuspiciousAd: false };
+      }
+      sameGuildInviteUrls.push(item.url);
+    }
+  }
+
+  const sanitized = stripSameGuildLinks(norm, guildId, sameGuildInviteUrls);
+  return { isInvite: false, isSuspiciousAd: hasSuspiciousAd(sanitized) };
 }
 
 function hasSuspiciousAd(text) {
@@ -141,14 +251,15 @@ async function inspect(msg, tools) {
   if (!o.securityEnabled || tools.trusted(msg.guild, msg.author.id, o)) return false;
 
   const now = (typeof tools.now === 'function' ? tools.now() : (Number(tools.now) || msg._now || msg.createdTimestamp || Date.now()));
-  let violation = '', action = o.securityChatAction, violationCategory = '';
+  let violation = '', action = o.securityChatAction, violationCategory = '', violationDetail = '';
 
-  const isInvite = hasInvite(msg.content);
-  const isSuspiciousAd = hasSuspiciousAd(msg.content);
-  if (o.securityInvites && !exempt(msg, o.securityInviteChannels, o.securityInviteRoles) && (isInvite || isSuspiciousAd)) {
-    violation = isInvite ? 'quảng cáo server khác (link mời)' : 'nghi ngờ quảng cáo web hoặc liên kết lạ';
-    action = o.securityInviteAction || 'timeout';
-    violationCategory = 'invite';
+  if (o.securityInvites && !exempt(msg, o.securityInviteChannels, o.securityInviteRoles)) {
+    const { isInvite, isSuspiciousAd } = await analyzeInviteAndAd(msg);
+    if (isInvite || isSuspiciousAd) {
+      violation = isInvite ? 'quảng cáo server khác (link mời)' : 'nghi ngờ quảng cáo web hoặc liên kết lạ';
+      action = o.securityInviteAction || 'timeout';
+      violationCategory = 'invite';
+    }
   }
 
   if (!violation && !exempt(msg, o.securityChatChannels, o.securityChatRoles)) {
@@ -194,7 +305,9 @@ async function inspect(msg, tools) {
     }
 
     const mentions = directUsersCount + (msg.mentions?.roles?.size || 0);
-    const mass = o.securitySpam && o.securityMentionEnabled && (mentions >= o.securityMentionLimit || msg.mentions?.everyone);
+    const isEveryoneMention = Boolean(msg.mentions?.everyone);
+    const isMassMention = mentions >= o.securityMentionLimit;
+    const mass = o.securitySpam && o.securityMentionEnabled && (isMassMention || isEveryoneMention);
     const burst = !tools.edited && o.securitySpam && tools.hit('spam:' + msg.guild.id + ':' + msg.author.id, o.securitySpamWindow, o.securitySpamLimit, now);
     const normalized = normalize(msg.content).toLowerCase().replace(/\s+/g, ' ').trim();
     const duplicate = !tools.edited && o.securityDuplicate && normalized.length >= 4 && tools.hit(
@@ -206,7 +319,10 @@ async function inspect(msg, tools) {
       violationCategory = 'mention';
       action = 'timeout';
     } else if (mass) {
-      violation = 'tag hàng loạt';
+      violation = isEveryoneMention ? 'tag @everyone/@here' : 'tag hàng loạt';
+      if (!isEveryoneMention) {
+        violationDetail = ` (${directUsersCount} user, ${msg.mentions?.roles?.size || 0} role)`;
+      }
       violationCategory = 'mention';
       action = 'timeout';
     } else if (burst) {
@@ -251,7 +367,7 @@ async function inspect(msg, tools) {
 
   try {
     if (action === 'timeout') await tools.punish(msg.member, 'timeout', 'Bảo vệ chat: ' + violation, timeoutMs);
-    await tools.alert(msg.guild, msg.author.id + ' tại <#' + msg.channelId + '>: ' + violation + '. ' + (action === 'timeout' ? 'Timeout ' + durationText + '.' : 'Chỉ xóa tin vi phạm.') + (!canDelete ? ' Bot thiếu quyền xóa tin.' : ''));
+    await tools.alert(msg.guild, msg.author.id + ' tại <#' + msg.channelId + '>: ' + violation + violationDetail + '. ' + (action === 'timeout' ? 'Timeout ' + durationText + '.' : 'Chỉ xóa tin vi phạm.') + (!canDelete ? ' Bot thiếu quyền xóa tin.' : ''));
   } catch (error) {
     await tools.alert(msg.guild, 'Không xử lý được ' + msg.author.id + ': ' + error.message);
   } finally {
@@ -265,6 +381,10 @@ module.exports = {
   inspect,
   hasInvite,
   hasSuspiciousAd,
+  analyzeInviteAndAd,
+  extractDiscordInvites,
+  resolveInviteGuildId,
+  clearInviteCache,
   exempt,
   normalize,
   extractUserMentions,
